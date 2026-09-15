@@ -2360,6 +2360,14 @@ process.stdin.on("end", () => {
       expect(job).toContain(`target: ${target}`);
       expect(job.indexOf("[build] Workspace source products")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
       expect(job).toContain(target === "win_x64" ? '"tools-pack", "win", "package"' : "exec tools-pack mac package");
+      if (target === "mac_arm64" || target === "mac_x64") {
+        expect(job).not.toContain("uses: actions/cache/");
+        expect(job).not.toContain("tools_pack_cache_key");
+        expect(job).not.toContain("gh cache delete");
+        expect(job).toContain("exec tools-pack mac build"); // Local fallback stays independent.
+      } else {
+        expect(job).toContain("uses: actions/cache/restore@v5"); // Windows still reuses native products.
+      }
       expect(config.workflows["release-beta"].workloads[`source_${target}`]).toMatchObject({
         inputs: ["suite://workspace-source"], products: "manifest", runnerClass: `source_${target}`,
         success: { [`Build beta ${target}`]: ["[build] Workspace source products"] },

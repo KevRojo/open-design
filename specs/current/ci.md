@@ -286,6 +286,12 @@ tools-pack's internal native caches stay independent of Plan. Source receipts
 currently require their containing native job to succeed; a native failure may
 therefore forgo a source-cache contribution even after a successful source build.
 
+Beta's Mac `package` path does not consume the old tools-pack workspace cache,
+so its workflow no longer computes keys or restores/saves/prunes that GitHub
+cache. The normal local build cache and full-source fallback are unchanged.
+Windows retains its independent native-product cache transport; public source
+reuse is not a reason to discard useful native packaging results.
+
 Workflows remain isolated by default. A reusable workload may opt into a named
 `recipe` and list `trustedSources` as explicit `{workflow, policy, workload}`
 coordinates. Only then can an identical recipe digest be read from another

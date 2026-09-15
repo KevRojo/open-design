@@ -503,33 +503,6 @@ jobs:
         with:
           node-version: 24
 
-      - name: Compute mac_arm64 tools-pack cache key
-        id: mac_arm64_tools_pack_cache_key
-        env:
-          MAC_TOOLS_PACK_ORIGIN_KEY: ${{ hashFiles('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/daemon/**', 'apps/web/**', 'apps/desktop/**', 'apps/packaged/**', 'packages/agui-adapter/**', 'packages/contracts/**', 'packages/plugin-runtime/**', 'packages/sidecar-proto/**', 'packages/sidecar/**', 'packages/platform/**', 'tools/pack/bin/**', 'tools/pack/package.json', 'tools/pack/resources/**', 'tools/pack/src/**', 'tools/pack/tsconfig.json', 'assets/community-pets/**', 'assets/frames/**', 'craft/**', 'design-systems/**', 'design-templates/**', 'plugins/_official/**', 'plugins/registry/**', 'prompt-templates/**', 'skills/**', '.github/workflows/release-beta.yml', '.github/scripts/release/cache/mac.sh') }}
-        run: |
-          set -euo pipefail
-          if [ -z "$MAC_TOOLS_PACK_ORIGIN_KEY" ]; then
-            echo "mac_arm64 tools-pack cache origin key is empty" >&2
-            exit 1
-          fi
-          prefix="tools-pack-mac-v1-beta-${RUNNER_OS}-arm64-"
-          {
-            echo "origin=$MAC_TOOLS_PACK_ORIGIN_KEY"
-            echo "prefix=$prefix"
-            echo "key=$prefix$MAC_TOOLS_PACK_ORIGIN_KEY"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Restore mac_arm64 tools-pack cache
-        id: mac_arm64_tools_pack_cache_restore
-        uses: actions/cache/restore@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/tools-pack-cache
-          key: ${{ steps.mac_arm64_tools_pack_cache_key.outputs.key }}
-          restore-keys: |
-            ${{ steps.mac_arm64_tools_pack_cache_key.outputs.prefix }}
-
       - name: Install dependencies
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
@@ -686,24 +659,6 @@ jobs:
           pnpm exec tools-release publish-dogfood
           node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
 
-      - name: Delete failed mac_arm64 tools-pack cache
-        if: ${{ steps.mac_arm64_tools_pack_build.outcome == 'failure' && steps.mac_arm64_tools_pack_cache_restore.outputs.cache-matched-key != '' }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          matched_key="${{ steps.mac_arm64_tools_pack_cache_restore.outputs.cache-matched-key }}"
-          cache_ids="$(gh cache list --key "$matched_key" --limit 100 --json id,key,ref --jq ".[] | select(.key == \"$matched_key\") | .id")"
-          count=0
-          while IFS= read -r cache_id; do
-            if [ -n "$cache_id" ]; then
-              gh cache delete "$cache_id"
-              count=$((count + 1))
-            fi
-          done <<< "$cache_ids"
-          echo "deletedFailedCacheKey=$matched_key count=$count"
-
       - name: Build beta mac_arm64 update fixture
         id: mac_arm64_update_fixture
         if: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' }}
@@ -781,37 +736,6 @@ jobs:
       - name: Publish mac_arm64 report summary
         if: ${{ always() }}
         run: cat "${{ runner.temp }}/release-report/mac_arm64/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Prune mac_arm64 tools-pack cache
-        continue-on-error: true
-        run: bash .github/scripts/release/cache/mac.sh
-
-      - name: Save mac_arm64 tools-pack cache
-        if: ${{ success() && (steps.mac_arm64_tools_pack_cache_restore.outputs.cache-hit != 'true' || steps.mac_arm64_tools_pack_build.outcome == 'failure') }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/tools-pack-cache
-          key: ${{ steps.mac_arm64_tools_pack_cache_key.outputs.key }}
-
-      - name: Retain recent mac_arm64 tools-pack caches
-        if: ${{ success() }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          prefix="${{ steps.mac_arm64_tools_pack_cache_key.outputs.prefix }}"
-          keep=1
-          cache_ids="$(gh cache list --key "$prefix" --sort created_at --order desc --limit 100 --json id,key,createdAt --jq ".[$keep:] | .[].id")"
-          count=0
-          while IFS= read -r cache_id; do
-            if [ -n "$cache_id" ]; then
-              gh cache delete "$cache_id"
-              count=$((count + 1))
-            fi
-          done <<< "$cache_ids"
-          echo "actionsCachePrefix=$prefix deleted=$count"
 
       - name: Prepare mac_arm64 assets
         if: ${{ inputs.publish }}
@@ -893,33 +817,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-
-      - name: Compute mac_x64 tools-pack cache key
-        id: mac_x64_tools_pack_cache_key
-        env:
-          MAC_TOOLS_PACK_ORIGIN_KEY: ${{ hashFiles('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/daemon/**', 'apps/web/**', 'apps/desktop/**', 'apps/packaged/**', 'packages/agui-adapter/**', 'packages/contracts/**', 'packages/plugin-runtime/**', 'packages/sidecar-proto/**', 'packages/sidecar/**', 'packages/platform/**', 'tools/pack/bin/**', 'tools/pack/package.json', 'tools/pack/resources/**', 'tools/pack/src/**', 'tools/pack/tsconfig.json', 'assets/community-pets/**', 'assets/frames/**', 'craft/**', 'design-systems/**', 'design-templates/**', 'plugins/_official/**', 'plugins/registry/**', 'prompt-templates/**', 'skills/**', '.github/workflows/release-beta.yml', '.github/scripts/release/cache/mac.sh') }}
-        run: |
-          set -euo pipefail
-          if [ -z "$MAC_TOOLS_PACK_ORIGIN_KEY" ]; then
-            echo "mac_x64 tools-pack cache origin key is empty" >&2
-            exit 1
-          fi
-          prefix="tools-pack-mac-v1-beta-${RUNNER_OS}-x64-"
-          {
-            echo "origin=$MAC_TOOLS_PACK_ORIGIN_KEY"
-            echo "prefix=$prefix"
-            echo "key=$prefix$MAC_TOOLS_PACK_ORIGIN_KEY"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Restore mac_x64 tools-pack cache
-        id: mac_x64_tools_pack_cache_restore
-        uses: actions/cache/restore@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/tools-pack-cache
-          key: ${{ steps.mac_x64_tools_pack_cache_key.outputs.key }}
-          restore-keys: |
-            ${{ steps.mac_x64_tools_pack_cache_key.outputs.prefix }}
 
       - name: Install dependencies
         env:
@@ -1053,24 +950,6 @@ jobs:
           pnpm exec tools-release publish-dogfood
           node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
 
-      - name: Delete failed mac_x64 tools-pack cache
-        if: ${{ steps.mac_x64_tools_pack_build.outcome == 'failure' && steps.mac_x64_tools_pack_cache_restore.outputs.cache-matched-key != '' }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          matched_key="${{ steps.mac_x64_tools_pack_cache_restore.outputs.cache-matched-key }}"
-          cache_ids="$(gh cache list --key "$matched_key" --limit 100 --json id,key,ref --jq ".[] | select(.key == \"$matched_key\") | .id")"
-          count=0
-          while IFS= read -r cache_id; do
-            if [ -n "$cache_id" ]; then
-              gh cache delete "$cache_id"
-              count=$((count + 1))
-            fi
-          done <<< "$cache_ids"
-          echo "deletedFailedCacheKey=$matched_key count=$count"
-
       - name: Smoke beta mac_x64 packaged runtime
         if: ${{ inputs.mac_x64_smoke_mode == 'full' }}
         working-directory: e2e
@@ -1106,37 +985,6 @@ jobs:
       - name: Publish mac_x64 report summary
         if: ${{ always() }}
         run: cat "${{ runner.temp }}/release-report/mac_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Prune mac_x64 tools-pack cache
-        continue-on-error: true
-        run: bash .github/scripts/release/cache/mac.sh
-
-      - name: Save mac_x64 tools-pack cache
-        if: ${{ success() && (steps.mac_x64_tools_pack_cache_restore.outputs.cache-hit != 'true' || steps.mac_x64_tools_pack_build.outcome == 'failure') }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/tools-pack-cache
-          key: ${{ steps.mac_x64_tools_pack_cache_key.outputs.key }}
-
-      - name: Retain recent mac_x64 tools-pack caches
-        if: ${{ success() }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          prefix="${{ steps.mac_x64_tools_pack_cache_key.outputs.prefix }}"
-          keep=1
-          cache_ids="$(gh cache list --key "$prefix" --sort created_at --order desc --limit 100 --json id,key,createdAt --jq ".[$keep:] | .[].id")"
-          count=0
-          while IFS= read -r cache_id; do
-            if [ -n "$cache_id" ]; then
-              gh cache delete "$cache_id"
-              count=$((count + 1))
-            fi
-          done <<< "$cache_ids"
-          echo "actionsCachePrefix=$prefix deleted=$count"
 
       - name: Prepare mac_x64 assets
         if: ${{ inputs.publish }}
