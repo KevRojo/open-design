@@ -7,9 +7,6 @@
       "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
       ".github/workflows/ci.yml", ".github/config/runners.json"
     ],
-    "platform-tests": [
-      "suite://platform-source", "packages/platform/tests/", "packages/platform/tsconfig.tests.json"
-    ],
     "convergence-control": [
       ".github/config/convergence.json",
       ".github/config/scopes.json",
@@ -124,7 +121,8 @@
           "products": "manifest", "reusable": true
         },
         "platform_tests": {
-          "inputs": ["suite://platform-tests"], "runnerClass": "workspace_unit",
+          "inputs": ["suite://platform-source", "packages/platform/tests/", "packages/platform/tsconfig.tests.json"],
+          "runnerClass": "workspace_unit",
           "products": "none", "reusable": true
         },
         "static_gate": {
