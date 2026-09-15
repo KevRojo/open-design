@@ -369,7 +369,8 @@ jobs:
       branch: ${{ steps.identity.outputs.branch }}
       commit: ${{ steps.identity.outputs.commit }}
       previous_commit: ${{ steps.prev.outputs.previous_commit }}
-      promote: ${{ inputs.promote }}
+      # workflow_dispatch has no promote input; a callable explicit false wins.
+      promote: ${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}
       release_name: ${{ steps.beta.outputs.release_name }}
       state_source: ${{ steps.beta.outputs.state_source }}
     steps:
@@ -410,6 +411,13 @@ jobs:
         run: |
           set -euo pipefail
           built_sha="$(git rev-parse HEAD)"
+          # Task-scoped authorization; arbitrary feature refs remain dogfood-only.
+          if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] &&
+             [ "${GITHUB_REF:-}" = "refs/heads/feat/plan-foundation" ] &&
+             [ "$built_sha" = "${GITHUB_SHA:-}" ]; then
+            echo "Authorized Plan task beta publication at $built_sha"
+            exit 0
+          fi
           main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
           if [ -z "$main_sha" ]; then
             echo "Could not resolve the current main commit; refusing shared beta publication." >&2
@@ -1605,7 +1613,7 @@ jobs:
         always() &&
         !cancelled() &&
         inputs.publish &&
-        inputs.promote &&
+        needs.metadata.outputs.promote == 'true' &&
         needs.metadata.result == 'success' &&
         (inputs.enable_mac_arm64 || inputs.enable_win_x64 || inputs.enable_mac_x64 || inputs.enable_linux_x64) &&
         (!inputs.enable_mac_arm64 || needs.build_mac_arm64.result == 'success') &&
@@ -1763,6 +1771,8 @@ jobs:
         if: ${{ success() && steps.outputs.outputs.release_state == 'complete' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          # Source tests/Plan/installation reports coexist in this workflow.
+          ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
 
   # Validation is deliberately not in build/publish needs. For this branch

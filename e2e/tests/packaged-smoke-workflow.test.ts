@@ -2741,7 +2741,7 @@ process.stdin.on("end", () => {
     }
   });
 
-  it("[P1] keeps shared beta publication main-owned while feature refs stay dogfood-only", async () => {
+  it("[P1] limits the beta publication exception to the authorized manual task branch", async () => {
     const [betaWorkflow, dailyWorkflow] = await Promise.all([
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(notifyDailyFeishuWorkflowPath, "utf8"),
@@ -2762,12 +2762,15 @@ process.stdin.on("end", () => {
       'main_sha="$(git ls-remote origin refs/heads/main | awk \'{print $1}\')"',
     );
     expect(publisherGuard).toContain('[ "$built_sha" != "$main_sha" ]');
+    expect(publisherGuard).toContain('GITHUB_EVENT_NAME:-');
+    expect(publisherGuard).toContain('refs/heads/feat/plan-foundation');
+    expect(publisherGuard).toContain('"$built_sha" = "${GITHUB_SHA:-}"');
     expect(publisherGuard).toContain("publish=false");
     expect(betaWorkflow).not.toContain("recover_foreign_beta");
     expect(betaWorkflow).not.toContain("OPEN_DESIGN_RECOVER_FOREIGN_BETA");
     expect(metadataJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
     expect(metadataJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
-    expect(metadataJob).toContain("promote: ${{ inputs.promote }}");
+    expect(metadataJob).toContain(`promote: \${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}`);
     expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}");
     expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}");
     expect(betaWorkflow).toContain(
@@ -2792,7 +2795,8 @@ process.stdin.on("end", () => {
     expect(winJob).toContain("id: win_x64_platform_outputs");
 
     const publishJob = betaWorkflow.slice(betaWorkflow.indexOf("  publish:"));
-    expect(publishJob).toContain("inputs.promote");
+    expect(publishJob).toContain("needs.metadata.outputs.promote == 'true'");
+    expect(publishJob).toContain("ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'");
     expect(dailyWorkflow).toContain("resolve-daily-beta-recovery.ts");
     expect(dailyWorkflow).toContain("force: ${{ needs.resolve.outputs.force == 'true' }}");
     expect(dailyWorkflow).toContain("promote: ${{ needs.resolve.outputs.promote == 'true' }}");
@@ -2802,6 +2806,26 @@ process.stdin.on("end", () => {
     );
     expect(dailyWorkflow).toContain("WIN_X64_SMOKE_RESULT: ${{ needs.build.outputs.win_x64_smoke_result }}");
     expect(dailyWorkflow).toContain("RELEASE_STATE: ${{ needs.build.outputs.release_state }}");
+  });
+
+  it("[P1] executes the beta publisher guard against authorized and foreign source identities", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const script = extractWorkflowRunScript(workflow, "Validate shared beta publisher");
+    const gitFixture = `git() { if [ "$1" = rev-parse ]; then echo "$TEST_BUILT_SHA"; else echo "main-sha refs/heads/main"; fi; }\n`;
+    for (const [event, ref, source, allowed] of [
+      ["workflow_dispatch", "refs/heads/feat/plan-foundation", "task-sha", true],
+      ["workflow_dispatch", "refs/heads/feat/plan-foundation", "foreign-sha", false],
+      ["push", "refs/heads/feat/plan-foundation", "task-sha", false],
+      ["workflow_dispatch", "refs/heads/another", "task-sha", false],
+      ["push", "refs/heads/main", "main-sha", true],
+    ] as const) {
+      const execution = execFileAsync("bash", ["-c", gitFixture + script], {
+        env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_REF: ref,
+          GITHUB_SHA: "task-sha", TEST_BUILT_SHA: source },
+      });
+      if (allowed) await expect(execution).resolves.toBeDefined();
+      else await expect(execution).rejects.toBeDefined();
+    }
   });
 
   it("[P1] gives every exempted beta smoke step a visible failure signal", async () => {
