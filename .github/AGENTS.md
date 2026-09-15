@@ -61,11 +61,23 @@ must never invoke these scripts. Keep runner placement, changed-file relevance,
 reusable-result convergence, and fine-grained commands inside a workload independent.
 
 `convergence.py` computes workload identities from declared Git inputs, the
-execution class, product mode, and the convergence control contract. Public
+execution class, product mode, policy, and `schema.version`. Changes to hashing
+or declaration interpretation require a schema version bump. The control file
+set remains a trusted-writer admission boundary, not an implicit global cache
+input; execution-affecting configuration must be declared by workloads. Public
 result reads are credential-free and fail open to execution. Only a successful
 gate may produce a `handoff/convergence` candidate; only trusted
 `convergence.atom.yml` code may publish immutable results. `lib/r2.py` knows R2
 transport only and must not interpret workload policy or handoff schemas.
+
+Manual CI may select existing workload IDs through `workloads`; the resulting
+check is explicitly selected validation, never a complete merge gate. Workload
+declarations stay in `convergence.json`, scheduling stays in `ci.yml`, and only
+the successful gate creates a publication handoff. Do not create stage-named
+workflow/config files for validation. The current `ci-isolated-v1` policy and
+manual callable path in `convergence.atom.yml` are task-scoped to the explicitly
+authorized `feat/plan-foundation` branch. They do not relax production
+`workflow_run`/default-branch admission and must be revisited before landing.
 
 ## Handoff contract
 
