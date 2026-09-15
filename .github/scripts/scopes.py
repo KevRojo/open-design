@@ -15,6 +15,8 @@ from lib.github import append_outputs, append_summary
 
 CONFIDENCE = {"medium": 0, "certain": 1}
 WORKLOADS = {
+    "platform_build",
+    "platform_tests",
     "static_gate",
     "preflight",
     "workspace_unit_tests",
@@ -185,6 +187,8 @@ def enabled_workloads(outputs, ci_mode, full_lanes):
     broad = full_lanes or ci_mode == "hot" or any_scope
     ui_p0 = full_lanes or outputs["ui_p0_validation_required"]
     enabled = {
+        "platform_build": broad,
+        "platform_tests": broad,
         "static_gate": True,
         "preflight": True,
         "workspace_unit_tests": broad,
@@ -302,6 +306,7 @@ def emit_plan(plan, output_path=None):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     append_outputs({
+        "enabled": compact_json(plan["enabled"]),
         "scopes": compact_json(plan["scopes"]),
         "ui_p0_matrix": compact_json(plan["matrices"]["ui_p0"]),
         "visual_matrix": compact_json(plan["matrices"]["visual"]),
@@ -348,7 +353,18 @@ def main():
         return 0
     if args.command == "github-output":
         source, files, threshold, mode, full_lanes, derive, resolved = changed_files_for_environment()
-        emit_plan(build_plan(contract, files, source, threshold, mode, full_lanes, derive, resolved), args.output)
+        plan = build_plan(contract, files, source, threshold, mode, full_lanes, derive, resolved)
+        selection = os.environ.get("CI_WORKLOADS", "").strip()
+        if selection:
+            if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+                raise ConfigError("explicit workload selection requires workflow_dispatch")
+            selected = set(selection.split(","))
+            if not selected.issubset(WORKLOADS):
+                raise ConfigError("explicit selection contains unknown workload identities")
+            plan["enabled"] = {name: name in selected for name in WORKLOADS}
+            plan["source"] = "workflow_dispatch:selected"
+            plan["selection"] = sorted(selected)
+        emit_plan(plan, args.output)
         return 0
     files = list(args.files)
     if args.files_from:

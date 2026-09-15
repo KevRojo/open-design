@@ -4,6 +4,7 @@ name: convergence.atom
 # successful ci run. All validation and R2 writes execute trusted default-branch
 # Python; pull-request code is treated solely as data.
 on:
+  workflow_call:
   workflow_run:
     workflows: [ci]
     types: [completed]
@@ -13,10 +14,58 @@ permissions:
   contents: read
 
 concurrency:
-  group: convergence-${{ github.event.workflow_run.id }}
+  group: convergence-${{ github.event.workflow_run.id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
+  isolated:
+    name: '[cache] Authorized manual CI results'
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+        && github.repository == 'nexu-io/open-design'
+        && github.ref == 'refs/heads/feat/plan-foundation' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Explicit task authorization only. The production job below still uses
+      # default-branch code and its original PR/merge-group admission checks.
+      - name: '[prepare] Authorized source snapshot'
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: '[resolve] Gate handoff name'
+        id: artifact
+        run: echo "name=$(python3 .github/scripts/handoff.py artifact-name convergence ci-results)" >> "$GITHUB_OUTPUT"
+      - name: '[collect] Successful gate handoff'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ runner.temp }}/handoff-convergence
+      - name: '[validate] Branch, run and isolated storage identity'
+        id: trust
+        run: >-
+          python3 .github/scripts/convergence.py admit --isolated
+          --handoff-root "$RUNNER_TEMP/handoff-convergence"
+      - name: '[collect] Referenced build products'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/convergence.py stage-products
+          --candidate "${{ steps.trust.outputs.candidate }}"
+          --run-id "${{ github.run_id }}" --output-dir "$RUNNER_TEMP/products"
+      - name: '[cache] Publish isolated results'
+        env:
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
+        run: >-
+          python3 .github/scripts/convergence.py publish --isolated
+          --candidate "${{ steps.trust.outputs.candidate }}"
+          --products-root "$RUNNER_TEMP/products" --output-dir "$RUNNER_TEMP/publication"
+
   publish:
     name: Publish reusable workload results
     if: >-

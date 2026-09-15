@@ -12,6 +12,10 @@ on:
           - full
           - hot
         default: full
+      workloads:
+        description: 'Optional comma-separated workload IDs; selected validation only, not a full merge gate'
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -69,6 +73,8 @@ jobs:
       convergence_hit: ${{ steps.convergence.outputs.hit }}
       convergence_would_run: ${{ steps.convergence.outputs.would_run }}
       scopes: ${{ steps.scopes.outputs.scopes }}
+      enabled: ${{ steps.scopes.outputs.enabled }}
+      selection: ${{ inputs.workloads }}
       ui_p0_matrix: ${{ steps.scopes.outputs.ui_p0_matrix }}
       visual_matrix: ${{ steps.scopes.outputs.visual_matrix }}
 
@@ -80,6 +86,7 @@ jobs:
         id: scopes
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_WORKLOADS: ${{ inputs.workloads }}
         run: python3 .github/scripts/scopes.py github-output --output "$RUNNER_TEMP/scope-plan.json"
 
       - name: Resolve reusable workload results
@@ -92,7 +99,7 @@ jobs:
           --workflow ci
           --scope-plan "$RUNNER_TEMP/scope-plan.json"
           --runner-plan-json "$RUNNER_PLAN_JSON"
-          --mode shadow
+          --mode ${{ github.event_name == 'workflow_dispatch' && inputs.workloads != '' && 'enforce' || 'shadow' }}
           --pending "$RUNNER_TEMP/pending-convergence.json"
 
       # Shadow mode records reusable-result hits without omitting validation.
@@ -318,7 +325,6 @@ jobs:
         run: |
           pnpm --filter @open-design/contracts test
           pnpm --filter @open-design/host test
-          pnpm --filter @open-design/platform test
           pnpm --filter @open-design/sidecar test
           pnpm --filter @open-design/sidecar-proto test
           if [ "${{ fromJSON(needs.plan.outputs.scopes).tools_dev_tests_required }}" = "true" ]; then
@@ -852,8 +858,66 @@ jobs:
           name: ${{ steps.merge_blocking_label_gate.outputs.comment_name }}
           path: ${{ steps.merge_blocking_label_gate.outputs.comment_path }}
 
+  platform_build:
+    name: '[build] packages/platform'
+    needs: [plan, runners]
+    if: ${{ fromJSON(needs.plan.outputs.run).platform_build }}
+    runs-on: ${{ fromJSON(needs.runners.outputs.runs_on).workspace_unit }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v6.0.8
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: '[prepare] Platform dependencies'
+        run: pnpm --filter @open-design/platform... install --frozen-lockfile --ignore-scripts
+      - name: '[build] Platform public package'
+        run: pnpm --filter @open-design/platform build
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.plan.outputs.convergence_plan_artifact }}
+          path: ${{ runner.temp }}
+      - name: '[record] Bind produced artifact to plan'
+        run: >-
+          python3 .github/scripts/convergence.py contribute
+          --pending "$RUNNER_TEMP/pending-convergence.json" --workload platform_build
+          --products-json '{"bundle":{"type":"job","source":"platform-build"}}'
+          --output-dir "$RUNNER_TEMP/convergence-products"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-build
+          path: packages/platform/dist
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-build-manifest
+          path: ${{ runner.temp }}/convergence-products
+          retention-days: 1
+          if-no-files-found: error
+
+  platform_tests:
+    name: '[test] packages/platform'
+    needs: [plan, runners]
+    if: ${{ fromJSON(needs.plan.outputs.run).platform_tests }}
+    runs-on: ${{ fromJSON(needs.runners.outputs.runs_on).workspace_unit }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v6.0.8
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: '[prepare] Platform dependencies'
+        run: pnpm --filter @open-design/platform... install --frozen-lockfile --ignore-scripts
+      - name: '[test] Platform behavior'
+        run: pnpm --filter @open-design/platform test
+
   validate:
-    name: Validate workspace
+    name: ${{ inputs.workloads != '' && '[validate] Selected workloads' || 'Validate workspace' }}
     needs:
       - plan
       - runners
@@ -868,6 +932,8 @@ jobs:
       - playwright_critical
       - ui_p0
       - playwright_visual
+      - platform_build
+      - platform_tests
     if: ${{ always() }}
     runs-on: ${{ fromJSON(needs.runners.outputs.runs_on).control }}
     timeout-minutes: 5
@@ -906,12 +972,12 @@ jobs:
           fi
 
       - name: Checkout convergence control plane
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '' }}
         continue-on-error: true
         uses: actions/checkout@v6.0.2
 
       - name: Download pending convergence plan
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '' }}
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
@@ -920,9 +986,16 @@ jobs:
           name: ${{ needs.plan.outputs.convergence_plan_artifact }}
           path: ${{ runner.temp }}
 
+      - name: '[collect] Platform product manifest'
+        if: ${{ needs.platform_build.result == 'success' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: platform-build-manifest
+          path: ${{ runner.temp }}/convergence-products
+
       - name: Create convergence handoff
         id: convergence_handoff
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '' }}
         continue-on-error: true
         run: >-
           python3 .github/scripts/convergence.py handoff
@@ -1121,6 +1194,44 @@ jobs:
         with:
           name: ${{ steps.merge_queue_failure_notice.outputs.comment_name }}
           path: ${{ steps.merge_queue_failure_notice.outputs.comment_path }}
+
+  cache_results:
+    name: '[cache] Isolated successful CI results'
+    needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && inputs.workloads != '' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    secrets: inherit
+
+  platform_restore:
+    name: '[validate] Restored platform package'
+    needs: [plan, runners, cache_results]
+    if: ${{ fromJSON(needs.plan.outputs.enabled).platform_build }}
+    runs-on: ${{ fromJSON(needs.runners.outputs.runs_on).workspace_unit }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24.18.0
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.plan.outputs.convergence_plan_artifact }}
+          path: ${{ runner.temp }}
+      - name: '[restore] Verify and acquire frozen build result'
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+        run: |
+          python3 .github/scripts/convergence.py restore --refresh \
+            --pending "$RUNNER_TEMP/pending-convergence.json" --workload platform_build \
+            --output-dir "$RUNNER_TEMP/restored"
+          unzip -q "$RUNNER_TEMP/restored/bundle" -d "$RUNNER_TEMP/platform-dist"
+      - name: '[validate] Restored public API'
+        run: >-
+          node --input-type=module -e
+          'import {pathToFileURL} from "node:url";
+          const p = await import(pathToFileURL(process.env.RUNNER_TEMP+"/platform-dist/index.mjs"));
+          if (typeof p.createCommandInvocation !== "function" || !p.pathContains("/tmp/root", "/tmp/root/child"))
+          throw new Error("restored platform API failed");'
 
   runtime_summary:
     name: Runtime summary

@@ -24,7 +24,7 @@ from typing import Any
 from unittest.mock import patch
 
 import handoff as handoff_contract
-from lib.config import ConfigError, compact_json, load_json, object_value, repository_root, schema_v1
+from lib.config import ConfigError, compact_json, load_json, object_value, repository_root
 from lib.github import (
     GitHubError,
     append_outputs,
@@ -38,6 +38,8 @@ from lib.workload_products import materialize_products
 
 
 PROTOCOL = "nexu-workload-result-v1"
+# Identity/declaration semantics have one version. Storage receipts remain v1.
+SCHEMA_VERSION = 2
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -106,7 +108,10 @@ class ConvergenceContract:
         value = object_value(load_json(path), "convergence")
         if set(value) != {"schema", "suites", "workflows"}:
             raise ConfigError("convergence keys must be schema, suites, and workflows")
-        schema_v1(value, "convergence")
+        schema = object_value(value["schema"], "convergence.schema")
+        if set(schema) != {"version"} or type(schema["version"]) is not int or schema["version"] != SCHEMA_VERSION:
+            raise ConfigError(f"convergence requires schema.version {SCHEMA_VERSION}")
+        self.schema_version = schema["version"]
         suites = object_value(value["suites"], "convergence.suites")
         self.suites = {
             require_identity(name, "convergence suite"): self.tokens(tokens, f"convergence.suites.{name}")
@@ -244,7 +249,7 @@ def digest_tokens(
         return resolved[node]
     digest = hashlib.sha256()
     digest.update(f"{PROTOCOL}\0{node}\0".encode())
-    for token in tokens:
+    for token in sorted(set(tokens)):
         digest.update(f"token\0{token}\0".encode())
         if token.startswith("suite://"):
             name = token.removeprefix("suite://")
@@ -266,13 +271,6 @@ def calculate(
     workflow = contract.workflow(workflow_name)
     resolved: dict[str, str] = {}
     fingerprinter = GitFingerprinter(root)
-    control_digest = digest_tokens(
-        contract,
-        fingerprinter,
-        f"suite://{CONTROL_SUITE}",
-        contract.suites[CONTROL_SUITE],
-        resolved,
-    )
     results: dict[str, dict[str, Any]] = {}
     for identity, workload in workflow.workloads.items():
         if workload.runner_class not in runner_plan:
@@ -288,11 +286,14 @@ def calculate(
             resolved,
         )
         execution_class = canonical_json({"runnerClass": workload.runner_class, "labels": labels})
-        digest = hashlib.sha256()
-        digest.update(f"{PROTOCOL}\0workload-result\0".encode())
-        for value in (workflow_name, workflow.policy, identity, input_digest, control_digest, execution_class, workload.products):
-            digest.update(value.encode())
-            digest.update(b"\0")
+        # Control source is an admission boundary, not a global cache input.
+        # Workloads declare execution-affecting source/configuration explicitly.
+        digest = hashlib.sha256(canonical_json({
+            "schemaVersion": contract.schema_version, "protocol": PROTOCOL,
+            "workflow": workflow_name, "policy": workflow.policy, "workload": identity,
+            "inputs": input_digest, "executionClass": json.loads(execution_class),
+            "products": workload.products, "reusable": workload.reusable,
+        }).encode())
         results[identity] = {
             "digest": digest.hexdigest(),
             "executionClass": json.loads(execution_class),
@@ -579,6 +580,15 @@ def restore_command(args: argparse.Namespace, contract: ConvergenceContract) -> 
         raise ConfigError("unknown restore workload")
     expected = object_value(pending.get("workloads"), "pending workloads").get(args.workload)
     expected = object_value(expected, "pending workload")
+    if args.refresh and expected.get("scopeEnabled") and expected.get("reusable"):
+        # Acquire a newly published result using the frozen recipe identity.
+        # Never re-fingerprint the source in a consuming job.
+        workflow_results = resolve_results(
+            os.environ.get("OD_WORKLOAD_RESULTS_BASE_URL"), pending["repositoryId"],
+            workflow, {args.workload: expected}, args.timeout,
+        )
+        expected = {**expected, "resultHit": workflow_results[0][args.workload],
+                    "result": workflow_results[2].get(args.workload)}
     if not expected.get("scopeEnabled") or not expected.get("reusable") or not expected.get("resultHit"):
         raise ConfigError("restore requires a selected reusable-result hit")
     if args.output_dir.exists() or args.output_dir.is_symlink():
@@ -941,6 +951,8 @@ def git_differs(left: str, right: str, paths: list[str]) -> bool:
 
 
 def admit_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
+    if args.isolated:
+        return admit_isolated_command(args, contract)
     context = workflow_run_context(event_payload())
     if context["head_repository"] != context["repository"]:
         raise ConfigError("workflow_run head repository is not trusted")
@@ -1204,7 +1216,62 @@ def self_check() -> None:
             raise ConfigError("convergence self-check produced nondeterministic product archives")
 
 
+def require_isolated_candidate(candidate: dict[str, Any]) -> None:
+    """Task-scoped authorization, deliberately not a production trust override."""
+    if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
+            or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"):
+        raise ConfigError("isolated publication requires the authorized manual branch")
+    context = producer_context(event_payload())
+    if (candidate.get("workflow") != "ci" or candidate.get("policy") != "ci-isolated-v1"
+            or candidate.get("repositoryId") != context["repositoryId"]
+            or candidate.get("repository") != context["repository"]):
+        raise ConfigError("isolated candidate repository/workflow/policy differs")
+    provenance = candidate.get("provenance", {})
+    for field in ("event", "runId", "runAttempt", "headSha", "baseSha", "treeSha"):
+        if provenance.get(field) != context["provenance"][field]:
+            raise ConfigError(f"isolated candidate {field} differs from current run")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "candidate.json"
+        write_json_atomic(path, candidate)
+        prepare_publication(path, Path(directory) / "receipts", require_urls=False)
+
+
+def admit_isolated_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
+    entries = handoff_contract.candidate_entry_dirs(args.handoff_root, "convergence")
+    if len(entries) != 1:
+        raise ConfigError("isolated publication requires exactly one successful gate handoff")
+    entry = handoff_contract.validate_convergence(entries[0])
+    candidate = load_json(Path(entry["candidate_path"]))
+    require_isolated_candidate(candidate)
+    if contract.workflow("ci").policy != candidate["policy"]:
+        raise ConfigError("isolated policy differs from declaration")
+    append_outputs({"candidate": entry["candidate_path"], "publish": "true"})
+    return 0
+
+
+def contribute_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
+    """Bind product references to the frozen plan; only the gate issues success."""
+    pending = object_value(load_json(args.pending), "pending convergence")
+    workflow = contract.workflow(require_identity(pending.get("workflow"), "pending workflow"))
+    if args.workload not in workflow.workloads:
+        raise ConfigError("unknown contribution workload")
+    value = object_value(pending["workloads"].get(args.workload), "pending workload")
+    if not value.get("run") or not value.get("scopeEnabled"):
+        raise ConfigError("contribution requires an executed workload")
+    products = validate_products(json.loads(args.products_json), "contribution products", require_urls=False)
+    if workflow.workloads[args.workload].products != "manifest" or not products:
+        raise ConfigError("contribution requires a manifest workload and nonempty products")
+    write_json_atomic(args.output_dir / args.workload / "product-manifest.json", {
+        "workload": args.workload, "digest": value["digest"],
+        "executionClass": value["executionClass"], "products": products,
+    })
+    return 0
+
+
 def publish_command(args: argparse.Namespace) -> int:
+    if args.isolated:
+        require_isolated_candidate(load_json(args.candidate))
     storage = storage_config(required=True)
     origin = public_origin(storage["public_origin"])
     client = R2Client(
@@ -1284,6 +1351,7 @@ def publish_command(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    append_outputs({"receipts": compact_json([item["receipt"] for item in candidate["results"]])})
     return 0
 
 
@@ -1315,8 +1383,15 @@ def parse_args() -> argparse.Namespace:
     restore.add_argument("--output-dir", type=Path, required=True)
     restore.add_argument("--timeout", type=float, default=60.0)
     restore.add_argument("--allow-miss", action="store_true", help="caller explicitly handles restored=false by executing the workload")
+    restore.add_argument("--refresh", action="store_true", help="read newly published receipt using the frozen pending identity")
+    contribute = sub.add_parser("contribute")
+    contribute.add_argument("--pending", type=Path, required=True)
+    contribute.add_argument("--workload", required=True)
+    contribute.add_argument("--products-json", required=True)
+    contribute.add_argument("--output-dir", type=Path, required=True)
     admit = sub.add_parser("admit")
     admit.add_argument("--handoff-root", type=Path, required=True)
+    admit.add_argument("--isolated", action="store_true")
     publication = sub.add_parser("prepare-publication")
     publication.add_argument("--candidate", type=Path, required=True)
     publication.add_argument("--output-dir", type=Path, required=True)
@@ -1330,6 +1405,7 @@ def parse_args() -> argparse.Namespace:
     publish.add_argument("--output-dir", type=Path, required=True)
     publish.add_argument("--products-root", type=Path, required=True)
     publish.add_argument("--timeout", type=float, default=15.0)
+    publish.add_argument("--isolated", action="store_true")
     return parser.parse_args()
 
 
@@ -1367,6 +1443,8 @@ def main() -> int:
         return handoff_command(args, contract)
     if args.command == "restore":
         return restore_command(args, contract)
+    if args.command == "contribute":
+        return contribute_command(args, contract)
     return admit_command(args, contract)
 
 

@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 1 },
+    schema: { version: 2 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -95,6 +95,40 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("rejects isolated writes from unauthorized branches before loading storage credentials", () => {
+    const fixture = createRepository();
+    const candidatePath = path.join(fixture.root, "candidate.json");
+    writeFileSync(candidatePath, JSON.stringify(candidate({})));
+    const result = spawnSync("python3", [convergenceScript, "publish", "--isolated",
+      "--candidate", candidatePath, "--output-dir", path.join(fixture.root, "published"),
+      "--products-root", path.join(fixture.root, "products")], {
+      cwd: fixture.root, encoding: "utf8", env: { ...process.env,
+        GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "nexu-io/open-design",
+        GITHUB_REF: "refs/heads/main" },
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("authorized manual branch");
+    expect(result.stderr).not.toContain("storage is missing");
+  });
+  test("isolates local declarations from admission controls and rejects stale identity schemas", () => {
+    const fixture = createRepository();
+    const before = runPlan(fixture).pending.workloads;
+    writeFileSync(path.join(fixture.root, "control.txt"), "new admission code");
+    execFileSync("git", ["add", "control.txt"], { cwd: fixture.root });
+    expect(runPlan(fixture).pending.workloads).toEqual(before);
+    const config = JSON.parse(readFileSync(fixture.configPath, "utf8"));
+    config.workflows.ci.workloads.b.inputs = ["b.txt"];
+    writeFileSync(fixture.configPath, JSON.stringify(config));
+    const after = runPlan(fixture).pending.workloads;
+    expect(workload(after, "a").digest).toBe(workload(before, "a").digest);
+    expect(workload(after, "b").digest).not.toBe(workload(before, "b").digest);
+    config.schema.version = 1;
+    writeFileSync(fixture.configPath, JSON.stringify(config));
+    const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
+      "--config", fixture.configPath, "validate"], { encoding: "utf8" });
+    expect(stale.status).toBe(2);
+    expect(stale.stderr).toContain("requires schema.version 2");
+  });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();
     runPlan(fixture);

@@ -404,6 +404,21 @@ async function renderFeishuBuildCard(env: Record<string, string>): Promise<Recor
 }
 
 describe("packaged smoke workflow", () => {
+  it("keeps selected CI reuse inside existing workflow and publication boundaries", async () => {
+    const ci = await readFile(ciWorkflowPath, "utf8");
+    const atom = await readFile(convergenceWorkflowPath, "utf8");
+    expect(ci).not.toContain("plan-foundation.yml");
+    expect(ci).not.toContain("plan-foundation.json");
+    expect(ci).toContain("uses: ./.github/workflows/convergence.atom.yml");
+    expect(ci).toContain("name: '[build] packages/platform'");
+    expect(ci).toContain("name: '[test] packages/platform'");
+    expect(ci.match(/pnpm --filter @open-design\/platform test/g)).toHaveLength(1);
+    expect(atom).toContain("workflow_call:");
+    expect(atom).toContain("admit --isolated");
+    expect(atom).toContain("publish --isolated");
+    expect(atom).toContain("ref: ${{ github.event.repository.default_branch }}");
+    expect(atom).toContain("github.event.workflow_run.event == 'pull_request'");
+  });
   it("[P2] keeps packaged smoke outside the main CI gate", async () => {
     const workflow = await readFile(ciWorkflowPath, "utf8");
     expect(workflow).not.toContain("packaged_smoke_");

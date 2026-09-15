@@ -30,6 +30,29 @@ function plan(context: "pr" | "merge-queue" | "full", files: string[] = []): Pla
 }
 
 describe("workflow scope planner", () => {
+  test("selects existing workloads only for explicitly scoped manual runs", () => {
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), "scope-selection-"));
+    try {
+      const eventPath = path.join(temporaryRoot, "event.json");
+      const planPath = path.join(temporaryRoot, "plan.json");
+      writeFileSync(eventPath, JSON.stringify({ inputs: { ci_mode: "full" } }));
+      const env = { ...process.env, GITHUB_EVENT_NAME: "workflow_dispatch",
+        GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: "example/repo",
+        CI_WORKLOADS: "platform_build,platform_tests" };
+      execFileSync("python3", [script, "github-output", "--output", planPath], { cwd: repoRoot, env });
+      const result = JSON.parse(readFileSync(planPath, "utf8"));
+      expect(Object.entries(result.enabled).filter(([, enabled]) => enabled).map(([id]) => id).sort())
+        .toEqual(["platform_build", "platform_tests"]);
+      expect(result.source).toBe("workflow_dispatch:selected");
+      const invalid = spawnSync("python3", [script, "github-output"], {
+        cwd: repoRoot, env: { ...env, CI_WORKLOADS: "typo" }, encoding: "utf8",
+      });
+      expect(invalid.status).toBe(2);
+      expect(invalid.stderr).toContain("unknown workload");
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
   test("keeps the JSON matrices aligned with the business-owned suite topology", () => {
     expect(plan("full").matrices).toEqual({ ui_p0: uiP0CiMatrix, visual: visualCiMatrix });
   });

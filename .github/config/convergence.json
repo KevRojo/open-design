@@ -1,6 +1,15 @@
 {
-  "schema": { "version": 1 },
+  "schema": { "version": 2 },
   "suites": {
+    "platform-source": [
+      "packages/platform/src/", "packages/platform/package.json",
+      "packages/platform/esbuild.config.mjs", "packages/platform/tsconfig.json",
+      "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
+      ".github/workflows/ci.yml", ".github/config/runners.json"
+    ],
+    "platform-tests": [
+      "suite://platform-source", "packages/platform/tests/", "packages/platform/tsconfig.tests.json"
+    ],
     "convergence-control": [
       ".github/config/convergence.json",
       ".github/config/scopes.json",
@@ -108,8 +117,16 @@
   },
   "workflows": {
     "ci": {
-      "policy": "ci-v1",
+      "policy": "ci-isolated-v1",
       "workloads": {
+        "platform_build": {
+          "inputs": ["suite://platform-source"], "runnerClass": "workspace_unit",
+          "products": "manifest", "reusable": true
+        },
+        "platform_tests": {
+          "inputs": ["suite://platform-tests"], "runnerClass": "workspace_unit",
+          "products": "none", "reusable": true
+        },
         "static_gate": {
           "inputs": ["*"],
           "runnerClass": "control",
