@@ -1785,7 +1785,7 @@ jobs:
       run: ${{ steps.plan.outputs.run }}
       hit: ${{ steps.plan.outputs.hit }}
       pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
-      contribution: ${{ steps.mode.outputs.contribution }}
+      contribution: ${{ steps.mode.outputs.contribution == 'true' && steps.plan.outputs.expects_contributions == 'true' }}
     steps:
       - name: '[prepare] Workflow control snapshot'
         uses: actions/checkout@v6.0.2

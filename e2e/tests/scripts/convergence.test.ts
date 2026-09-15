@@ -141,6 +141,34 @@ describe("workload convergence", () => {
     { cwd: fixture.root, encoding: "utf8", env: { ...process.env, OD_WORKLOAD_RESULTS_BASE_URL: "",
       GITHUB_OUTPUT: path.join(fixture.root, "outputs"), GITHUB_STEP_SUMMARY: path.join(fixture.root, "summary") } });
     expect(JSON.parse(output).run).toEqual({ a: true, b: true });
+    expect(readFileSync(path.join(fixture.root, "outputs"), "utf8")).toContain("expects_contributions=true");
+  });
+
+  test("does not collect receipts for all-hit or out-of-scope workloads", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import os, sys
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+args = ["convergence", "--root", str(root), "--config", str(root / "convergence.json"),
+        "github-output", "--workflow", "ci", "--all-workloads",
+        "--runner-plan-json", '{"worker":["ubuntu-24.04"]}', "--repository-id", "42",
+        "--repository", "example/repo", "--mode", "enforce", "--pending", str(root / "pending.json")]
+for mode in ("enforce", "shadow"):
+    args[args.index("--mode") + 1] = mode
+    with patch.object(sys, "argv", args), patch("convergence.resolve_results", return_value=(
+            {"a": True, "b": True}, {"a": "result-hit", "b": "result-hit"}, {})), \\
+            patch("convergence.append_outputs") as outputs:
+        assert c.main() == 0
+        assert outputs.call_args.args[0]["expects_contributions"] == "false"
+`, path.dirname(convergenceScript), fixture.root], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    writeFileSync(fixture.scopePlanPath, JSON.stringify({ enabled: { a: false, b: false } }));
+    runPlan(fixture);
+    expect(readFileSync(path.join(fixture.root, "github-output.txt"), "utf8")).toContain("expects_contributions=false");
   });
 
   test("admits only the named beta policy under the existing isolated branch authorization", () => {

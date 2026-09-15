@@ -854,6 +854,8 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
             "run": compact_json(run),
             "hit": compact_json(hits),
             "would_run": compact_json(would_run),
+            "expects_contributions": str(any(run[name] and calculated[name]["reusable"] and not hits[name]
+                                             for name in calculated)).lower(),
         }
     )
     lines = [

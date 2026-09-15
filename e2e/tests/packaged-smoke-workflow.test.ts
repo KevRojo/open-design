@@ -2344,6 +2344,7 @@ process.stdin.on("end", () => {
     expect(plan).toContain("needs.metadata.outputs.commit == github.sha");
     expect(plan).toContain("--root plan-source --config .github/config/convergence-beta.json");
     expect(plan).toContain("--all-workloads");
+    expect(plan).toContain("steps.plan.outputs.expects_contributions == 'true'");
     expect(plan).not.toContain("pnpm install");
     const collection = sectionBetween(workflow, "  test_results:", "  cache_test_results:");
     expect(collection).toContain("--id beta-results");
