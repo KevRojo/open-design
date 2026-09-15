@@ -98,7 +98,7 @@ async function writeWorkspace(root: string): Promise<void> {
 
 function buildRunner(build: () => Promise<void>): WorkspaceBuildRunner {
   return async (args) => {
-    if (args[0] === "--filter" && args[1] === "@open-design/packaged") await build();
+    if (args[0] === "--filter" && args[1] === "@open-design/web" && args[3] === "build") await build();
   };
 }
 
@@ -527,6 +527,27 @@ describe("runWorkspaceBuild", () => {
       await expect(readFile(join(root, "apps/web/next-env.d.ts"), "utf8")).rejects.toThrow();
     } finally {
       await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("produces portable standalone peers before any cache or release materialization", async () => {
+    const root = await mkdtemp(join(tmpdir(), "open-design-web-unit-"));
+    const config = createConfig(root, join(root, ".cache"));
+    try {
+      await writeWorkspace(root);
+      await runWorkspaceBuildUnit(config, "web", async (args) => {
+        if (args[3] !== "build") return;
+        await writeOutputs(root, "pristine");
+        await writeStandalonePeerDeps(root);
+        await writeFile(join(root, "apps/web/.next/static/chunk.js.map"), "pristine-map");
+      });
+      expect(JSON.parse(await readFile(join(root,
+        "apps/web/.next/standalone/apps/web/node_modules/react/package.json"), "utf8"))).toEqual({ name: "react" });
+      expect(await readFile(join(root, "apps/web/.next/static/chunk.js.map"), "utf8")).toBe("pristine-map");
+      expect(await readdir(config.roots.cacheRoot).catch(() => [])).toEqual([]);
+      expect((await workspaceBuildUnitResult(config, "web")).outputPaths).toContain("apps/web/.next/standalone");
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

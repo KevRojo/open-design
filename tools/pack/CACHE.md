@@ -70,6 +70,12 @@ order and retains its existing whole-workspace cache (schema 12). Changing unit
 commands therefore changes the aggregate cache key; this is not yet per-unit
 workflow cache integration. Plan owns that external decision.
 
+The Web source unit normalizes standalone peer links before returning. This
+belongs to producing a usable public build result, not to writing a local cache.
+Its JS/map pairs stay pristine: release-specific sourcemap injection/upload and
+map removal remain on the packaging materialization path. A restored public Web
+result must preserve those pairs until that path runs.
+
 ## Determinant rules
 
 **R1 — A node key must cover every input that determines the node's output.**

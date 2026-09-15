@@ -158,6 +158,11 @@ export async function runWorkspaceBuildUnit(
   const previousWebNextEnv = await readFile(webNextEnvPath, "utf8").catch(() => null);
   try {
     await execute();
+    if (config.webOutputMode === "standalone") {
+      const standaloneRoot = join(config.workspaceRoot, WEB_STANDALONE_ARTIFACT);
+      await stripBrokenSymlinks(standaloneRoot);
+      await hoistStandaloneNextPeerDeps(standaloneRoot);
+    }
   } finally {
     if (previousWebNextEnv == null) await rm(webNextEnvPath, { force: true });
     else await writeFile(webNextEnvPath, previousWebNextEnv, "utf8");
@@ -338,14 +343,9 @@ async function hoistStandaloneNextPeerDeps(standaloneRoot: string): Promise<void
 async function copyWorkspaceBuildArtifactsToCache(config: ToolPackConfig, entryRoot: string): Promise<void> {
   for (const artifact of workspaceBuildArtifacts(config)) {
     const sourcePath = join(config.workspaceRoot, artifact.workspacePath);
-    // Strip dangling symlinks first: that clears any leftover from a
-    // previous build whose target moved (e.g. a renamed `.pnpm/<pkg>@<ver>`
-    // after a dependency bump), so the subsequent hoist step starts
-    // from a clean slot and can safely (re-)create its symlinks.
+    // Cache copies must not dereference stale dangling links. Standalone peer
+    // normalization belongs to the Web producer, not this storage operation.
     await stripBrokenSymlinks(sourcePath);
-    if (artifact.workspacePath === WEB_STANDALONE_ARTIFACT) {
-      await hoistStandaloneNextPeerDeps(sourcePath);
-    }
     const targetPath = join(entryRoot, artifact.cachePath);
     await mkdir(dirname(targetPath), { recursive: true });
     await cp(sourcePath, targetPath, { dereference: true, recursive: true });
