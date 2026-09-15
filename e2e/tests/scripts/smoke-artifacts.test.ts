@@ -113,7 +113,7 @@ afterAll(async () => {
   if (workDir.length > 0) await rm(workDir, { force: true, recursive: true });
 });
 
-async function run(mode: "plan" | "stage", env: Record<string, string>): Promise<{ stdout: string }> {
+async function run(mode: "plan" | "stage" | "stage-dogfood", env: Record<string, string>): Promise<{ stdout: string }> {
   return execFileAsync(
     process.execPath,
     ["--experimental-strip-types", scriptPath, mode],
@@ -122,6 +122,49 @@ async function run(mode: "plan" | "stage", env: Record<string, string>): Promise
 }
 
 describe("smoke-artifacts", () => {
+  it("downloads dogfood bytes from the publisher receipt and binds the build attempt", async () => {
+    const version = "0.22.1-beta.1";
+    const receipt = {
+      version, buildId: "123-2",
+      releaseTarget: "mac_arm64", sourceCommit: "a".repeat(40),
+      files: [{ name: "test-mac-arm64.dmg", url: `${origin}/test-mac-arm64.dmg`, sha256: sha256(DMG_BYTES), size: DMG_BYTES.length }],
+    };
+    const env = {
+      EXPECTED_VERSION: version,
+      EXPECTED_BUILD_ID: "123-2",
+      EXPECTED_COMMIT: "a".repeat(40),
+      RELEASE_TARGET: "mac_arm64",
+      RELEASE_NAMESPACE: "release-beta",
+      BUILD_JSON_PATH: join(workDir, "dogfood-build.json"),
+      TOOLS_PACK_DIR: join(workDir, "dogfood"),
+      DOGFOOD_RECEIPT: JSON.stringify(receipt),
+    };
+    await run("stage-dogfood", env);
+    const build = JSON.parse(await readFile(env.BUILD_JSON_PATH, "utf8"));
+    expect(build.source).toBe("dogfood-artifact");
+    expect(build.buildId).toBe("123-2");
+    expect(await readFile(build.dmgPath)).toEqual(DMG_BYTES);
+    await expect(run("stage-dogfood", { ...env, EXPECTED_BUILD_ID: "123-3" })).rejects.toThrow(/expected version\/build attempt/);
+    await expect(run("stage-dogfood", { ...env, EXPECTED_VERSION: "0.22.1-beta.2" })).rejects.toThrow(/expected version\/build attempt/);
+    await expect(run("stage-dogfood", { ...env, EXPECTED_COMMIT: "b".repeat(40) })).rejects.toThrow(/platform\/source commit/);
+    await expect(run("stage-dogfood", { ...env, RELEASE_TARGET: "mac_x64" })).rejects.toThrow(/platform\/source commit/);
+    await expect(run("stage-dogfood", { ...env, DOGFOOD_RECEIPT: JSON.stringify({ ...receipt, files: [{ ...receipt.files[0], sha256: "0".repeat(64) }] }) })).rejects.toThrow(/checksum\/size mismatch/);
+    await expect(run("stage-dogfood", { ...env, DOGFOOD_RECEIPT: JSON.stringify({ ...receipt, files: [...receipt.files, ...receipt.files] }) })).rejects.toThrow(/expected one installable/);
+  });
+
+  it("checks version and channel when staging, not only when planning", async () => {
+    const env = {
+      BUILD_JSON_PATH: join(workDir, "wrong-channel.json"),
+      RELEASE_NAMESPACE: "release-beta",
+      RELEASE_TARGET: "mac_arm64",
+      TOOLS_PACK_DIR: join(workDir, "wrong-channel"),
+      VERSION_METADATA_URL: `${origin}/prerelease/versions/${VERSION}/metadata.json`,
+    };
+    await expect(run("stage", { ...env, EXPECTED_CHANNEL: "beta" })).rejects.toThrow(/channel is prerelease, not beta/);
+    await expect(run("stage", { ...env, EXPECTED_VERSION: "0.22.1-beta.1" })).rejects.toThrow(/not the dispatched/);
+    expect(existsSync(env.BUILD_JSON_PATH)).toBe(false);
+  });
+
   it("plans only the targets that actually published", async () => {
     const { stdout } = await run("plan", {
       EXPECTED_VERSION: VERSION,

@@ -2325,6 +2325,29 @@ process.stdin.on("end", () => {
     expect(beta).not.toContain("uses: ./.github/workflows/release-prerelease.yml");
   });
 
+  it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");
+    expect(publish).not.toMatch(/- (test_|smoke_)/);
+    for (const id of ["functional_e2e", "e2e_vitest", "daemon_unit_tests", "verify"]) {
+      expect(workflow).toContain(`  test_${id}:\n    needs: metadata`);
+    }
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
+      const job = workflow.slice(workflow.indexOf(`\n  smoke_${target}:`)).split(/\n  [a-z_0-9]+:/)[1];
+      expect(job).toContain("always() && !cancelled()");
+      expect(job).toContain(`inputs.${target}_smoke_mode == 'core'`);
+      expect(job).toContain("ref: ${{ needs.metadata.outputs.commit }}");
+      expect(job).toContain("smoke-artifacts.ts stage-dogfood");
+      expect(job).toContain("smoke-artifacts.ts stage");
+      expect(job).toContain("EXPECTED_CHANNEL: beta");
+      expect(job).toContain("EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
+      expect(job).not.toContain("RELEASE_STORAGE_SECRET");
+      expect(job).not.toContain("publish-platform");
+      expect(job).toContain("Install and inspect downloaded artifact");
+    }
+    expect(workflow).not.toMatch(/release-beta-(tests|smoke)\.yml/);
+  });
+
   it("[P2] preserves beta linux AppImage smoke reports for platform publication", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const linuxBuildStep = workflow.match(/- name: Build beta linux_x64\r?\n(?:.+\r?\n)+?(?=\r?\n      - name: Write linux_x64 release report)/m);
@@ -2497,7 +2520,7 @@ process.stdin.on("end", () => {
     const winJob = sectionBetween(workflow, "  build_win_x64:", "  build_linux_x64:");
 
     for (const [label, job] of [["mac_arm64", macJob], ["win_x64", winJob]] as const) {
-      expect(job, label).toContain("run: pnpm exec tools-release publish-dogfood");
+      expect(job, label).toContain("pnpm exec tools-release publish-dogfood");
       expect(job, label).toContain("DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}");
       expect(job, label).toContain("DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
       // Artifact paths come from the build's own --json output, so whichever
@@ -2517,7 +2540,7 @@ process.stdin.on("end", () => {
     const dogfoodSteps = workflow.split("\n      - name: ").filter((step) =>
       /publish-dogfood|for manual distribution/.test(step)
     );
-    expect(dogfoodSteps).toHaveLength(4);
+    expect(dogfoodSteps).toHaveLength(5);
     for (const step of dogfoodSteps) {
       expect(step, step.split("\n")[0]).toContain("if: ${{ !cancelled() && !inputs.publish }}");
     }
@@ -2738,8 +2761,8 @@ process.stdin.on("end", () => {
     expect(metadataJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
     expect(metadataJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
     expect(metadataJob).toContain("promote: ${{ inputs.promote }}");
-    expect(betaWorkflow).toContain("value: ${{ jobs.build_mac_arm64.outputs.smoke_result }}");
-    expect(betaWorkflow).toContain("value: ${{ jobs.build_win_x64.outputs.smoke_result }}");
+    expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}");
+    expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}");
     expect(betaWorkflow).toContain(
       "value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build_mac_arm64.outputs.mac_arm64_url }}",
     );
@@ -3944,7 +3967,8 @@ function expectWindowsUpdaterSmokeContract(workflow: string, channel: "beta" | "
     expect(workflow).toContain(`Build ${channel} win_x64 update fixture`);
     expect(workflow).toContain(`full Windows smoke requires a counted ${channel} version`);
   }
-  expect(workflow).not.toContain("OD_PACKAGED_E2E_WIN_SMOKE_PROFILE: core");
+  const updaterWorkflow = channel === "beta" ? sectionBetween(workflow, "  build_win_x64:", "  build_linux_x64:") : workflow;
+  expect(updaterWorkflow).not.toContain("OD_PACKAGED_E2E_WIN_SMOKE_PROFILE: core");
 }
 
 function expectCountedReleaseWorkflowCallContract(workflow: string, channel: "preview" | "prerelease"): void {

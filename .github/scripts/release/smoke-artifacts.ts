@@ -21,7 +21,7 @@
 // the artifact URL is the published one rather than a name reconstructed here.
 
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 type ReleaseTarget = "mac_arm64" | "mac_x64" | "win_x64" | "linux_x64";
@@ -73,7 +73,16 @@ function sanitizeNamespace(value: string): string {
 async function fetchJson(url: string): Promise<VersionMetadata> {
   const response = await fetch(url, { redirect: "follow" });
   if (!response.ok) throw new Error(`GET ${url} failed: HTTP ${response.status}`);
-  return (await response.json()) as VersionMetadata;
+  const metadata = (await response.json()) as VersionMetadata;
+  const expectedVersion = optional("EXPECTED_VERSION");
+  const expectedChannel = optional("EXPECTED_CHANNEL");
+  if (expectedVersion && metadata.releaseVersion !== expectedVersion) {
+    throw new Error(`version metadata is for ${String(metadata.releaseVersion)}, not the dispatched ${expectedVersion}`);
+  }
+  if (expectedChannel && metadata.channel !== expectedChannel) {
+    throw new Error(`version metadata channel is ${String(metadata.channel)}, not ${expectedChannel}`);
+  }
+  return metadata;
 }
 
 function publishedTargets(metadata: VersionMetadata): ReleaseTarget[] {
@@ -159,12 +168,6 @@ function writeBuildJson(path: string, body: Record<string, unknown>): void {
 async function plan(): Promise<void> {
   const metadataUrl = required("VERSION_METADATA_URL");
   const metadata = await fetchJson(metadataUrl);
-  const expectedVersion = optional("EXPECTED_VERSION");
-  if (expectedVersion.length > 0 && metadata.releaseVersion !== expectedVersion) {
-    throw new Error(
-      `version metadata is for ${String(metadata.releaseVersion)}, not the dispatched ${expectedVersion}`,
-    );
-  }
   const published = publishedTargets(metadata);
   console.log(`published targets: ${published.join(", ") || "<none>"}`);
   for (const target of ["mac_arm64", "mac_x64", "win_x64", "linux_x64"] as const) {
@@ -184,6 +187,7 @@ async function stage(): Promise<void> {
 
   const metadata = await fetchJson(metadataUrl);
   const asset = assetOf(metadata, target);
+  if (optional("EXPECTED_CHANNEL") && !asset.sha256Url) throw new Error("published artifact lacks required sha256 sidecar");
   const destination = artifactDestination(target, toolsPackDir, namespace);
   console.log(`staging ${asset.url}\n     -> ${destination}`);
   const { bytes, sha256 } = await download(asset.url, destination);
@@ -210,11 +214,76 @@ async function stage(): Promise<void> {
   setOutput("artifact_bytes", String(bytes));
 }
 
+// Dogfood uses the publisher's receipt, not synthetic channel metadata. Its
+// URL/hash/size are carried by this run's job outputs; no extra R2 object or
+// channel/latest pointer is introduced for validation.
+type DogfoodReceipt = {
+  version: string;
+  buildId: string;
+  releaseTarget?: string;
+  sourceCommit?: string;
+  files: { name: string; url: string; sha256: string; size: number }[];
+};
+
+function dogfoodReceipt(raw: string): DogfoodReceipt {
+  const receipt = JSON.parse(raw) as DogfoodReceipt;
+  if (receipt.version !== required("EXPECTED_VERSION") || receipt.buildId !== required("EXPECTED_BUILD_ID")) {
+    throw new Error("dogfood receipt does not match the expected version/build attempt");
+  }
+  if (!Array.isArray(receipt.files) || receipt.files.length === 0) throw new Error("empty dogfood receipt");
+  for (const file of receipt.files) {
+    if (typeof file.name !== "string" || typeof file.url !== "string" ||
+      !/^https?:\/\//.test(file.url) || !/^[a-f0-9]{64}$/.test(file.sha256) ||
+      !Number.isSafeInteger(file.size) || file.size <= 0) {
+      throw new Error("invalid dogfood artifact descriptor");
+    }
+  }
+  return receipt;
+}
+
+function dogfoodOutput(): void {
+  const receipt = dogfoodReceipt(readFileSync(required("DOGFOOD_OUTPUTS_PATH"), "utf8"));
+  setOutput("dogfood_receipt", JSON.stringify({ ...receipt, releaseTarget: required("RELEASE_TARGET"), sourceCommit: required("EXPECTED_COMMIT") }));
+}
+
+async function stageDogfood(): Promise<void> {
+  const receipt = dogfoodReceipt(required("DOGFOOD_RECEIPT"));
+  const target = required("RELEASE_TARGET");
+  if (receipt.releaseTarget !== target || receipt.sourceCommit !== required("EXPECTED_COMMIT")) {
+    throw new Error("dogfood receipt does not match the expected platform/source commit");
+  }
+  if (!["mac_arm64", "mac_x64", "win_x64"].includes(target)) throw new Error(`unsupported dogfood target: ${target}`);
+  const candidates = receipt.files.filter((file) => file.name.endsWith(target === "win_x64" ? "-setup.exe" : ".dmg"));
+  if (candidates.length !== 1) throw new Error(`expected one installable ${target} artifact, got ${candidates.length}`);
+  const file = candidates[0]!;
+  const toolsPackDir = required("TOOLS_PACK_DIR");
+  const namespace = required("RELEASE_NAMESPACE");
+  const destination = artifactDestination(target as ReleaseTarget, toolsPackDir, namespace);
+  const actual = await download(file.url, destination);
+  if (actual.sha256 !== file.sha256 || actual.bytes !== file.size) throw new Error("dogfood artifact checksum/size mismatch");
+  writeBuildJson(required("BUILD_JSON_PATH"), {
+    source: "dogfood-artifact",
+    releaseVersion: receipt.version,
+    buildId: receipt.buildId,
+    namespace,
+    channel: "beta",
+    publishedArtifact: file,
+    ...(target === "win_x64" ? { installerPath: destination } : { dmgPath: destination }),
+    cacheReport: { entries: [] },
+    timings: [],
+  });
+  setOutput("artifact_path", destination);
+}
+
 const mode = process.argv[2];
 if (mode === "plan") {
   await plan();
 } else if (mode === "stage") {
   await stage();
+} else if (mode === "dogfood-output") {
+  dogfoodOutput();
+} else if (mode === "stage-dogfood") {
+  await stageDogfood();
 } else {
-  throw new Error("usage: smoke-artifacts.ts <plan|stage>");
+  throw new Error("usage: smoke-artifacts.ts <plan|stage|dogfood-output|stage-dogfood>");
 }

@@ -302,10 +302,10 @@ on:
         value: ${{ jobs.publish.outputs.win_x64_url || jobs.build_win_x64.outputs.win_x64_url }}
       mac_arm64_smoke_result:
         description: "macOS arm64 packaged smoke outcome; advisory to publication."
-        value: ${{ jobs.build_mac_arm64.outputs.smoke_result }}
+        value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}
       win_x64_smoke_result:
         description: "Windows x64 packaged smoke outcome; advisory to publication."
-        value: ${{ jobs.build_win_x64.outputs.smoke_result }}
+        value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}
       mac_x64_url:
         description: "macOS x64 dmg download URL."
         value: ${{ jobs.publish.outputs.mac_x64_url }}
@@ -472,6 +472,7 @@ jobs:
     if: ${{ inputs.enable_mac_arm64 }}
     runs-on: macos-14
     outputs:
+      dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
       mac_arm64_url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
       smoke_result: ${{ steps.mac_arm64_smoke.outcome }}
     env:
@@ -635,6 +636,8 @@ jobs:
           retention-days: 14
 
       - name: Upload mac_arm64 dogfood build to release storage
+        id: dogfood
+        shell: bash
         # Companion to the artifact step above, for publish=false only. A GitHub
         # artifact needs a logged-in teammate and a zip round-trip; this puts the
         # same DMG in R2 under dogfood/<version>/<build>/ so the link can be
@@ -645,6 +648,11 @@ jobs:
         if: ${{ !cancelled() && !inputs.publish }}
         continue-on-error: true
         env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_TARGET: mac_arm64
+          EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+          DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-mac_arm64.json
           DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           DOGFOOD_BUILD_JSON_KEYS: dmgPath
           DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
@@ -656,7 +664,9 @@ jobs:
           RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-        run: pnpm exec tools-release publish-dogfood
+        run: |
+          pnpm exec tools-release publish-dogfood
+          node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
 
       - name: Delete failed mac_arm64 tools-pack cache
         if: ${{ steps.mac_arm64_tools_pack_build.outcome == 'failure' && steps.mac_arm64_tools_pack_cache_restore.outputs.cache-matched-key != '' }}
@@ -708,7 +718,7 @@ jobs:
 
       - name: Smoke beta mac_arm64 packaged runtime
         id: mac_arm64_smoke
-        if: ${{ inputs.mac_arm64_smoke_mode != 'skip' }}
+        if: ${{ inputs.mac_arm64_smoke_mode == 'full' }}
         continue-on-error: true
         working-directory: e2e
         env:
@@ -846,6 +856,8 @@ jobs:
     needs: metadata
     if: ${{ inputs.enable_mac_x64 }}
     runs-on: macos-15-intel
+    outputs:
+      dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
     env:
       RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
     steps:
@@ -982,6 +994,39 @@ jobs:
             exit "$build_status"
           fi
 
+      - name: Upload mac_x64 dogfood build to release storage
+        id: dogfood
+        shell: bash
+        # Companion to the artifact step above, for publish=false only. A GitHub
+        # artifact needs a logged-in teammate and a zip round-trip; this puts the
+        # same DMG in R2 under dogfood/<version>/<build>/ so the link can be
+        # handed over directly. It writes no channel metadata and no latest
+        # pointer (enforced by the guard in tools/release/src/storage/dogfood.ts),
+        # so it cannot change what an installed client sees as an available
+        # update. The publish=true pipeline is untouched.
+        if: ${{ !cancelled() && !inputs.publish }}
+        continue-on-error: true
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_TARGET: mac_x64
+          EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+          DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-mac_x64.json
+          DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          DOGFOOD_BUILD_JSON_KEYS: dmgPath
+          DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
+          DOGFOOD_LABEL: macOS x64 beta ${{ needs.metadata.outputs.beta_version }}
+          DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
+          RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
+          RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
+          RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
+          RELEASE_STORAGE_REGION: auto
+          RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
+        run: |
+          pnpm exec tools-release publish-dogfood
+          node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
+
       - name: Delete failed mac_x64 tools-pack cache
         if: ${{ steps.mac_x64_tools_pack_build.outcome == 'failure' && steps.mac_x64_tools_pack_cache_restore.outputs.cache-matched-key != '' }}
         continue-on-error: true
@@ -1001,7 +1046,7 @@ jobs:
           echo "deletedFailedCacheKey=$matched_key count=$count"
 
       - name: Smoke beta mac_x64 packaged runtime
-        if: ${{ inputs.mac_x64_smoke_mode != 'skip' }}
+        if: ${{ inputs.mac_x64_smoke_mode == 'full' }}
         working-directory: e2e
         env:
           OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
@@ -1115,6 +1160,7 @@ jobs:
     if: ${{ inputs.enable_win_x64 }}
     runs-on: windows-latest
     outputs:
+      dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
       smoke_result: ${{ steps.win_x64_smoke.outcome }}
       win_x64_url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
     env:
@@ -1250,6 +1296,8 @@ jobs:
           retention-days: 14
 
       - name: Upload win_x64 dogfood build to release storage
+        id: dogfood
+        shell: bash
         # publish=false only. Artifact paths come from the build's own --json
         # output rather than a hardcoded layout, so whichever of installerPath /
         # portableZipPath the selected win_x64_target actually produced is what
@@ -1258,6 +1306,11 @@ jobs:
         if: ${{ !cancelled() && !inputs.publish }}
         continue-on-error: true
         env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_TARGET: win_x64
+          EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+          DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-win_x64.json
           DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           DOGFOOD_BUILD_JSON_KEYS: installerPath,portableZipPath
           DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
@@ -1269,7 +1322,9 @@ jobs:
           RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-        run: pnpm exec tools-release publish-dogfood
+        run: |
+          pnpm exec tools-release publish-dogfood
+          node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
 
       - name: Delete failed Windows tools-pack cache
         if: ${{ steps.win_tools_pack_build.outcome == 'failure' && steps.win_tools_pack_cache_restore.outputs.cache-matched-key != '' }}
@@ -1301,7 +1356,7 @@ jobs:
 
       - name: Smoke beta win_x64 packaged runtime
         id: win_x64_smoke
-        if: ${{ inputs.win_x64_smoke_mode != 'skip' }}
+        if: ${{ inputs.win_x64_smoke_mode == 'full' }}
         continue-on-error: true
         working-directory: e2e
         env:
@@ -1709,3 +1764,335 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
+
+  # Validation is deliberately not in build/publish needs. For this branch
+  # it stays in the registered beta workflow; its tail is reported separately.
+  test_functional_e2e:
+    needs: metadata
+    name: "[test] beta P0 Functional E2E"
+    uses: ./.github/workflows/ui-extended-main.yml
+    with:
+      ref: ${{ needs.metadata.outputs.commit }}
+      suite: p0
+  test_e2e_vitest:
+    needs: metadata
+    name: "[test] beta E2E Vitest"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          fetch-depth: 1
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.2
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Setup Playwright
+        run: pnpm -C e2e exec playwright install --with-deps chromium
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+      # The daemon launches the installed Chromium directly instead of through
+      # Playwright. Restore user namespaces on this ephemeral runner so the real
+      # Chromium sandbox remains enabled rather than disabling that protection.
+      - name: Allow Chromium user namespaces on GitHub Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Prebuild workspace type declarations
+        run: |
+          pnpm --filter @open-design/daemon build
+          pnpm --filter @open-design/desktop build
+          pnpm --filter @open-design/web build:sidecar
+      - name: Run E2E Vitest
+        run: pnpm --filter @open-design/e2e test
+  test_daemon_unit_tests:
+    needs: metadata
+    name: "[test] beta Daemon tests (${{ matrix.shard }}/4)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.2
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run daemon test shard
+        env:
+          OD_WATCHER_TEST_DEBUG: "1"
+        run: pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4
+  test_verify:
+    needs: metadata
+    name: "[test] beta Verify build (typecheck + tests)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          # Shallow: nothing here reads git history. `pnpm guard` uses
+          # `git ls-files` (the index, not history), and a full clone of this
+          # repository is a 2.2 GiB pack.
+          fetch-depth: 1
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.2
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build daemon and desktop (typecheck dependencies)
+        run: |
+          pnpm --filter @open-design/daemon build
+          pnpm --filter @open-design/desktop build
+      - name: Typecheck workspaces
+        run: pnpm -r --workspace-concurrency=4 --if-present run typecheck
+      - name: Check repository layout policies
+        run: pnpm guard
+
+  smoke_mac_arm64:
+    name: "[validate] beta mac_arm64 downloaded artifact"
+    needs: [metadata, build_mac_arm64, publish]
+    if: >-
+      ${{
+        always() && !cancelled() &&
+        needs.build_mac_arm64.result == 'success' &&
+        inputs.mac_arm64_smoke_mode == 'core' &&
+        (!inputs.publish || needs.publish.outputs.version_metadata_url != '')
+      }}
+    runs-on: macos-14
+    timeout-minutes: 45
+    outputs:
+      smoke_result: ${{ steps.outcome.outputs.result }}
+    permissions:
+      contents: read
+    env:
+      RELEASE_NAMESPACE: release-beta
+      EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+      EXPECTED_CHANNEL: beta
+      EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+      EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE_TARGET: mac_arm64
+    steps:
+      - name: Checkout built source
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          fetch-depth: 1
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+      - name: Stage published artifact
+        if: ${{ inputs.publish }}
+        env:
+          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
+          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+          VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
+        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
+      - name: Stage dogfood artifact
+        if: ${{ !inputs.publish }}
+        env:
+          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
+          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+          DOGFOOD_RECEIPT: ${{ needs.build_mac_arm64.outputs.dogfood_receipt }}
+        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage-dogfood
+      - name: Install and inspect downloaded artifact
+        id: smoke
+        working-directory: e2e
+        env:
+          OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
+          OD_PACKAGED_E2E_MAC: "1"
+          OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: core
+          OD_PACKAGED_E2E_NAMESPACE: release-beta
+          OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/download-smoke/mac_arm64
+          OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+        run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
+      - name: Preserve downloaded artifact validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-design-beta-mac_arm64-download-smoke
+          path: |
+            ${{ runner.temp }}/download-smoke/mac_arm64
+            ${{ runner.temp }}/release-build/mac_arm64
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Record validation outcome
+        id: outcome
+        if: ${{ always() }}
+        shell: bash
+        run: echo "result=${{ job.status }}" >> "$GITHUB_OUTPUT"
+
+  smoke_mac_x64:
+    name: "[validate] beta mac_x64 downloaded artifact"
+    needs: [metadata, build_mac_x64, publish]
+    if: >-
+      ${{
+        always() && !cancelled() &&
+        needs.build_mac_x64.result == 'success' &&
+        inputs.mac_x64_smoke_mode == 'core' &&
+        (!inputs.publish || needs.publish.outputs.version_metadata_url != '')
+      }}
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    outputs:
+      smoke_result: ${{ steps.outcome.outputs.result }}
+    permissions:
+      contents: read
+    env:
+      RELEASE_NAMESPACE: release-beta-x64
+      EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+      EXPECTED_CHANNEL: beta
+      EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+      EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE_TARGET: mac_x64
+    steps:
+      - name: Checkout built source
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          fetch-depth: 1
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+      - name: Stage published artifact
+        if: ${{ inputs.publish }}
+        env:
+          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
+          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+          VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
+        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
+      - name: Stage dogfood artifact
+        if: ${{ !inputs.publish }}
+        env:
+          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
+          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+          DOGFOOD_RECEIPT: ${{ needs.build_mac_x64.outputs.dogfood_receipt }}
+        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage-dogfood
+      - name: Install and inspect downloaded artifact
+        id: smoke
+        working-directory: e2e
+        env:
+          OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
+          OD_PACKAGED_E2E_MAC: "1"
+          OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: core
+          OD_PACKAGED_E2E_NAMESPACE: release-beta-x64
+          OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/download-smoke/mac_x64
+          OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+        run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
+      - name: Preserve downloaded artifact validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-design-beta-mac_x64-download-smoke
+          path: |
+            ${{ runner.temp }}/download-smoke/mac_x64
+            ${{ runner.temp }}/release-build/mac_x64
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Record validation outcome
+        id: outcome
+        if: ${{ always() }}
+        shell: bash
+        run: echo "result=${{ job.status }}" >> "$GITHUB_OUTPUT"
+
+  smoke_win_x64:
+    name: "[validate] beta win_x64 downloaded artifact"
+    needs: [metadata, build_win_x64, publish]
+    if: >-
+      ${{
+        always() && !cancelled() &&
+        needs.build_win_x64.result == 'success' &&
+        inputs.win_x64_smoke_mode == 'core' &&
+        (!inputs.publish || needs.publish.outputs.version_metadata_url != '')
+      }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      smoke_result: ${{ steps.outcome.outputs.result }}
+    permissions:
+      contents: read
+    env:
+      RELEASE_NAMESPACE: release-beta-win
+      EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+      EXPECTED_CHANNEL: beta
+      EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+      EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE_TARGET: win_x64
+    steps:
+      - name: Checkout built source
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          fetch-depth: 1
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+      - name: Stage published artifact
+        if: ${{ inputs.publish }}
+        env:
+          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/win_x64/build.json
+          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+          VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
+        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
+      - name: Stage dogfood artifact
+        if: ${{ !inputs.publish }}
+        env:
+          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/win_x64/build.json
+          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+          DOGFOOD_RECEIPT: ${{ needs.build_win_x64.outputs.dogfood_receipt }}
+        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage-dogfood
+      - name: Install and inspect downloaded artifact
+        id: smoke
+        working-directory: e2e
+        env:
+          OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/win_x64/build.json
+          OD_PACKAGED_E2E_WIN: "1"
+          OD_PACKAGED_E2E_WIN_SMOKE_PROFILE: core
+          OD_PACKAGED_E2E_NAMESPACE: release-beta-win
+          OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/download-smoke/win_x64
+          OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
+        run: pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts
+      - name: Preserve downloaded artifact validation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-design-beta-win_x64-download-smoke
+          path: |
+            ${{ runner.temp }}/download-smoke/win_x64
+            ${{ runner.temp }}/release-build/win_x64
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Record validation outcome
+        id: outcome
+        if: ${{ always() }}
+        shell: bash
+        run: echo "result=${{ job.status }}" >> "$GITHUB_OUTPUT"
