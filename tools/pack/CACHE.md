@@ -60,6 +60,16 @@ The build-graph cache is almost entirely Windows-specific.
 
 `mac` and `linux` have `<platform>.workspace-build` only.
 
+The source executor is partitioned into `packages`, `daemon`, `web`, and `shell`
+units under `src/workspace/units.ts`. `tools-pack workspace build <unit>` executes
+only that unit; dependencies must already be built or restored by its caller.
+`workspace result <unit>` verifies required outputs and emits platform/arch,
+Node version, output mode, and output paths, without computing a workflow identity
+or making a skip decision. The ordinary local aggregate runs the same units in
+order and retains its existing whole-workspace cache (schema 12). Changing unit
+commands therefore changes the aggregate cache key; this is not yet per-unit
+workflow cache integration. Plan owns that external decision.
+
 ## Determinant rules
 
 **R1 — A node key must cover every input that determines the node's output.**

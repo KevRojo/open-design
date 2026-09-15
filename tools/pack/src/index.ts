@@ -114,6 +114,14 @@ function addWinLifecycleOptions(command: CacCommand) {
 
 const cli = cac("tools-pack");
 
+cli.command("workspace <action> <unit>", "Source build units: build|result packages|daemon|web|shell")
+  .option("--web-output-mode <mode>", "web output: standalone|server", { default: "standalone" })
+  .option("--json", "print JSON result metadata")
+  .action(async (action: string, unit: string, options: { webOutputMode?: string }) => {
+    const { workspaceCommand } = await import("./workspace/command.js");
+    printJson(await workspaceCommand(action, unit, options));
+  });
+
 cli.command('verify-runtime', 'Verify installed prerelease Vela/OpenCode identity against a release manifest')
   .option('--resources <path>', 'installed package Resources directory')
   .option('--manifest <path>', 'release platform manifest JSON')

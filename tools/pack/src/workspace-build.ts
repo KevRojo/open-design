@@ -8,46 +8,13 @@ import { hashPackageSourcePath } from "./package-source-hash.js";
 import { readRuntimeAppVersion, versionFamilyForAppVersion } from "./versioning/index.js";
 import { processWebSourcemaps } from "./web-sourcemaps.js";
 
-export const WORKSPACE_BUILD_PACKAGES = [
-  { directory: "packages/release", name: "@open-design/release" },
-  { directory: "packages/components", name: "@open-design/components" },
-  { directory: "packages/contracts", name: "@open-design/contracts" },
-  { directory: "packages/registry-protocol", name: "@open-design/registry-protocol" },
-  { directory: "packages/sidecar-proto", name: "@open-design/sidecar-proto" },
-  { directory: "packages/launcher-proto", name: "@open-design/launcher-proto" },
-  { directory: "packages/platform", name: "@open-design/platform" },
-  { directory: "packages/sidecar", name: "@open-design/sidecar" },
-  { directory: "packages/download", name: "@open-design/download" },
-  { directory: "packages/host", name: "@open-design/host" },
-  { directory: "packages/agui-adapter", name: "@open-design/agui-adapter" },
-  { directory: "packages/plugin-runtime", name: "@open-design/plugin-runtime" },
-  { directory: "packages/diagnostics", name: "@open-design/diagnostics" },
-  { directory: "packages/dsh-runtime", name: "@open-design/dsh-runtime" },
-  { directory: "apps/daemon", name: "@open-design/daemon" },
-  { directory: "apps/web", name: "@open-design/web" },
-  { directory: "apps/desktop", name: "@open-design/desktop" },
-  { directory: "apps/packaged", name: "@open-design/packaged" },
-] as const;
+import {
+  WORKSPACE_BUILD_COMMANDS, WORKSPACE_BUILD_COMMANDS_BY_UNIT, WORKSPACE_BUILD_PACKAGES,
+  WORKSPACE_BUILD_UNITS, parseWorkspaceBuildUnit, workspaceUnitPackages, type WorkspaceBuildUnit,
+} from "./workspace/units.js";
+export { WORKSPACE_BUILD_COMMANDS, WORKSPACE_BUILD_PACKAGES } from "./workspace/units.js";
 
-export const WORKSPACE_BUILD_COMMANDS = [
-  {
-    args: [
-      "--filter", "@open-design/dsh-runtime...",
-      "--workspace-concurrency=1", "--if-present", "run", "build",
-    ],
-  },
-  {
-    args: [
-      "--filter", "@open-design/packaged^...",
-      "--workspace-concurrency=1", "--if-present", "run", "build",
-    ],
-    env: ["OD_WEB_OUTPUT_MODE"],
-  },
-  { args: ["--filter", "@open-design/web", "run", "build:sidecar"] },
-  { args: ["--filter", "@open-design/packaged", "run", "build"] },
-] as const;
-
-export const WORKSPACE_BUILD_CACHE_SCHEMA_VERSION = 11;
+export const WORKSPACE_BUILD_CACHE_SCHEMA_VERSION = 12;
 
 /**
  * V8 old-space ceiling (MB) for the packaged closure build, the stage that runs
@@ -93,6 +60,8 @@ export type WorkspaceBuildRunner = (
   args: string[],
   extraEnv?: NodeJS.ProcessEnv,
 ) => Promise<void>;
+
+export type WorkspaceBuildConfig = Pick<ToolPackConfig, "workspaceRoot" | "webOutputMode">;
 
 export type WorkspaceBuildMaterializer = (config: ToolPackConfig) => Promise<void>;
 
@@ -155,36 +124,47 @@ export async function createWorkspaceBuildCacheKey(config: ToolPackConfig): Prom
 }
 
 /**
- * Build the packaged workspace closure while leaving dependency ordering to
- * pnpm's workspace graph. The explicit stages here are packaging stages, not a
- * second dependency graph: DSH is an independently bundled resource, Web has
- * one non-standard sidecar output, and packaged is the final assembly root.
+ * Local full build uses the same independently executable units as workflows.
+ * pnpm orders the public-package group; callers of one unit supply its already
+ * built dependencies. Executors never infer workflow skip/cache decisions.
  */
 export async function runWorkspaceBuild(
-  config: ToolPackConfig,
+  config: WorkspaceBuildConfig,
   runPnpm: WorkspaceBuildRunner,
 ): Promise<void> {
+  for (const unit of WORKSPACE_BUILD_UNITS) await runWorkspaceBuildUnit(config, unit, runPnpm);
+}
+
+export async function runWorkspaceBuildUnit(
+  config: WorkspaceBuildConfig,
+  unit: WorkspaceBuildUnit,
+  runPnpm: WorkspaceBuildRunner,
+): Promise<void> {
+  parseWorkspaceBuildUnit(unit);
+  const execute = async () => {
+    for (const command of WORKSPACE_BUILD_COMMANDS_BY_UNIT[unit]) {
+      await runPnpm([...command.args], command.env?.includes("OD_WEB_OUTPUT_MODE")
+        ? {
+            NODE_OPTIONS: workspaceBuildNodeOptions(process.env.NODE_OPTIONS),
+            OD_WEB_OUTPUT_MODE: config.webOutputMode,
+          }
+        : undefined);
+    }
+  };
+  if (unit !== "web") return await execute();
+  // Only Web owns Next's generated source declaration. Other units may run
+  // concurrently and must never restore/delete a file in Web's output boundary.
   const webNextEnvPath = join(config.workspaceRoot, "apps", "web", "next-env.d.ts");
   const previousWebNextEnv = await readFile(webNextEnvPath, "utf8").catch(() => null);
-
   try {
-    await runPnpm([...WORKSPACE_BUILD_COMMANDS[0].args]);
-    await runPnpm(
-      [...WORKSPACE_BUILD_COMMANDS[1].args],
-      {
-        NODE_OPTIONS: workspaceBuildNodeOptions(process.env.NODE_OPTIONS),
-        OD_WEB_OUTPUT_MODE: config.webOutputMode,
-      },
-    );
-    await runPnpm([...WORKSPACE_BUILD_COMMANDS[2].args]);
-    await runPnpm([...WORKSPACE_BUILD_COMMANDS[3].args]);
+    await execute();
   } finally {
     if (previousWebNextEnv == null) await rm(webNextEnvPath, { force: true });
     else await writeFile(webNextEnvPath, previousWebNextEnv, "utf8");
   }
 }
 
-function workspaceBuildOutputFiles(config: ToolPackConfig): string[] {
+function workspaceBuildOutputFiles(config: WorkspaceBuildConfig): string[] {
   const webStandaloneServerCandidates = [
     "apps/web/.next/standalone/apps/web/server.js",
     "apps/web/.next/standalone/server.js",
@@ -232,7 +212,7 @@ function workspaceBuildOutputFiles(config: ToolPackConfig): string[] {
   ];
 }
 
-function workspaceBuildArtifacts(config: ToolPackConfig): WorkspaceBuildArtifact[] {
+function workspaceBuildArtifacts(config: WorkspaceBuildConfig): WorkspaceBuildArtifact[] {
   const artifacts = [
     "packages/components/dist",
     "packages/release/dist",
@@ -372,8 +352,9 @@ async function copyWorkspaceBuildArtifactsToCache(config: ToolPackConfig, entryR
   }
 }
 
-async function missingWorkspaceBuildOutput(config: ToolPackConfig): Promise<string | null> {
+async function missingWorkspaceBuildOutput(config: WorkspaceBuildConfig, unit?: WorkspaceBuildUnit): Promise<string | null> {
   for (const output of workspaceBuildOutputFiles(config)) {
+    if (unit && !workspaceUnitPackages(unit).some(({ directory }) => output.startsWith(`${directory}/`))) continue;
     const candidates = output.split("|");
     const exists = await Promise.any(
       candidates.map(async (candidate) => {
@@ -384,6 +365,29 @@ async function missingWorkspaceBuildOutput(config: ToolPackConfig): Promise<stri
     if (!exists) return output;
   }
   return null;
+}
+
+export async function workspaceBuildUnitResult(config: WorkspaceBuildConfig, unit: WorkspaceBuildUnit) {
+  parseWorkspaceBuildUnit(unit);
+  const missing = await missingWorkspaceBuildOutput(config, unit);
+  if (missing) throw new Error(`workspace ${unit} completed but output is missing: ${missing}`);
+  const outputPaths = workspaceBuildArtifacts(config)
+    .filter(({ workspacePath }) => workspaceUnitPackages(unit).some(({ directory }) => workspacePath.startsWith(`${directory}/`)))
+    .map(({ workspacePath }) => workspacePath);
+  for (const output of outputPaths) {
+    if (!(await pathExists(join(config.workspaceRoot, output)))) {
+      throw new Error(`workspace ${unit} completed but output is missing: ${output}`);
+    }
+  }
+  return {
+    schemaVersion: 1,
+    unit,
+    platform: process.platform,
+    arch: process.arch,
+    nodeVersion: process.version,
+    webOutputMode: config.webOutputMode,
+    outputPaths,
+  };
 }
 
 export async function ensureWorkspaceBuildArtifacts(

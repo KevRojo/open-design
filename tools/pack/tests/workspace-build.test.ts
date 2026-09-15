@@ -12,11 +12,14 @@ import {
   createWorkspaceBuildCacheKeyFromInputs,
   ensureWorkspaceBuildArtifacts,
   runWorkspaceBuild,
+  runWorkspaceBuildUnit,
+  workspaceBuildUnitResult,
   WORKSPACE_BUILD_COMMANDS,
   WORKSPACE_BUILD_CACHE_SCHEMA_VERSION,
   WORKSPACE_BUILD_PACKAGES,
   type WorkspaceBuildRunner,
 } from "@/workspace-build.js";
+import { WORKSPACE_BUILD_UNITS, workspaceUnitPackages } from "@/workspace/units.js";
 
 const PACKAGE_DIRS = [
   "packages/release",
@@ -404,6 +407,36 @@ describe("ensureWorkspaceBuildArtifacts", () => {
 });
 
 describe("runWorkspaceBuild", () => {
+  it("partitions the existing closure without rebuilding dependencies inside an app unit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "open-design-workspace-unit-"));
+    const config = createConfig(root, join(root, ".cache"));
+    try {
+      const owned = WORKSPACE_BUILD_UNITS.flatMap((unit) => workspaceUnitPackages(unit).map(({ name }) => name));
+      expect(owned.sort()).toEqual(WORKSPACE_BUILD_PACKAGES.map(({ name }) => name).sort());
+      expect(new Set(owned).size).toBe(owned.length);
+      await mkdir(join(root, "apps/web"), { recursive: true });
+      await runWorkspaceBuildUnit(config, "daemon", async () => {
+        await writeFile(join(root, "apps/web/next-env.d.ts"), "concurrent web build\n");
+      });
+      expect(await readFile(join(root, "apps/web/next-env.d.ts"), "utf8")).toBe("concurrent web build\n");
+      for (const unit of ["daemon", "web", "shell"] as const) {
+        const calls: string[][] = [];
+        await runWorkspaceBuildUnit(config, unit, async (args) => { calls.push(args); });
+        expect(calls.flat()).not.toContain("@open-design/packaged^...");
+        expect(calls.flat().some((arg) => arg.endsWith("..."))).toBe(false);
+        expect(calls.map((args) => args[1])).toEqual(unit === "web"
+          ? ["@open-design/web", "@open-design/web"] : unit === "shell"
+            ? ["@open-design/desktop", "@open-design/packaged"] : ["@open-design/daemon"]);
+      }
+      await expect(workspaceBuildUnitResult(config, "daemon")).rejects.toThrow("output is missing");
+      await writeOutputs(root, "built");
+      const result = await workspaceBuildUnitResult(config, "daemon");
+      expect(result.outputPaths).toEqual(["apps/daemon/dist"]);
+      expect(result).toMatchObject({ platform: process.platform, arch: process.arch, unit: "daemon" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("keeps the cache/artifact contract aligned with the packaged dependency closure", async () => {
     const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
     const packages = new Map<string, { dependencies: Record<string, string> }>();
@@ -445,12 +478,13 @@ describe("runWorkspaceBuild", () => {
       await writeFile(join(root, "apps/web/next-env.d.ts"), "original\n", "utf8");
       await runWorkspaceBuild(config, async (args, env) => {
         calls.push({ args, env });
-        await writeFile(join(root, "apps/web/next-env.d.ts"), "generated\n", "utf8");
+        if (args[1] === "@open-design/web") await writeFile(join(root, "apps/web/next-env.d.ts"), "generated\n", "utf8");
       });
 
       expect(calls.map((call) => call.args)).toEqual(WORKSPACE_BUILD_COMMANDS.map((command) => [...command.args]));
-      expect(calls[1]?.env).toMatchObject({ OD_WEB_OUTPUT_MODE: "standalone" });
-      expect(calls[1]?.env?.NODE_OPTIONS).toContain("--max-old-space-size=4096");
+      const webBuild = calls.find((call) => call.args[1] === "@open-design/web" && call.args.at(-1) === "build");
+      expect(webBuild?.env).toMatchObject({ OD_WEB_OUTPUT_MODE: "standalone" });
+      expect(webBuild?.env?.NODE_OPTIONS).toContain("--max-old-space-size=4096");
       expect(await readFile(join(root, "apps/web/next-env.d.ts"), "utf8")).toBe("original\n");
     } finally {
       await rm(root, { force: true, recursive: true });
@@ -471,7 +505,8 @@ describe("runWorkspaceBuild", () => {
       });
 
       // Ours first, so a caller's own --max-old-space-size still wins (Node keeps the last one).
-      expect(calls[1]?.env?.NODE_OPTIONS).toBe("--max-old-space-size=4096 --enable-source-maps");
+      const webBuild = calls.find((call) => call.args[1] === "@open-design/web" && call.args.at(-1) === "build");
+      expect(webBuild?.env?.NODE_OPTIONS).toBe("--max-old-space-size=4096 --enable-source-maps");
     } finally {
       if (previousNodeOptions == null) delete process.env.NODE_OPTIONS;
       else process.env.NODE_OPTIONS = previousNodeOptions;
@@ -485,7 +520,7 @@ describe("runWorkspaceBuild", () => {
 
     try {
       await mkdir(join(root, "apps/web"), { recursive: true });
-      await expect(runWorkspaceBuild(config, async () => {
+      await expect(runWorkspaceBuildUnit(config, "web", async () => {
         await writeFile(join(root, "apps/web/next-env.d.ts"), "generated\n", "utf8");
         throw new Error("build failed");
       })).rejects.toThrow("build failed");
@@ -558,10 +593,10 @@ describe("createWorkspaceBuildCacheKey", () => {
         createWorkspaceBuildCacheKeyFromInputs({ ...inputs, buildCommands }),
         `build command ${JSON.stringify(command.args)}`,
       ).not.toBe(baseline);
-      for (const envName of "env" in command ? command.env : []) {
+      for (const envName of command.env ?? []) {
         const envCommands = WORKSPACE_BUILD_COMMANDS.map((entry, entryIndex) =>
           entryIndex === index
-            ? { ...entry, env: [...("env" in entry ? entry.env : []), `${envName}_WITNESS`] }
+            ? { ...entry, env: [...(entry.env ?? []), `${envName}_WITNESS`] }
             : entry,
         );
         expect(

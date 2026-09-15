@@ -8,6 +8,7 @@ import macFs from "@/mac/fs.ts?raw";
 import macLifecycle from "@/mac/lifecycle.ts?raw";
 import macWorkspace from "@/mac/workspace.ts?raw";
 import workspaceBuild from "@/workspace-build.ts?raw";
+import { WORKSPACE_BUILD_COMMANDS_BY_UNIT, WORKSPACE_BUILD_UNITS } from "@/workspace/units.js";
 import winApp from "@/win/app.ts?raw";
 import winLifecycle from "@/win/lifecycle.ts?raw";
 
@@ -334,12 +335,11 @@ describe("release workflows", () => {
       expect(buildSource).not.toContain('["--filter", "@open-design/platform", "build"]');
       expect(buildSource).not.toContain('["--filter", "@open-design/sidecar", "build"]');
     }
-    const dependencyClosureBuild = '"--filter", "@open-design/packaged^..."';
-    const webSidecarBuild = '"--filter", "@open-design/web", "run", "build:sidecar"';
-    const packagedBuild = '"--filter", "@open-design/packaged", "run", "build"';
-    expect(workspaceBuild).toContain('"--filter", "@open-design/dsh-runtime..."');
-    expect(workspaceBuild.indexOf(dependencyClosureBuild)).toBeLessThan(workspaceBuild.indexOf(webSidecarBuild));
-    expect(workspaceBuild.indexOf(webSidecarBuild)).toBeLessThan(workspaceBuild.indexOf(packagedBuild));
+    expect(workspaceBuild).toContain("for (const unit of WORKSPACE_BUILD_UNITS)");
+    expect(WORKSPACE_BUILD_UNITS).toEqual(["packages", "daemon", "web", "shell"]);
+    expect(WORKSPACE_BUILD_COMMANDS_BY_UNIT.packages.flatMap(({ args }) => args)).toContain("@open-design/dsh-runtime");
+    expect(WORKSPACE_BUILD_COMMANDS_BY_UNIT.web.at(-1)?.args).toEqual(["--filter", "@open-design/web", "run", "build:sidecar"]);
+    expect(WORKSPACE_BUILD_COMMANDS_BY_UNIT.shell.at(-1)?.args).toEqual(["--filter", "@open-design/packaged", "run", "build"]);
     expect(prerelease).toContain("name: release-prerelease");
     expect(prerelease).toContain("pnpm exec tools-release prepare prerelease");
     expect(prerelease).toContain("OPEN_DESIGN_PRERELEASE_METADATA_URL");
