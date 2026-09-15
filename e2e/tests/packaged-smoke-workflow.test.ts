@@ -2306,6 +2306,25 @@ process.stdin.on("end", () => {
     expect(postMergeWorkflow).not.toContain("PREVIEW_BAKE_TOKEN");
   });
 
+  it("[P2] aligns beta desktop defaults with prerelease without merging channel identity", async () => {
+    const [beta, prerelease] = await Promise.all([
+      readFile(releaseBetaWorkflowPath, "utf8"),
+      readFile(releasePrereleaseWorkflowPath, "utf8"),
+    ]);
+    const defaults = (workflow: string, input: string) =>
+      [...workflow.matchAll(new RegExp(`^      ${input}:\\n(?:(?:        .*|)\\n)*?        default: ([^\\n]+)`, "gm"))]
+        .map((match) => match[1]?.replaceAll('"', ""));
+    expect(defaults(beta, "enable_mac_x64")).toEqual(defaults(prerelease, "enable_mac_x64"));
+    for (const platform of ["mac_arm64", "mac_x64"]) {
+      expect(defaults(beta, `${platform}_sign_mode`)).toEqual(defaults(prerelease, "mac_sign_mode"));
+      expect(defaults(beta, `${platform}_target`)).toEqual(["all", "all"]);
+      expect(defaults(beta, `${platform}_smoke_mode`)).toEqual(["core", "core"]);
+    }
+    expect(defaults(prerelease, "mac_sign_mode")).toEqual(["sign-only", "sign-only"]);
+    expect(beta).toContain("run: pnpm exec tools-release prepare beta");
+    expect(beta).not.toContain("uses: ./.github/workflows/release-prerelease.yml");
+  });
+
   it("[P2] preserves beta linux AppImage smoke reports for platform publication", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const linuxBuildStep = workflow.match(/- name: Build beta linux_x64\r?\n(?:.+\r?\n)+?(?=\r?\n      - name: Write linux_x64 release report)/m);

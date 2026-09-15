@@ -17,7 +17,7 @@ on:
         description: "Build and publish macOS x64 beta artifacts."
         required: true
         type: boolean
-        default: false
+        default: true
       enable_linux_x64:
         description: "Build and publish Linux x64 AppImage beta artifacts."
         required: true
@@ -68,7 +68,7 @@ on:
           - "no"
           - "sign-only"
           - "notarize"
-        default: "notarize"
+        default: "sign-only"
       mac_arm64_smoke_mode:
         description: "macOS arm64 smoke coverage."
         required: true
@@ -85,7 +85,7 @@ on:
         options:
           - dmg
           - all
-        default: dmg
+        default: all
       mac_arm64_update_metadata_url:
         description: "Optional external updater metadata URL for full macOS arm64 payload smoke."
         required: false
@@ -104,7 +104,7 @@ on:
           - "no"
           - "sign-only"
           - "notarize"
-        default: "no"
+        default: "sign-only"
       mac_x64_smoke_mode:
         description: "macOS x64 smoke coverage."
         required: true
@@ -113,7 +113,7 @@ on:
           - skip
           - core
           - full
-        default: skip
+        default: core
       mac_x64_target:
         description: "macOS x64 build target."
         required: true
@@ -181,7 +181,7 @@ on:
       enable_mac_x64:
         required: false
         type: boolean
-        default: false
+        default: true
       enable_linux_x64:
         required: false
         type: boolean
@@ -222,7 +222,7 @@ on:
       mac_arm64_sign_mode:
         required: false
         type: string
-        default: notarize
+        default: "sign-only"
       mac_arm64_smoke_mode:
         required: false
         type: string
@@ -230,7 +230,7 @@ on:
       mac_arm64_target:
         required: false
         type: string
-        default: dmg
+        default: all
       mac_arm64_update_metadata_url:
         required: false
         type: string
@@ -242,11 +242,11 @@ on:
       mac_x64_sign_mode:
         required: false
         type: string
-        default: "no"
+        default: "sign-only"
       mac_x64_smoke_mode:
         required: false
         type: string
-        default: skip
+        default: core
       mac_x64_target:
         required: false
         type: string
