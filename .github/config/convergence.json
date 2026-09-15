@@ -1,5 +1,5 @@
 {
-  "schema": { "version": 2 },
+  "schema": { "version": 3 },
   "suites": {
     "platform-source": [
       "packages/platform/src/", "packages/platform/package.json",
@@ -117,10 +117,12 @@
       "policy": "ci-isolated-v1",
       "workloads": {
         "platform_build": {
+          "success": { "[build] packages/platform": ["[build] Platform public package"] },
           "inputs": ["suite://platform-source"], "runnerClass": "workspace_unit",
           "products": "manifest", "reusable": true
         },
         "platform_tests": {
+          "success": { "[test] packages/platform": ["[test] Platform behavior"] },
           "inputs": ["suite://platform-source", "packages/platform/tests/", "packages/platform/tsconfig.tests.json"],
           "runnerClass": "workspace_unit",
           "products": "none", "reusable": true
@@ -144,30 +146,46 @@
           "reusable": false
         },
         "daemon_unit_tests": {
+          "success": {
+            "Daemon tests (1/4)": ["Run daemon test shard"],
+            "Daemon tests (2/4)": ["Run daemon test shard"],
+            "Daemon tests (3/4)": ["Run daemon test shard"],
+            "Daemon tests (4/4)": ["Run daemon test shard"]
+          },
           "inputs": ["*"],
           "runnerClass": "workspace_unit",
           "products": "none",
           "reusable": true
         },
         "windows_tools_pack_payload_tests": {
+          "success": { "Windows tools-pack payload tests": ["Windows launcher payload archive tests"] },
           "inputs": ["suite://windows-launcher-payload"],
           "runnerClass": "windows_tools",
           "products": "none",
           "reusable": true
         },
         "web_workspace_tests": {
+          "success": {
+            "Web workspace tests (1/2)": ["Prebuild web sidecar declarations", "Web workspace tests"],
+            "Web workspace tests (2/2)": ["Prebuild web sidecar declarations", "Web workspace tests"]
+          },
           "inputs": ["suite://web"],
           "runnerClass": "js_hot",
           "products": "none",
           "reusable": true
         },
         "e2e_vitest": {
+          "success": { "E2E Vitest": ["Prebuild workspace type declarations", "E2E Vitest"] },
           "inputs": ["*"],
           "runnerClass": "js_hot",
           "products": "none",
           "reusable": true
         },
         "playwright_critical": {
+          "success": {
+            "Playwright critical (a)": ["Prebuild workspace type declarations", "Playwright critical"],
+            "Playwright critical (b)": ["Prebuild workspace type declarations", "Playwright critical"]
+          },
           "inputs": ["suite://ui-runtime"],
           "runnerClass": "ui_hot",
           "products": "none",

@@ -1,7 +1,8 @@
 name: convergence.atom
 
 # Atomic capability: publish immutable reusable workload results only after a
-# successful ci run. All validation and R2 writes execute trusted default-branch
+# successful workload execution, independently of the overall gate. All
+# validation and R2 writes execute trusted default-branch
 # Python; pull-request code is treated solely as data.
 on:
   workflow_call:
@@ -44,6 +45,8 @@ jobs:
           path: ${{ runner.temp }}/handoff-convergence
       - name: '[validate] Branch, run and isolated storage identity'
         id: trust
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 .github/scripts/convergence.py admit --isolated
           --handoff-root "$RUNNER_TEMP/handoff-convergence"
@@ -72,7 +75,7 @@ jobs:
       ${{
         github.repository == 'nexu-io/open-design'
         && github.event.workflow_run.name == 'ci'
-        && github.event.workflow_run.conclusion == 'success'
+        && contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
         && github.event.workflow_run.head_repository.full_name == github.repository
         && (
           github.event.workflow_run.event == 'pull_request'
@@ -113,6 +116,8 @@ jobs:
       - name: Validate producing run and control plane
         if: ${{ steps.artifact.outputs.found == 'true' }}
         id: trust
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 .github/scripts/convergence.py admit
           --handoff-root "$RUNNER_TEMP/handoff-convergence"

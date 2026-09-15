@@ -1,5 +1,5 @@
 {
-  "schema": { "version": 2 },
+  "schema": { "version": 3 },
   "suites": {
     "convergence-control": [
       ".github/config/convergence-exact.json",
@@ -30,6 +30,9 @@
       "policy": "terminal-scene-v1",
       "workloads": {
         "terminal_scene_darwin_arm64": {
+          "success": {
+            "Terminal scene (darwin-arm64)": ["Build release-neutral scene inputs", "Build Darwin Terminal scene", "Verify scene and prepare convergence product"]
+          },
           "inputs": ["suite://terminal-scene"],
           "runnerClass": "terminal_darwin_arm64",
           "products": "manifest",

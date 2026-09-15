@@ -18,14 +18,14 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 2 },
+    schema: { version: 3 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
         policy: "test-v1",
         workloads: {
-          a: { inputs: ["suite://web"], runnerClass: "worker", products: "none", reusable: true },
-          b: { inputs: ["suite://web", "b.txt"], runnerClass: "worker", products: "none", reusable: true },
+          a: { inputs: ["suite://web"], runnerClass: "worker", products: "none", reusable: true, success: { "Job a": ["Execute"] } },
+          b: { inputs: ["suite://web", "b.txt"], runnerClass: "worker", products: "none", reusable: true, success: { "Job b": ["Execute"] } },
         },
       },
     },
@@ -95,6 +95,112 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("reads all jobs from the exact attempt and rejects malformed API responses", () => {
+    const result = spawnSync("python3", ["-c", `
+import sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+from lib import github as g
+with patch.object(g, "api_json", side_effect=[{"jobs": [{"id": i} for i in range(100)]}, {"jobs": [{"id": 100}]}]) as api:
+    assert len(g.run_jobs("example/repo", 12, 2)) == 101
+    assert [call.args[0] for call in api.call_args_list] == [
+        f"/repos/example/repo/actions/runs/12/attempts/2/jobs?per_page=100&page={page}" for page in (1, 2)]
+for response in ({}, {"jobs": None}, {"jobs": [None]}):
+    with patch.object(g, "api_json", return_value=response):
+        try: g.run_jobs("example/repo", 12, 2)
+        except g.GitHubError: pass
+        else: raise AssertionError("accepted invalid jobs response")
+`, path.dirname(convergenceScript)], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  test("contributes independent successes but rejects forged successful-step evidence", () => {
+    const fixture = createRepository();
+    runPlan(fixture);
+    const result = spawnSync("python3", ["-c", `
+import copy, json, subprocess, sys
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+contract = c.ConvergenceContract(root / "convergence.json")
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+provenance = {"event": "workflow_dispatch", "runId": 12, "runAttempt": 1, "headSha": head,
+              "baseSha": head, "treeSha": tree, "validatedAt": "2026-09-15T00:00:00Z"}
+jobs = [{"id": i, "name": f"Job {name}", "run_id": 12, "run_attempt": 1, "head_sha": head,
+         "status": "completed", "conclusion": "success" if name == "a" else "failure",
+         "labels": ["ubuntu-24.04"],
+         "steps": [{"name": "Execute", "status": "completed", "conclusion": "success"}]}
+        for i, name in enumerate(("a", "b"), 1)]
+# Failed b has no manifest. Its absence must not suppress successful a.
+contract.workflow("ci").workloads["b"].products = "manifest"
+candidate = c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs)
+assert [item["receipt"]["workload"] for item in candidate["results"]] == ["a"]
+with patch("convergence.run_jobs", return_value=jobs):
+    c.validate_admitted_plan(candidate, contract, root, tree)
+for mutation in ("step", "attempt", "missing", "duplicate"):
+    bad = copy.deepcopy(jobs)
+    if mutation == "step": bad[0]["steps"][0]["conclusion"] = "skipped"
+    if mutation == "attempt": bad[0]["run_attempt"] = 2
+    if mutation == "missing": bad = bad[1:]
+    if mutation == "duplicate": bad.append(copy.deepcopy(bad[0]))
+    with patch("convergence.run_jobs", return_value=bad):
+        try: c.validate_admitted_plan(candidate, contract, root, tree)
+        except c.ConfigError: pass
+        else: raise AssertionError("accepted false success: " + mutation)
+before = c.calculate(contract, root, "ci", {"worker": ["ubuntu-24.04"]})["a"]["digest"]
+contract.workflow("ci").workloads["a"].success["Job a"].append("Additional validation")
+assert c.calculate(contract, root, "ci", {"worker": ["ubuntu-24.04"]})["a"]["digest"] != before
+`, path.dirname(convergenceScript), fixture.root], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  test("authenticates PR merge trees and exact parents without changing the trusted checkout", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+def git(*args):
+    return subprocess.check_output(["git", "-c", "user.name=test", "-c", "user.email=test@example.com", *args], text=True).strip()
+initial = git("rev-parse", "HEAD")
+git("checkout", "-qb", "feature")
+(root / "a.txt").write_text("feature change")
+git("commit", "-qam", "feature")
+head = git("rev-parse", "HEAD")
+head_tree = git("rev-parse", "HEAD^{tree}")
+git("checkout", "-qb", "base", initial)
+(root / "b.txt").write_text("base change")
+git("commit", "-qam", "base")
+base = git("rev-parse", "HEAD")
+git("merge", "--no-ff", "--no-edit", "feature")
+merge = git("rev-parse", "HEAD")
+tree = git("rev-parse", "HEAD^{tree}")
+assert tree != head_tree
+git("update-ref", "refs/pull/17/merge", merge)
+git("remote", "add", "origin", str(root))
+git("checkout", "-q", "--detach", base)
+index = git("ls-files", "-s")
+entry = {"event": "pull_request", "base_sha": base, "head_sha": head, "tree_sha": tree}
+payload = {"workflow_run": {"pull_requests": [{"number": 17}]}}
+assert c.authenticated_source_tree(entry, payload) == tree
+assert git("rev-parse", "HEAD") == base
+assert git("ls-files", "-s") == index
+for bad in ({**entry, "tree_sha": head_tree}, {**entry, "base_sha": initial}):
+    try: c.authenticated_source_tree(bad, payload)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted wrong PR snapshot")
+for pulls in ([], [{"number": 17}, {"number": 18}], [{"number": "17;echo unsafe"}]):
+    try: c.authenticated_source_tree(entry, {"workflow_run": {"pull_requests": pulls}})
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted ambiguous PR source")
+`, path.dirname(convergenceScript), fixture.root], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
   test("requires all workload shards and execution steps from the exact producing attempt", () => {
     const result = spawnSync("python3", ["-c", `
 import copy, sys
@@ -205,7 +311,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 2");
+    expect(stale.stderr).toContain("requires schema.version 3");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();
@@ -285,8 +391,22 @@ print("snapshot and candidate binding passed")
       pull_request: { head: { sha: headSha }, base: { sha: headSha } },
     }));
     writeFileSync(outputPath, "");
-    execFileSync("python3", [
-      convergenceScript, "--root", fixture.root, "--config", fixture.configPath,
+    const jobs = ["a", "b"].map((name, index) => ({
+      id: index + 1, name: `Job ${name}`, run_id: 12, run_attempt: 1, head_sha: headSha,
+      status: "completed", conclusion: "success", labels: ["ubuntu-24.04"],
+      steps: [{ name: "Execute", status: "completed", conclusion: "success" }],
+    }));
+    const jobsPath = path.join(fixture.root, "jobs.json");
+    writeFileSync(jobsPath, JSON.stringify(jobs));
+    execFileSync("python3", ["-c", `
+import json, sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv.pop(1))
+jobs = json.loads(open(sys.argv.pop(1)).read())
+import convergence as c
+with patch("convergence.run_jobs", return_value=jobs):
+    raise SystemExit(c.main())
+`, path.dirname(convergenceScript), jobsPath, "--root", fixture.root, "--config", fixture.configPath,
       "handoff", "--pending", fixture.pendingPath,
       "--products-root", path.join(fixture.root, "products"),
       "--handoff-root", handoffRoot,
@@ -294,7 +414,7 @@ print("snapshot and candidate binding passed")
       cwd: fixture.root,
       env: {
         ...process.env,
-        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_EVENT_NAME: "workflow_dispatch",
         GITHUB_EVENT_PATH: eventPath,
         GITHUB_REPOSITORY: "example/repo",
         GITHUB_REPOSITORY_ID: "42",
@@ -309,26 +429,56 @@ print("snapshot and candidate binding passed")
     )) as Record<string, unknown>;
     expect(metadata).toMatchObject({
       repository_id: 42, repository: "example/repo", workflow: "ci", policy: "test-v1",
-      event: "pull_request", run_id: 12, run_attempt: 1, head_sha: headSha,
+      event: "workflow_dispatch", run_id: 12, run_attempt: 1, head_sha: headSha,
     });
     expect(readFileSync(outputPath, "utf8")).toContain("name=handoff-convergence-ci-results");
 
     writeFileSync(eventPath, JSON.stringify({
       repository: { id: 42, full_name: "example/repo" },
       workflow_run: {
-        id: 12, run_attempt: 1, name: "ci", event: "pull_request", head_sha: headSha,
+        id: 12, run_attempt: 1, name: "ci", event: "workflow_dispatch", head_sha: headSha,
         head_repository: { full_name: "example/repo" },
       },
     }));
     writeFileSync(outputPath, "");
     execFileSync("git", ["remote", "add", "origin", fixture.root], { cwd: fixture.root });
-    execFileSync("python3", [
-      convergenceScript, "--root", fixture.root, "--config", fixture.configPath,
-      "admit", "--handoff-root", handoffRoot,
-    ], {
+    const admission = spawnSync("python3", ["-c", `
+import argparse, copy, json, sys
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+args = argparse.Namespace(root=root, isolated=False, handoff_root=Path(sys.argv[3]))
+contract = c.ConvergenceContract(root / "convergence.json")
+candidate_path = args.handoff_root / "handoff/convergence/ci-results/candidate.json"
+original = json.loads(candidate_path.read_text())
+with patch("convergence.run_jobs", return_value=json.loads((root / "jobs.json").read_text())):
+    assert c.admit_command(args, contract) == 0
+    for field in ("digest", "executionClass", "treeSha", "workload"):
+        forged = copy.deepcopy(original)
+        receipt = forged["results"][0]["receipt"]
+        if field == "digest": receipt["digest"] = "e" * 64
+        if field == "executionClass": receipt["executionClass"]["labels"] = ["invented-runner"]
+        if field == "workload": receipt["workload"] = "undeclared"
+        if field == "treeSha":
+            forged["provenance"]["treeSha"] = "f" * 40
+            for result in forged["results"]: result["receipt"]["validated"]["treeSha"] = "f" * 40
+        forged["results"][0]["key"] = c.result_key(42, "ci", "test-v1", receipt["workload"], receipt["digest"])
+        candidate_path.write_text(json.dumps(forged))
+        metadata_path = candidate_path.parent / "metadata.json"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["tree_sha"] = forged["provenance"]["treeSha"]
+        metadata_path.write_text(json.dumps(metadata))
+        try: c.admit_command(args, contract)
+        except c.ConfigError: pass
+        else: raise AssertionError("admission accepted forged " + field)
+`, path.dirname(convergenceScript), fixture.root, handoffRoot], {
       cwd: fixture.root,
+      encoding: "utf8",
       env: { ...process.env, GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: outputPath },
     });
+    expect(admission.status, admission.stderr).toBe(0);
     expect(readFileSync(outputPath, "utf8")).toContain("publish=true");
   });
 

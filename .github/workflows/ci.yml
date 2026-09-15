@@ -972,12 +972,12 @@ jobs:
           fi
 
       - name: Checkout convergence control plane
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '' }}
+        if: ${{ !cancelled() && needs.plan.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '') }}
         continue-on-error: true
         uses: actions/checkout@v6.0.2
 
       - name: Download pending convergence plan
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '' }}
+        if: ${{ !cancelled() && needs.plan.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '') }}
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
@@ -987,7 +987,7 @@ jobs:
           path: ${{ runner.temp }}
 
       - name: '[collect] Platform product manifest'
-        if: ${{ needs.platform_build.result == 'success' }}
+        if: ${{ !cancelled() && needs.platform_build.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: platform-build-manifest
@@ -995,8 +995,10 @@ jobs:
 
       - name: Create convergence handoff
         id: convergence_handoff
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '' }}
+        if: ${{ !cancelled() && needs.plan.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.workloads != '') }}
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 .github/scripts/convergence.py handoff
           --pending "$RUNNER_TEMP/pending-convergence.json"
@@ -1004,7 +1006,7 @@ jobs:
           --handoff-root "$RUNNER_TEMP/handoff-convergence-ci-results"
 
       - name: Upload convergence handoff
-        if: ${{ steps.convergence_handoff.outputs.name != '' }}
+        if: ${{ !cancelled() && steps.convergence_handoff.outputs.name != '' }}
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -1198,7 +1200,7 @@ jobs:
   cache_results:
     name: '[cache] Isolated successful CI results'
     needs: validate
-    if: ${{ !cancelled() && needs.validate.result == 'success' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && inputs.workloads != '' }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && inputs.workloads != '' }}
     uses: ./.github/workflows/convergence.atom.yml
     secrets: inherit
 

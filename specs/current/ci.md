@@ -123,8 +123,9 @@ directionality is the central fail-closed property of active omission.
 Scope answers whether a workload is relevant to the changed-file context.
 Convergence answers whether the same workload identity already has a validated,
 reusable successful result. A workload identity includes its declared Git
-inputs, execution class, product mode, workflow policy, and convergence control
-contract. Once enforcement is enabled, the execution predicate is:
+inputs, execution class, product mode, workflow policy, declared success jobs
+and steps, and `schema.version`. Control source is a trusted admission boundary,
+not an implicit global hash input. Once enforcement is enabled, the execution predicate is:
 
 ```text
 scope_enabled && !reusable_result_hit
@@ -240,7 +241,10 @@ a `certain` decision.
 Convergence declarations live in `.github/config/convergence.json`. A workload
 composes Git paths or globs, `suite://<name>` reusable path groups, or `"*"` for
 the tracked tree, and declares an execution class, product mode, and explicit
-reuse opt-in. Cycles, dangling suites, unsafe paths, empty matches, schema
+reuse opt-in. Reusable workloads also declare `success`, mapping exact job
+display names (including every shard) to required execution step names. This
+contract participates in identity; hashing or declaration interpretation changes
+require a bump of the sole `schema.version`. Cycles, dangling suites, unsafe paths, empty matches, schema
 drift, and scope/convergence identity drift fail at the plan entrypoint.
 
 Reuse is valid only for a workload with no products or a complete typed product
@@ -254,10 +258,18 @@ that production cannot be modeled cleanly, the workload remains non-reusable.
 
 CI reads immutable result receipts through the public base URL. A missing
 secret, 404, timeout, malformed receipt, product mismatch, or unavailable
-service is a miss and therefore executes the workload. A successful merge gate
-produces a typed convergence handoff; it does not write storage. The trusted
+service is a miss and therefore executes the workload. The validation job
+collects a typed convergence handoff even when an unrelated workload or policy
+fails; the required merge gate remains failed. Missing, failed, cancelled,
+skipped, or previous-attempt execution cannot contribute success. It does not
+write storage. The trusted
 `convergence.atom.yml` consumer checks the producing run and that its control
-plane matches the default branch before publishing to R2. `convergence.py`
+plane matches the default branch before publishing to R2. It independently
+checks every declared job and required step via the attempt-scoped GitHub API,
+authenticates the source tree (exact base/head merge parents for PRs), and
+recomputes identities without checking out or executing producer source.
+Moved or unavailable PR merge refs refuse admission; they do not grant reuse.
+`convergence.py`
 owns protocol validation and publication orchestration; `lib/r2.py` owns only
 signed R2 transport. Write credentials never enter the low-privilege CI run.
 
@@ -269,7 +281,7 @@ The current control flow is:
 runners -> plan -> workloads ---------> validate -> runtime summary
                 -> merge policy ------/
 
-successful validate -> typed handoff -> convergence.atom -> R2
+successful workload jobs/steps -> typed handoff -> trusted convergence.atom -> R2
 ```
 
 `merge_policy` is merge-group-only and runs in parallel with workloads. It does

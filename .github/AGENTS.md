@@ -65,15 +65,18 @@ execution class, product mode, policy, and `schema.version`. Changes to hashing
 or declaration interpretation require a schema version bump. The control file
 set remains a trusted-writer admission boundary, not an implicit global cache
 input; execution-affecting configuration must be declared by workloads. Public
-result reads are credential-free and fail open to execution. Only a successful
-gate may produce a `handoff/convergence` candidate; only trusted
+result reads are credential-free and fail open to execution. The convergence
+handoff contains only workloads whose declared jobs and execution steps succeeded
+in the producing attempt, even when an unrelated gate failed. Only trusted
 `convergence.atom.yml` code may publish immutable results. `lib/r2.py` knows R2
 transport only and must not interpret workload policy or handoff schemas.
 
 Manual CI may select existing workload IDs through `workloads`; the resulting
 check is explicitly selected validation, never a complete merge gate. Workload
-declarations stay in `convergence.json`, scheduling stays in `ci.yml`, and only
-the successful gate creates a publication handoff. Do not create stage-named
+declarations stay in `convergence.json`, scheduling stays in `ci.yml`, and the
+validation job collects per-workload success without softening its gate. The
+trusted writer independently checks the attempt's job/step evidence and source
+tree and recalculates identities. Do not create stage-named
 workflow/config files for validation. The current `ci-isolated-v1` policy and
 manual callable path in `convergence.atom.yml` are task-scoped to the explicitly
 authorized `feat/plan-foundation` branch. They do not relax production

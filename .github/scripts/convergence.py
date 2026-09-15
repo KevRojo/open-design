@@ -31,6 +31,7 @@ from lib.github import (
     append_summary,
     download_artifact,
     event_payload,
+    run_jobs,
     unique_run_artifact,
 )
 from lib.r2 import R2Client, R2Credentials, R2Error, R2PreconditionFailed, self_check as r2_self_check
@@ -39,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -75,6 +76,8 @@ class Workload:
     def __init__(self, workflow: str, identity: str, raw: Any):
         value = object_value(raw, f"convergence.workflows.{workflow}.workloads.{identity}")
         expected = {"inputs", "runnerClass", "products", "reusable"}
+        if value.get("reusable") is True:
+            expected.add("success")
         if set(value) != expected:
             raise ConfigError(
                 f"convergence.workflows.{workflow}.workloads.{identity} keys must be {sorted(expected)}"
@@ -88,6 +91,15 @@ class Workload:
         if not isinstance(value["reusable"], bool):
             raise ConfigError(f"workload {workflow}/{identity}.reusable must be boolean")
         self.reusable = value["reusable"]
+        self.success = object_value(value.get("success", {}), f"workload {workflow}/{identity}.success")
+        if self.reusable and not self.success:
+            raise ConfigError(f"reusable workload {workflow}/{identity} requires success jobs")
+        for job, steps in self.success.items():
+            require_string(job, "success job name")
+            if (not isinstance(steps, list) or not steps
+                    or any(not isinstance(step, str) or not step for step in steps)
+                    or len(set(steps)) != len(steps)):
+                raise ConfigError(f"success job {job} requires unique non-empty execution steps")
 
 
 class WorkflowContract:
@@ -271,12 +283,15 @@ def calculate(
     runner_plan: dict[str, Any],
     *,
     index: Path | None = None,
+    identities: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     workflow = contract.workflow(workflow_name)
     resolved: dict[str, str] = {}
     fingerprinter = GitFingerprinter(root, index)
     results: dict[str, dict[str, Any]] = {}
     for identity, workload in workflow.workloads.items():
+        if identities is not None and identity not in identities:
+            continue
         if workload.runner_class not in runner_plan:
             raise ConfigError(f"runner plan lacks class {workload.runner_class} for {workflow_name}/{identity}")
         labels = runner_plan[workload.runner_class]
@@ -297,6 +312,7 @@ def calculate(
             "workflow": workflow_name, "policy": workflow.policy, "workload": identity,
             "inputs": input_digest, "executionClass": json.loads(execution_class),
             "products": workload.products, "reusable": workload.reusable,
+            "success": workload.success,
         }).encode())
         results[identity] = {
             "digest": digest.hexdigest(),
@@ -310,6 +326,7 @@ def calculate(
 def calculate_snapshot(
     contract: ConvergenceContract, root: Path, workflow: str,
     runner_plan: dict[str, Any], tree_sha: str,
+    *, identities: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Read an independently verified Git tree as data, using the sole identity algorithm.
 
@@ -322,7 +339,7 @@ def calculate_snapshot(
         index = Path(temporary) / "index"
         subprocess.run(["git", "read-tree", tree_sha], cwd=root, check=True,
                        env={**os.environ, "GIT_INDEX_FILE": str(index)})
-        return calculate(contract, root, workflow, runner_plan, index=index)
+        return calculate(contract, root, workflow, runner_plan, index=index, identities=identities)
 
 
 def validate_candidate_plan(
@@ -805,6 +822,7 @@ def finalize_candidate(
     provenance: dict[str, Any],
     products_root: Path,
     contract: ConvergenceContract,
+    jobs: list[dict[str, Any]],
 ) -> dict[str, Any]:
     pending = object_value(load_json(pending_path), "pending convergence")
     workflow = contract.workflow(require_string(pending.get("workflow"), "pending workflow"))
@@ -823,6 +841,9 @@ def finalize_candidate(
             or not value.get("run")
             or value.get("resultHit")
         ):
+            continue
+        if successful_workload_jobs(jobs, workflow.workloads[identity].success,
+                                    provenance, value["executionClass"]) is None:
             continue
         products_mode = workflow.workloads[identity].products
         if products_mode == "manifest":
@@ -915,7 +936,8 @@ def producer_context(payload: dict[str, Any]) -> dict[str, Any]:
 
 def handoff_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
     context = producer_context(event_payload())
-    candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract)
+    jobs = run_jobs(context["repository"], context["provenance"]["runId"], context["provenance"]["runAttempt"])
+    candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract, jobs)
     if candidate.get("repositoryId") != context["repositoryId"] or candidate.get("repository") != context["repository"]:
         raise ConfigError("pending convergence repository differs from the producing run")
     handoff_contract.write_convergence(args.handoff_root, args.id, candidate)
@@ -1039,10 +1061,75 @@ def git_differs(left: str, right: str, paths: list[str]) -> bool:
     return result.returncode == 1
 
 
+def authenticated_source_tree(entry: dict[str, Any], payload: dict[str, Any]) -> str:
+    """Bind the candidate tree to the server's checkout commit, never its claim.
+
+    PR runs execute a merge tree, not the head branch tree. Only the server merge
+    ref with the exact recorded base/head parents is admissible. A moved or
+    unavailable ref fails closed; we never checkout or execute producer files.
+    """
+    commit = entry["head_sha"]
+    if entry["event"] == "pull_request":
+        pulls = payload["workflow_run"].get("pull_requests", [])
+        if not isinstance(pulls, list) or len(pulls) != 1:
+            raise ConfigError("PR source tree requires exactly one producing pull request")
+        number = object_value(pulls[0], "producing pull request").get("number")
+        if type(number) is not int or number <= 0:
+            raise ConfigError("producing pull request number must be positive")
+        subprocess.run(["git", "fetch", "--no-tags", "--depth=1", "origin",
+                        f"refs/pull/{number}/merge"], check=True)
+        commit = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], text=True).strip()
+        # cat-file preserves real parents even in a depth-1 checkout; rev-list
+        # and pretty-format %P intentionally hide parents at shallow boundaries.
+        raw = subprocess.check_output(["git", "cat-file", "-p", commit], text=True)
+        headers = raw.split("\n\n", 1)[0].splitlines()
+        parents = [line.removeprefix("parent ") for line in headers if line.startswith("parent ")]
+        if parents != [entry["base_sha"], entry["head_sha"]]:
+            raise ConfigError("producing PR merge parents differ from candidate base/head")
+    tree = subprocess.check_output(["git", "rev-parse", f"{commit}^{{tree}}"], text=True).strip()
+    if tree != entry["tree_sha"]:
+        raise ConfigError("candidate tree differs from authenticated source tree")
+    return tree
+
+
+def validate_admitted_plan(
+    candidate: dict[str, Any], contract: ConvergenceContract, root: Path, tree: str,
+) -> None:
+    """Authenticate execution via attempt jobs, then recompute the source recipe.
+
+    Job names and required steps come from trusted configuration. Runner labels
+    come from those actual jobs, not a CI-specific global runner catalogue.
+    """
+    workflow = contract.workflow(candidate["workflow"])
+    provenance = candidate["provenance"]
+    jobs = run_jobs(candidate["repository"], provenance["runId"], provenance["runAttempt"])
+    receipts = [object_value(item.get("receipt"), "candidate receipt")
+                for item in candidate["results"]]
+    runners: dict[str, Any] = {}
+    identities: set[str] = set()
+    for receipt in receipts:
+        identity = receipt.get("workload")
+        if identity not in workflow.workloads or not workflow.workloads[identity].reusable:
+            raise ConfigError(f"candidate workload is not reusable: {identity}")
+        workload = workflow.workloads[identity]
+        execution = object_value(receipt.get("executionClass"), "receipt execution class")
+        if set(execution) != {"runnerClass", "labels"} or execution["runnerClass"] != workload.runner_class:
+            raise ConfigError(f"candidate {identity} runner class differs from declaration")
+        if successful_workload_jobs(jobs, workload.success, provenance, execution) is None:
+            raise ConfigError(f"candidate {identity} lacks successful execution in producing attempt")
+        if workload.runner_class in runners and runners[workload.runner_class] != execution["labels"]:
+            raise ConfigError("candidate has inconsistent runner class labels")
+        runners[workload.runner_class] = execution["labels"]
+        identities.add(identity)
+    expected = calculate_snapshot(contract, root, workflow.name, runners, tree, identities=identities)
+    validate_candidate_plan(candidate, contract, expected)
+
+
 def admit_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
     if args.isolated:
         return admit_isolated_command(args, contract)
-    context = workflow_run_context(event_payload())
+    payload = event_payload()
+    context = workflow_run_context(payload)
     if context["head_repository"] != context["repository"]:
         raise ConfigError("workflow_run head repository is not trusted")
     entries = handoff_contract.candidate_entry_dirs(args.handoff_root, "convergence")
@@ -1080,6 +1167,10 @@ def admit_command(args: argparse.Namespace, contract: ConvergenceContract) -> in
     elif git_differs("HEAD", base_sha, control_paths):
         reason = "producer-control-plane-superseded"
         publish = False
+    if publish:
+        tree = authenticated_source_tree(entry, payload)
+        root = args.root.resolve() if args.root else repository_root(__file__)
+        validate_admitted_plan(load_json(Path(candidate)), contract, root, tree)
     append_outputs(
         {
             "candidate": candidate,
@@ -1335,6 +1426,8 @@ def admit_isolated_command(args: argparse.Namespace, contract: ConvergenceContra
     require_isolated_candidate(candidate)
     if contract.workflow("ci").policy != candidate["policy"]:
         raise ConfigError("isolated policy differs from declaration")
+    root = args.root.resolve() if args.root else repository_root(__file__)
+    validate_admitted_plan(candidate, contract, root, candidate["provenance"]["treeSha"])
     append_outputs({"candidate": entry["candidate_path"], "publish": "true"})
     return 0
 

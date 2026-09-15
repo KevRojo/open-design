@@ -1746,7 +1746,7 @@ process.stdin.on("end", () => {
     await expect(validateGatePasses(workflow, needsWithFailedWeb)).resolves.toBe(false);
   });
 
-  it("[P1] hands off convergence results only after the workspace gate succeeds", async () => {
+  it("[P1] collects per-workload success without softening a failed workspace gate", async () => {
     const workflow = await readFile(ciWorkflowPath, "utf8");
     const plan = sectionBetween(workflow, "  plan:", "  static_gate:");
     const validate = sectionBetween(workflow, "  validate:", "  runtime_summary:");
@@ -1760,6 +1760,12 @@ process.stdin.on("end", () => {
     expect(validate).toContain("name: ${{ needs.plan.outputs.convergence_plan_artifact }}");
     expect(validate).not.toContain("name: ci-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}");
     expect(validate).toContain("Upload convergence handoff");
+    const handoff = sectionBetween(validate, "      - name: Create convergence handoff", "      - name: Upload convergence handoff");
+    expect(handoff).toContain("!cancelled() && needs.plan.result == 'success'");
+    expect(handoff).toContain("GH_TOKEN: ${{ github.token }}");
+    const atom = await readFile(convergenceWorkflowPath, "utf8");
+    expect(atom).toContain(`contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)`);
+    expect(atom).not.toContain("github.event.workflow_run.conclusion == 'success'");
     expect(validate.indexOf("Upload convergence handoff")).toBeGreaterThan(
       validate.indexOf("Check workspace validation jobs"),
     );
