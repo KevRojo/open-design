@@ -6,6 +6,13 @@ name: convergence.atom
 # Python; pull-request code is treated solely as data.
 on:
   workflow_call:
+    inputs:
+      config:
+        type: string
+        default: .github/config/convergence.json
+      handoff_id:
+        type: string
+        default: ci-results
   workflow_run:
     workflows: [ci]
     types: [completed]
@@ -20,7 +27,7 @@ concurrency:
 
 jobs:
   isolated:
-    name: '[cache] Authorized manual CI results'
+    name: '[cache] Authorized manual workload results'
     if: >-
       ${{ github.event_name == 'workflow_dispatch'
         && github.repository == 'nexu-io/open-design'
@@ -37,7 +44,9 @@ jobs:
           fetch-depth: 1
       - name: '[resolve] Gate handoff name'
         id: artifact
-        run: echo "name=$(python3 .github/scripts/handoff.py artifact-name convergence ci-results)" >> "$GITHUB_OUTPUT"
+        env:
+          HANDOFF_ID: ${{ inputs.handoff_id }}
+        run: echo "name=$(python3 .github/scripts/handoff.py artifact-name convergence "$HANDOFF_ID")" >> "$GITHUB_OUTPUT"
       - name: '[collect] Successful gate handoff'
         uses: actions/download-artifact@v8
         with:
@@ -47,8 +56,9 @@ jobs:
         id: trust
         env:
           GH_TOKEN: ${{ github.token }}
+          CONVERGENCE_CONFIG: ${{ inputs.config }}
         run: >-
-          python3 .github/scripts/convergence.py admit --isolated
+          python3 .github/scripts/convergence.py --config "$CONVERGENCE_CONFIG" admit --isolated
           --handoff-root "$RUNNER_TEMP/handoff-convergence"
       - name: '[collect] Referenced build products'
         env:

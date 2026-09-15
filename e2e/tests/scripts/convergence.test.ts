@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 4 },
+    schema: { version: 5 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -95,6 +95,81 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("projects declared JSON fields from Git without coupling product code to Plan", () => {
+    const fixture = createRepository();
+    const resourcePath = path.join(fixture.root, "release.json");
+    const raw = JSON.parse(readFileSync(fixture.configPath, "utf8"));
+    raw.resources = {
+      source: { paths: ["a.txt", "release.json"], exclude: ["release.json"] },
+      execution: { json: "release.json", omit: ["version"] },
+      publication: { json: "release.json", omit: [] },
+    };
+    raw.workflows.ci.workloads.a.inputs = ["resource://source", "resource://execution"];
+    raw.workflows.ci.workloads.b.inputs = ["resource://publication"];
+    writeFileSync(fixture.configPath, JSON.stringify(raw));
+    const stage = (value: object) => {
+      writeFileSync(resourcePath, JSON.stringify(value));
+      execFileSync("git", ["add", "release.json"], { cwd: fixture.root });
+    };
+    stage({ version: "0.22.1", channel: "beta", scripts: { build: "build" } });
+    const before = runPlan(fixture).pending.workloads;
+    stage({ version: "0.22.3", channel: "beta", scripts: { build: "build" } });
+    const version = runPlan(fixture).pending.workloads;
+    expect(workload(version, "a").digest).toBe(workload(before, "a").digest);
+    expect(workload(version, "b").digest).not.toBe(workload(before, "b").digest);
+    // An unstaged edit must not affect the authenticated Git input snapshot.
+    writeFileSync(resourcePath, '{"version":"bad","channel":"stable"}');
+    expect(runPlan(fixture).pending.workloads).toEqual(version);
+    for (const value of [
+      { version: "0.22.3", channel: "stable", scripts: { build: "build" } },
+      { version: "0.22.3", channel: "beta", scripts: { build: "different" } },
+      { version: "0.22.3", channel: "beta", scripts: { build: "build" }, newDependency: "x" },
+    ]) {
+      stage(value);
+      expect(workload(runPlan(fixture).pending.workloads, "a").digest).not.toBe(workload(version, "a").digest);
+    }
+    stage({ channel: "beta" });
+    expect(() => runPlan(fixture)).toThrow(/lacks omitted field version/);
+  });
+
+  test("selects the declared release workloads without manufacturing a parallel scope config", () => {
+    const fixture = createRepository();
+    const output = execFileSync("python3", [convergenceScript, "--root", fixture.root,
+      "--config", fixture.configPath, "github-output", "--workflow", "ci", "--all-workloads",
+      "--runner-plan-json", '{"worker":["ubuntu-24.04"]}', "--repository-id", "42",
+      "--repository", "example/repo", "--mode", "enforce", "--pending", fixture.pendingPath],
+    { cwd: fixture.root, encoding: "utf8", env: { ...process.env, OD_WORKLOAD_RESULTS_BASE_URL: "",
+      GITHUB_OUTPUT: path.join(fixture.root, "outputs"), GITHUB_STEP_SUMMARY: path.join(fixture.root, "summary") } });
+    expect(JSON.parse(output).run).toEqual({ a: true, b: true });
+  });
+
+  test("admits only the named beta policy under the existing isolated branch authorization", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import copy, os, sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+with patch.dict(os.environ, {"GITHUB_EVENT_NAME":"workflow_dispatch", "GITHUB_REPOSITORY":"nexu-io/open-design", "GITHUB_REF":"refs/heads/feat/plan-foundation", "GITHUB_REPOSITORY_ID":"42", "GITHUB_RUN_ID":"12", "GITHUB_RUN_ATTEMPT":"1"}):
+    with patch("convergence.event_payload", return_value={"repository":{"id":42}}):
+        context = c.producer_context(c.event_payload())
+        candidate = {**context, "workflow":"release-beta", "policy":"beta-isolated-v1"}
+        with patch("convergence.prepare_publication") as validation:
+            c.require_isolated_candidate(candidate)
+            validation.assert_called_once()
+            for mutation in ("policy", "workflow", "headSha", "runAttempt"):
+                forged = copy.deepcopy(candidate)
+                if mutation == "policy": forged[mutation] = "production-v1"
+                elif mutation == "workflow": forged[mutation] = "release-stable"
+                elif mutation == "headSha": forged["provenance"][mutation] = "f" * 40
+                else: forged["provenance"][mutation] = 2
+                try: c.require_isolated_candidate(forged)
+                except c.ConfigError: pass
+                else: raise AssertionError("accepted " + mutation)
+`, path.dirname(convergenceScript)], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("shares only explicit identical recipes from declared producers, preserving isolation otherwise", () => {
     const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `
@@ -421,7 +496,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 4");
+    expect(stale.stderr).toContain("requires schema.version 5");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();

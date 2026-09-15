@@ -40,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -136,12 +136,33 @@ class WorkflowContract:
 class ConvergenceContract:
     def __init__(self, path: Path):
         value = object_value(load_json(path), "convergence")
-        if set(value) != {"schema", "suites", "workflows"}:
-            raise ConfigError("convergence keys must be schema, suites, and workflows")
+        if not {"schema", "suites", "workflows"}.issubset(value) or set(value) - {"schema", "suites", "workflows", "resources"}:
+            raise ConfigError("convergence keys must be schema, suites, workflows, and optional resources")
         schema = object_value(value["schema"], "convergence.schema")
         if set(schema) != {"version"} or type(schema["version"]) is not int or schema["version"] != SCHEMA_VERSION:
             raise ConfigError(f"convergence requires schema.version {SCHEMA_VERSION}")
         self.schema_version = schema["version"]
+        self.resources = object_value(value.get("resources", {}), "convergence.resources")
+        for name, resource in self.resources.items():
+            require_identity(name, "resource name")
+            resource = object_value(resource, f"resource {name}")
+            if set(resource) == {"paths", "exclude"}:
+                paths = self.tokens(resource["paths"], f"resource {name}.paths")
+                excluded = resource["exclude"]
+                if not isinstance(excluded, list) or any(not isinstance(item, str) or not item for item in excluded):
+                    raise ConfigError(f"resource {name}.exclude must be path strings")
+                for token in [*paths, *excluded]:
+                    self.validate_path(token, name)
+            elif set(resource) == {"json", "omit"}:
+                token = require_string(resource["json"], f"resource {name}.json")
+                self.validate_path(token, name)
+                if any(char in token for char in "*?["):
+                    raise ConfigError("JSON projection requires one literal file")
+                omitted = resource["omit"]
+                if not isinstance(omitted, list) or any(not isinstance(key, str) or not key for key in omitted) or len(set(omitted)) != len(omitted):
+                    raise ConfigError("JSON projection omit must contain unique top-level field names")
+            else:
+                raise ConfigError(f"resource {name} requires paths/exclude or json/omit")
         suites = object_value(value["suites"], "convergence.suites")
         self.suites = {
             require_identity(name, "convergence suite"): self.tokens(tokens, f"convergence.suites.{name}")
@@ -189,6 +210,9 @@ class ConvergenceContract:
                 if token.startswith("suite://"):
                     if token not in nodes:
                         raise ConfigError(f"{node} references unknown {token}")
+                elif token.startswith("resource://"):
+                    if token.removeprefix("resource://") not in self.resources:
+                        raise ConfigError(f"{node} references unknown {token}")
                 else:
                     self.validate_path(token, node)
         visiting: list[str] = []
@@ -218,6 +242,9 @@ class ConvergenceContract:
             for token in self.suites[suite]:
                 if token.startswith("suite://"):
                     collect(token.removeprefix("suite://"))
+                elif token.startswith("resource://"):
+                    resource = self.resources[token.removeprefix("resource://")]
+                    paths.update(resource["paths"] if "paths" in resource else [resource["json"]])
                 else:
                     paths.add(token)
 
@@ -269,6 +296,32 @@ class GitFingerprinter:
         self.cache[token] = records
         return records
 
+    def resource_digest(self, resource: dict[str, Any]) -> str:
+        """Project declared resources from Git blobs, never mutable checkout data.
+
+        Omission is explicit configuration, not knowledge of product versions.
+        Unknown JSON fields remain determinants; missing omitted fields refuse.
+        """
+        if "paths" in resource:
+            records = {record for token in resource["paths"] for record in self.records(token)}
+            excluded = {record[0] for token in resource["exclude"] for record in self.records(token)}
+            projected: Any = sorted(record for record in records if record[0] not in excluded)
+            if not projected:
+                raise ConfigError("file resource projection is empty")
+        else:
+            records = self.records(resource["json"])
+            if len(records) != 1 or records[0][0] != resource["json"] or records[0][1] not in {"100644", "100755"} or records[0][3] != "0":
+                raise ConfigError("JSON resource requires one regular, unconflicted Git file")
+            path, mode, oid, stage = records[0]
+            raw = subprocess.check_output(["git", "cat-file", "blob", oid], cwd=self.root)
+            value = object_value(json.loads(raw), f"JSON resource {path}")
+            for key in resource["omit"]:
+                if key not in value:
+                    raise ConfigError(f"JSON resource {path} lacks omitted field {key}")
+                del value[key]
+            projected = {"path": path, "mode": mode, "stage": stage, "value": value}
+        return hashlib.sha256(canonical_json({"declaration": resource, "value": projected}).encode()).hexdigest()
+
 
 def digest_tokens(
     contract: ConvergenceContract,
@@ -286,6 +339,9 @@ def digest_tokens(
         if token.startswith("suite://"):
             name = token.removeprefix("suite://")
             child = digest_tokens(contract, fingerprinter, token, contract.suites[name], resolved)
+            digest.update(f"digest\0{child}\0".encode())
+        elif token.startswith("resource://"):
+            child = fingerprinter.resource_digest(contract.resources[token.removeprefix("resource://")])
             digest.update(f"digest\0{child}\0".encode())
         else:
             for path, mode, oid, stage in fingerprinter.records(token):
@@ -744,8 +800,8 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
     if repository_id <= 0 or not repository:
         raise ConfigError("repository id and name are required for convergence planning")
     workflow = contract.workflow(args.workflow)
-    scope_plan = load_json(args.scope_plan)
-    enabled = object_value(scope_plan.get("enabled"), "scope plan.enabled")
+    enabled = ({identity: True for identity in workflow.workloads}
+               if args.all_workloads else object_value(load_json(args.scope_plan).get("enabled"), "scope plan.enabled"))
     if set(enabled) != set(workflow.workloads):
         raise ConfigError(
             f"scope/convergence identity mismatch (scope={sorted(enabled)}, convergence={sorted(workflow.workloads)})"
@@ -1421,7 +1477,9 @@ def require_isolated_candidate(candidate: dict[str, Any]) -> None:
             or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"):
         raise ConfigError("isolated publication requires the authorized manual branch")
     context = producer_context(event_payload())
-    if (candidate.get("workflow") != "ci" or candidate.get("policy") != "ci-isolated-v1"
+    authorized_policies = {"ci": "ci-isolated-v1", "release-beta": "beta-isolated-v1"}
+    if (candidate.get("workflow") not in authorized_policies
+            or candidate.get("policy") != authorized_policies[candidate["workflow"]]
             or candidate.get("repositoryId") != context["repositoryId"]
             or candidate.get("repository") != context["repository"]):
         raise ConfigError("isolated candidate repository/workflow/policy differs")
@@ -1442,7 +1500,7 @@ def admit_isolated_command(args: argparse.Namespace, contract: ConvergenceContra
     entry = handoff_contract.validate_convergence(entries[0])
     candidate = load_json(Path(entry["candidate_path"]))
     require_isolated_candidate(candidate)
-    if contract.workflow("ci").policy != candidate["policy"]:
+    if contract.workflow(candidate["workflow"]).policy != candidate["policy"]:
         raise ConfigError("isolated policy differs from declaration")
     root = args.root.resolve() if args.root else repository_root(__file__)
     validate_admitted_plan(candidate, contract, root, candidate["provenance"]["treeSha"])
@@ -1571,7 +1629,9 @@ def parse_args() -> argparse.Namespace:
     sub.add_parser("control-paths")
     plan = sub.add_parser("github-output")
     plan.add_argument("--workflow", required=True)
-    plan.add_argument("--scope-plan", type=Path, required=True)
+    scope = plan.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--scope-plan", type=Path)
+    scope.add_argument("--all-workloads", action="store_true", help="select every declared workload, without changed-path routing")
     plan.add_argument("--runner-plan-json", required=True)
     plan.add_argument("--repository-id", type=int)
     plan.add_argument("--repository")

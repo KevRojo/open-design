@@ -2337,8 +2337,20 @@ process.stdin.on("end", () => {
     const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     for (const id of ["functional_e2e", "e2e_vitest", "daemon_unit_tests", "verify"]) {
-      expect(workflow).toContain(`  test_${id}:\n    needs: metadata`);
+      expect(workflow.includes(`  test_${id}:\n    needs: [metadata, plan_tests]`)).toBe(true);
+      expect(workflow.includes(`if: \${{ fromJSON(needs.plan_tests.outputs.run).test_${id} }}`)).toBe(true);
     }
+    const plan = sectionBetween(workflow, "  plan_tests:", "  test_functional_e2e:");
+    expect(plan).toContain("needs.metadata.outputs.commit == github.sha");
+    expect(plan).toContain("--root plan-source --config .github/config/convergence-beta.json");
+    expect(plan).toContain("--all-workloads");
+    expect(plan).not.toContain("pnpm install");
+    const collection = sectionBetween(workflow, "  test_results:", "  cache_test_results:");
+    expect(collection).toContain("--id beta-results");
+    expect(collection).not.toContain("needs.test_verify.result == 'success'");
+    const cache = sectionBetween(workflow, "  cache_test_results:", "  smoke_mac_arm64:");
+    expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
+    expect(cache).toContain("config: .github/config/convergence-beta.json");
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = workflow.slice(workflow.indexOf(`\n  smoke_${target}:`)).split(/\n  [a-z_0-9]+:/)[1];
       expect(job).toContain("always() && !cancelled()");

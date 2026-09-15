@@ -1777,15 +1777,74 @@ jobs:
 
   # Validation is deliberately not in build/publish needs. For this branch
   # it stays in the registered beta workflow; its tail is reported separately.
-  test_functional_e2e:
+  plan_tests:
+    name: '[plan] beta source validation'
     needs: metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      hit: ${{ steps.plan.outputs.hit }}
+      pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
+      contribution: ${{ steps.mode.outputs.contribution }}
+    steps:
+      - name: '[prepare] Workflow control snapshot'
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: '[prepare] Actual source snapshot'
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          path: plan-source
+          fetch-depth: 1
+      - name: '[resolve] Actual source runner profiles'
+        id: runners
+        working-directory: plan-source
+        env:
+          OD_CI_RUNNER_MODE: ${{ vars.OD_CI_RUNNER_MODE }}
+        run: python3 .github/scripts/runners.py
+      - name: '[resolve] Authorized result consumption'
+        id: mode
+        env:
+          AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && needs.metadata.outputs.commit == github.sha }}
+        run: |
+          echo "contribution=$AUTHORIZED" >> "$GITHUB_OUTPUT"
+          if [ "$AUTHORIZED" = true ]; then
+            echo "mode=enforce" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=shadow" >> "$GITHUB_OUTPUT"
+          fi
+      - name: '[plan] Frozen source test results'
+        id: plan
+        env:
+          RUNNER_PLAN: ${{ steps.runners.outputs.runs_on }}
+          PLAN_MODE: ${{ steps.mode.outputs.mode }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+        run: |
+          runners="$(jq -c '. + {release_tests:["ubuntu-latest"]}' <<< "$RUNNER_PLAN")"
+          python3 .github/scripts/convergence.py --root plan-source --config .github/config/convergence-beta.json github-output \
+            --workflow release-beta --all-workloads --runner-plan-json "$runners" \
+            --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
+      - name: '[retain] Frozen Plan witness'
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pending-convergence.json
+          if-no-files-found: error
+          retention-days: 7
+
+  test_functional_e2e:
+    needs: [metadata, plan_tests]
+    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_functional_e2e }}
     name: "[test] beta P0 Functional E2E"
     uses: ./.github/workflows/ui-extended-main.yml
     with:
       ref: ${{ needs.metadata.outputs.commit }}
       suite: p0
   test_e2e_vitest:
-    needs: metadata
+    needs: [metadata, plan_tests]
+    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_e2e_vitest }}
     name: "[test] beta E2E Vitest"
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1826,7 +1885,8 @@ jobs:
       - name: Run E2E Vitest
         run: pnpm --filter @open-design/e2e test
   test_daemon_unit_tests:
-    needs: metadata
+    needs: [metadata, plan_tests]
+    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_daemon_unit_tests }}
     name: "[test] beta Daemon tests (${{ matrix.shard }}/4)"
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1854,7 +1914,8 @@ jobs:
           OD_WATCHER_TEST_DEBUG: "1"
         run: pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4
   test_verify:
-    needs: metadata
+    needs: [metadata, plan_tests]
+    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_verify }}
     name: "[test] beta Verify build (typecheck + tests)"
     runs-on: ubuntu-latest
     steps:
@@ -1884,6 +1945,50 @@ jobs:
         run: pnpm -r --workspace-concurrency=4 --if-present run typecheck
       - name: Check repository layout policies
         run: pnpm guard
+
+  test_results:
+    name: '[collect] beta successful source results'
+    needs: [plan_tests, test_functional_e2e, test_e2e_vitest, test_daemon_unit_tests, test_verify]
+    if: ${{ !cancelled() && needs.plan_tests.result == 'success' && needs.plan_tests.outputs.contribution == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: '[prepare] Authorized control snapshot'
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: '[collect] Frozen Plan'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          path: ${{ runner.temp }}
+      - name: '[validate] Per-workload execution evidence'
+        id: handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/convergence.py --config .github/config/convergence-beta.json handoff
+          --pending "$RUNNER_TEMP/pending-convergence.json" --products-root "$RUNNER_TEMP/products"
+          --handoff-root "$RUNNER_TEMP/handoff" --id beta-results
+      - name: '[retain] Successful workload handoff'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.handoff.outputs.name }}
+          path: ${{ steps.handoff.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
+
+  cache_test_results:
+    name: '[cache] beta source results'
+    needs: test_results
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence-beta.json
+      handoff_id: beta-results
+    secrets: inherit
 
   smoke_mac_arm64:
     name: "[validate] beta mac_arm64 downloaded artifact"

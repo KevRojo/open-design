@@ -247,6 +247,24 @@ contract participates in identity; hashing or declaration interpretation changes
 require a bump of the sole `schema.version`. Cycles, dangling suites, unsafe paths, empty matches, schema
 drift, and scope/convergence identity drift fail at the plan entrypoint.
 
+Schema 5 also supports named `resource://<name>` references. A file resource
+declares `paths` and `exclude` path lists; a JSON resource declares one literal
+`json` file and an `omit` list of top-level field names. JSON projection reads
+the Git blob, retains every undeclared/new field, and rejects missing omitted
+fields. The resource declaration itself participates in the digest. This is a
+generic control-plane operation, not a product-version exception. Admission
+still checks whole referenced files, including projected fields.
+
+Beta source validation declares the packaged manifest's `version` outside its
+execution projection: release numbering changes do not invalidate unrelated
+source tests, while scripts, dependencies and all other manifest fields do.
+Version-bound packaging/materialization and downloaded-artifact validation are
+separate work and remain executed. Changing a channel only affects identities
+whose configuration references it; there is no implicit global channel key.
+Product code and build tools do not interpret Plan identities or cache receipts.
+The beta declaration remains conservative for other source changes until paired
+execution evidence justifies narrower groups.
+
 Workflows remain isolated by default. A reusable workload may opt into a named
 `recipe` and list `trustedSources` as explicit `{workflow, policy, workload}`
 coordinates. Only then can an identical recipe digest be read from another

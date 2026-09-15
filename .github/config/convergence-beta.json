@@ -1,0 +1,56 @@
+{
+  "schema": { "version": 5 },
+  "resources": {
+    "repository-validation": {
+      "paths": ["*"], "exclude": ["apps/packaged/package.json"]
+    },
+    "packaged-execution": {
+      "json": "apps/packaged/package.json", "omit": ["version"]
+    }
+  },
+  "suites": {
+    "repository-validation": ["resource://repository-validation", "resource://packaged-execution"],
+    "convergence-control": [
+      ".github/config/convergence-beta.json", ".github/scripts/convergence.py",
+      ".github/scripts/handoff.py", ".github/scripts/lib/",
+      ".github/workflows/convergence.atom.yml", ".github/workflows/release-beta.yml"
+    ]
+  },
+  "workflows": {
+    "release-beta": {
+      "policy": "beta-isolated-v1",
+      "workloads": {
+        "test_e2e_vitest": {
+          "inputs": ["suite://repository-validation"], "runnerClass": "release_tests", "products": "none", "reusable": true,
+          "success": { "[test] beta E2E Vitest": ["Prebuild workspace type declarations", "Run E2E Vitest"] }
+        },
+        "test_daemon_unit_tests": {
+          "inputs": ["suite://repository-validation"], "runnerClass": "release_tests", "products": "none", "reusable": true,
+          "success": {
+            "[test] beta Daemon tests (1/4)": ["Run daemon test shard"],
+            "[test] beta Daemon tests (2/4)": ["Run daemon test shard"],
+            "[test] beta Daemon tests (3/4)": ["Run daemon test shard"],
+            "[test] beta Daemon tests (4/4)": ["Run daemon test shard"]
+          }
+        },
+        "test_verify": {
+          "inputs": ["suite://repository-validation"], "runnerClass": "release_tests", "products": "none", "reusable": true,
+          "success": {
+            "[test] beta Verify build (typecheck + tests)": ["Build daemon and desktop (typecheck dependencies)", "Typecheck workspaces", "Check repository layout policies"]
+          }
+        },
+        "test_functional_e2e": {
+          "inputs": ["suite://repository-validation"], "runnerClass": "ui_p0", "products": "none", "reusable": true,
+          "success": {
+            "[test] beta P0 Functional E2E / UI P0 (entry-settings)": ["Prebuild workspace type declarations", "Run UI P0 domain"],
+            "[test] beta P0 Functional E2E / UI P0 (project-workspace)": ["Prebuild workspace type declarations", "Run UI P0 domain"],
+            "[test] beta P0 Functional E2E / UI P0 (project-workspace-editor)": ["Prebuild workspace type declarations", "Run UI P0 domain"],
+            "[test] beta P0 Functional E2E / UI P0 (project-collab)": ["Prebuild workspace type declarations", "Run UI P0 domain"],
+            "[test] beta P0 Functional E2E / UI P0 (project-runtime)": ["Prebuild workspace type declarations", "Run UI P0 domain", "Run UI critical extras"],
+            "[test] beta P0 Functional E2E / UI P0 (workspace-restoration)": ["Prebuild workspace type declarations", "Run UI P0 domain"]
+          }
+        }
+      }
+    }
+  }
+}
