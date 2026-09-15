@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const units = ["packages", "daemon", "web", "shell"] as const;
@@ -15,8 +15,17 @@ type Decision = { scopeEnabled: boolean; reusable: boolean; resultHit: boolean; 
   result?: { products: Record<string, Product> } };
 type Pending = { schemaVersion: number; protocol: string; mode: string; workloads: Record<string, Decision> };
 
+export function archiveExecutable(platform: string = process.platform, systemRoot = process.env.SystemRoot): string {
+  if (platform !== "win32") return "tar";
+  if (!systemRoot || !win32.isAbsolute(systemRoot)) throw new Error("Windows SystemRoot is required for native tar");
+  // Git Bash prepends GNU tar to PATH. It interprets D: as a remote archive
+  // host and cannot read the outer ZIP. Select the Windows bsdtar explicitly.
+  return win32.join(systemRoot, "System32", "tar.exe");
+}
+
 function command(command: string, args: string[], cwd: string): string {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 32 * 1024 * 1024 });
+  const executable = command === "tar" ? archiveExecutable() : command;
+  const result = spawnSync(executable, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 32 * 1024 * 1024 });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} failed (${result.signal ?? result.status})`);
   return result.stdout;
@@ -163,6 +172,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const platform = platforms[target ?? ""];
   if (!pendingPath || !scratch || !platform || platform[0] !== process.platform || platform[1] !== process.arch) throw new Error("source target differs from native executor");
   const root = process.cwd();
+  console.log(`archive tool: ${command("tar", ["--version"], root).trim()}`);
   const started = performance.now();
   const result = await executeSource({ root, scratch: resolve(scratch),
     pending: JSON.parse(readFileSync(pendingPath, "utf8")), workload: `source_${target}`,

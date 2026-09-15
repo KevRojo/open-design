@@ -2026,6 +2026,7 @@ jobs:
   cache_test_results:
     name: '[cache] beta source results'
     needs: test_results
+    if: ${{ !cancelled() && needs.test_results.result == 'success' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence-beta.json

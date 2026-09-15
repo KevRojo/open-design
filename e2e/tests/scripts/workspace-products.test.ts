@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { archiveOutputs, executeSource, restoreOutputs } from "../../../.github/scripts/release/workspace-products.ts";
+import { archiveExecutable, archiveOutputs, executeSource, restoreOutputs } from "../../../.github/scripts/release/workspace-products.ts";
 
 type Options = Parameters<typeof executeSource>[0];
 type Output = ReturnType<Options["runUnit"]>;
@@ -49,6 +49,11 @@ afterEach(() => {
 });
 
 describe("native source result consumption", () => {
+  it("selects Windows system bsdtar independently of Git Bash PATH", () => {
+    expect(archiveExecutable("win32", "C:\\Windows")).toBe("C:\\Windows\\System32\\tar.exe");
+    expect(archiveExecutable("darwin")).toBe("tar");
+    expect(() => archiveExecutable("win32", "relative")).toThrow("SystemRoot");
+  });
   it("builds the complete cold result, then restores without invoking any source build", async () => {
     const f = fixture();
     expect(await executeSource(f)).toMatchObject({ restored: false, produced: true });

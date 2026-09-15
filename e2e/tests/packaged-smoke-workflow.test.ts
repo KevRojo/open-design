@@ -2391,6 +2391,9 @@ process.stdin.on("end", () => {
     const cache = sectionBetween(workflow, "  cache_test_results:", "  smoke_mac_arm64:");
     expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
     expect(cache).toContain("config: .github/config/convergence-beta.json");
+    expect(cache).toContain("!cancelled() && needs.test_results.result == 'success'");
+    const writer = await readFile(join(workspaceRoot, ".github/workflows/convergence.atom.yml"), "utf8");
+    expect(writer).toContain("!cancelled() && github.event_name == 'workflow_dispatch'");
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = workflow.slice(workflow.indexOf(`\n  smoke_${target}:`)).split(/\n  [a-z_0-9]+:/)[1];
       expect(job).toContain("always() && !cancelled()");
