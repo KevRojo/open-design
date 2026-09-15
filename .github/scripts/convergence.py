@@ -196,8 +196,9 @@ class ConvergenceContract:
 
 
 class GitFingerprinter:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, index: Path | None = None):
         self.root = root
+        self.index = index
         self.cache: dict[str, list[tuple[str, str, str, str]]] = {}
 
     def records(self, token: str) -> list[tuple[str, str, str, str]]:
@@ -212,7 +213,8 @@ class GitFingerprinter:
         command = ["git", "ls-files", "-s", "-z"]
         if pathspec:
             command += ["--", *pathspec]
-        result = subprocess.run(command, cwd=self.root, check=True, stdout=subprocess.PIPE)
+        result = subprocess.run(command, cwd=self.root, check=True, stdout=subprocess.PIPE,
+                                env={**os.environ, "GIT_INDEX_FILE": str(self.index)} if self.index else None)
         records = []
         for raw in result.stdout.split(b"\0"):
             if not raw:
@@ -221,7 +223,7 @@ class GitFingerprinter:
             mode, oid, stage = metadata.decode("ascii").split()
             records.append((path.decode("utf-8", "surrogateescape"), mode, oid, stage))
         candidate = self.root / token
-        if not records and not any(character in token for character in "*?[") and candidate.is_file():
+        if self.index is None and not records and not any(character in token for character in "*?[") and candidate.is_file():
             oid = subprocess.run(
                 ["git", "hash-object", "--", token],
                 cwd=self.root,
@@ -267,10 +269,12 @@ def calculate(
     root: Path,
     workflow_name: str,
     runner_plan: dict[str, Any],
+    *,
+    index: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
     workflow = contract.workflow(workflow_name)
     resolved: dict[str, str] = {}
-    fingerprinter = GitFingerprinter(root)
+    fingerprinter = GitFingerprinter(root, index)
     results: dict[str, dict[str, Any]] = {}
     for identity, workload in workflow.workloads.items():
         if workload.runner_class not in runner_plan:
@@ -301,6 +305,91 @@ def calculate(
             "reusable": workload.reusable,
         }
     return results
+
+
+def calculate_snapshot(
+    contract: ConvergenceContract, root: Path, workflow: str,
+    runner_plan: dict[str, Any], tree_sha: str,
+) -> dict[str, dict[str, Any]]:
+    """Read an independently verified Git tree as data, using the sole identity algorithm.
+
+    The caller must authenticate the tree against the producing run first.
+    No producer files are checked out or executed and the trusted index is untouched.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", tree_sha):
+        raise ConfigError("snapshot tree must be a full Git SHA")
+    with tempfile.TemporaryDirectory(prefix="convergence-index-") as temporary:
+        index = Path(temporary) / "index"
+        subprocess.run(["git", "read-tree", tree_sha], cwd=root, check=True,
+                       env={**os.environ, "GIT_INDEX_FILE": str(index)})
+        return calculate(contract, root, workflow, runner_plan, index=index)
+
+
+def validate_candidate_plan(
+    candidate: dict[str, Any], contract: ConvergenceContract,
+    expected: dict[str, dict[str, Any]],
+) -> None:
+    """Bind every result to an independently calculated trusted plan, not to itself."""
+    workflow = contract.workflow(candidate["workflow"])
+    if candidate["policy"] != workflow.policy:
+        raise ConfigError("candidate policy differs from trusted plan")
+    with tempfile.TemporaryDirectory(prefix="convergence-candidate-") as temporary:
+        source = Path(temporary) / "candidate.json"
+        write_json_atomic(source, candidate)
+        prepare_publication(source, Path(temporary) / "receipts", require_urls=False)
+    for item in candidate["results"]:
+        receipt = item["receipt"]
+        identity = receipt["workload"]
+        value = expected.get(identity)
+        if identity not in workflow.workloads or value is None or not value["reusable"]:
+            raise ConfigError(f"candidate workload is not reusable in trusted plan: {identity}")
+        for field in ("digest", "executionClass"):
+            if receipt[field] != value[field]:
+                raise ConfigError(f"candidate {identity} {field} differs from trusted plan")
+        if bool(receipt["products"]) != (value["products"] == "manifest"):
+            raise ConfigError(f"candidate {identity} products differ from trusted plan")
+
+
+def successful_workload_jobs(
+    jobs: list[dict[str, Any]], required: dict[str, list[str]],
+    provenance: dict[str, Any], execution_class: dict[str, Any],
+) -> list[int] | None:
+    """Accept all declared shards and required steps from a trusted attempt API response.
+
+    `required` belongs to trusted workflow configuration, never a candidate.
+    Missing/failed/cancelled/skipped execution is a cache miss, not a success.
+    Contradictory or ambiguous identities are invalid evidence. Older attempts
+    are not silently borrowed; their independently published receipts remain usable.
+    """
+    if not required or any(not steps for steps in required.values()):
+        raise ConfigError("workload success requires jobs with explicit execution steps")
+    accepted = []
+    for name, steps in required.items():
+        matches = [job for job in jobs if job.get("name") == name]
+        if len(matches) > 1:
+            raise ConfigError(f"ambiguous workload job: {name}")
+        if not matches:
+            return None
+        job = matches[0]
+        for field, expected in (("run_id", provenance["runId"]),
+                                ("run_attempt", provenance["runAttempt"]),
+                                ("head_sha", provenance["headSha"])):
+            if job.get(field) != expected:
+                raise ConfigError(f"workload job {name} {field} differs from producing attempt")
+        if job.get("status") != "completed" or job.get("conclusion") != "success":
+            return None
+        if job.get("labels") != execution_class["labels"]:
+            raise ConfigError(f"workload job {name} runner labels differ from plan")
+        if type(job.get("id")) is not int or job["id"] <= 0 or job["id"] in accepted:
+            raise ConfigError(f"invalid or repeated workload job id: {name}")
+        for step in steps:
+            executions = [item for item in job.get("steps", []) if item.get("name") == step]
+            if len(executions) > 1:
+                raise ConfigError(f"ambiguous workload step: {name}/{step}")
+            if not executions or executions[0].get("status") != "completed" or executions[0].get("conclusion") != "success":
+                return None
+        accepted.append(job["id"])
+    return accepted
 
 
 def result_key(repository_id: int, workflow: str, policy: str, identity: str, digest: str) -> str:

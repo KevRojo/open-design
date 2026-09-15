@@ -95,6 +95,84 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("requires all workload shards and execution steps from the exact producing attempt", () => {
+    const result = spawnSync("python3", ["-c", `
+import copy, sys
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+provenance = {"runId": 12, "runAttempt": 2, "headSha": "a" * 40}
+execution = {"runnerClass": "js_hot", "labels": ["blacksmith-4vcpu-ubuntu-2404"]}
+required = {f"Web workspace tests ({i}/2)": ["Prebuild web sidecar declarations", "Web workspace tests"] for i in (1, 2)}
+jobs = [{"id": i, "name": name, "run_id": 12, "run_attempt": 2, "head_sha": "a" * 40,
+         "status": "completed", "conclusion": "success", "labels": execution["labels"],
+         "steps": [{"name": step, "status": "completed", "conclusion": "success"} for step in steps]}
+        for i, (name, steps) in enumerate(required.items(), 1)]
+assert c.successful_workload_jobs(jobs, required, provenance, execution) == [1, 2]
+assert c.successful_workload_jobs(jobs[:1], required, provenance, execution) is None
+for state in ("failure", "cancelled", "skipped", None):
+    bad = copy.deepcopy(jobs)
+    bad[1]["conclusion"] = state
+    assert c.successful_workload_jobs(bad, required, provenance, execution) is None
+    bad = copy.deepcopy(jobs)
+    bad[1]["steps"][1]["conclusion"] = state
+    assert c.successful_workload_jobs(bad, required, provenance, execution) is None
+for field, value in (("run_id", 13), ("run_attempt", 1), ("head_sha", "b" * 40), ("labels", ["other"]), ("id", 1)):
+    bad = copy.deepcopy(jobs)
+    bad[1][field] = value
+    try: c.successful_workload_jobs(bad, required, provenance, execution)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted " + field)
+try: c.successful_workload_jobs(jobs + [jobs[1]], required, provenance, execution)
+except c.ConfigError: pass
+else: raise AssertionError("accepted ambiguous jobs")
+print("workload execution boundary passed")
+`, path.dirname(convergenceScript)], { cwd: repoRoot, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+  test("binds candidates to trusted snapshot identities without checking out producer code", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import copy, json, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+contract = c.ConvergenceContract(root / "convergence.json")
+runners = {"worker": ["ubuntu-24.04"]}
+expected = c.calculate(contract, root, "ci", runners)
+tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
+(root / "a.txt").write_text("changed trusted checkout")
+subprocess.run(["git", "add", "a.txt"], cwd=root, check=True)
+index_before = subprocess.check_output(["git", "diff", "--cached"], cwd=root)
+snapshot = c.calculate_snapshot(contract, root, "ci", runners, tree)
+assert snapshot == expected
+assert c.calculate(contract, root, "ci", runners) != expected
+assert subprocess.check_output(["git", "diff", "--cached"], cwd=root) == index_before
+candidate = json.loads(sys.argv[3])
+receipt = candidate["results"][0]["receipt"]
+receipt["digest"] = expected["a"]["digest"]
+candidate["results"][0]["key"] = c.result_key(42, "ci", "test-v1", "a", receipt["digest"])
+c.validate_candidate_plan(candidate, contract, snapshot)
+for mutation in ("digest", "workload", "executionClass", "products", "duplicate"):
+    forged = copy.deepcopy(candidate)
+    item = forged["results"][0]
+    value = item["receipt"]
+    if mutation == "digest": value["digest"] = "e" * 64
+    if mutation == "workload": value["workload"] = "undeclared"
+    if mutation == "executionClass": value["executionClass"]["labels"] = ["forged-runner"]
+    if mutation == "products": value["products"] = {"bundle": {"type": "job", "source": "forged"}}
+    if mutation == "duplicate": forged["results"].append(copy.deepcopy(item))
+    item["key"] = c.result_key(42, "ci", "test-v1", value["workload"], value["digest"])
+    try: c.validate_candidate_plan(forged, contract, snapshot)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted " + mutation)
+print("snapshot and candidate binding passed")
+`, path.dirname(convergenceScript), fixture.root, JSON.stringify(candidate({}))], {
+      cwd: fixture.root, encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("snapshot and candidate binding passed");
+  });
   test("rejects isolated writes from unauthorized branches before loading storage credentials", () => {
     const fixture = createRepository();
     const candidatePath = path.join(fixture.root, "candidate.json");
