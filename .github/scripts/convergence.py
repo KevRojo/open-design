@@ -1469,6 +1469,7 @@ def publish_command(args: argparse.Namespace) -> int:
     workflow = candidate["workflow"]
     policy = candidate["policy"]
     promoted_products = 0
+    product_uploads: dict[str, list[tuple[str, Path, str]]] = {}
     for item in candidate["results"]:
         receipt = item["receipt"]
         identity = receipt["workload"]
@@ -1490,15 +1491,7 @@ def publish_command(args: argparse.Namespace) -> int:
             if declared_digest is not None and declared_digest != content_digest:
                 raise ConfigError(f"declared product digest differs from artifact: {identity}/{name}")
             data["sha256"] = content_digest
-            try:
-                client.put_file(
-                    key=key,
-                    file=archive,
-                    content_type="application/zip",
-                )
-            except R2PreconditionFailed:
-                if sha256_url(f"{origin}/{key}", args.timeout) != content_digest:
-                    raise ConfigError(f"immutable workload product collision: {key}")
+            product_uploads.setdefault(identity, []).append((key, archive, content_digest))
             promoted = {"type": "url", "source": f"{origin}/{key}"}
             promoted["data"] = data
             receipt["products"][name] = promoted
@@ -1508,6 +1501,8 @@ def publish_command(args: argparse.Namespace) -> int:
     manifest = prepare_publication(promoted_candidate, args.output_dir)
     published = 0
     unchanged = 0
+    uploaded_products = 0
+    uploaded_product_bytes = 0
     for item in manifest:
         key = item["key"]
         file = Path(item["file"])
@@ -1519,6 +1514,17 @@ def publish_command(args: argparse.Namespace) -> int:
                 raise ConfigError(f"immutable workload result collision: {key}")
             unchanged += 1
             continue
+        # Compare the complete normalized recipe/result before sending product
+        # bodies. A prior successful receipt proves all its products were
+        # published; retries must not PUT the same products again.
+        for product_object_key, archive, content_digest in product_uploads.get(receipt["workload"], []):
+            try:
+                client.put_file(key=product_object_key, file=archive, content_type="application/zip")
+                uploaded_products += 1
+                uploaded_product_bytes += archive.stat().st_size
+            except R2PreconditionFailed:
+                if sha256_url(f"{origin}/{product_object_key}", args.timeout) != content_digest:
+                    raise ConfigError(f"immutable workload product collision: {product_object_key}")
         try:
             client.put_file(key=key, file=file)
             published += 1
@@ -1529,7 +1535,8 @@ def publish_command(args: argparse.Namespace) -> int:
             unchanged += 1
     print(
         json.dumps(
-            {"promotedProducts": promoted_products, "published": published, "unchanged": unchanged},
+            {"promotedProducts": promoted_products, "uploadedProducts": uploaded_products,
+             "uploadedProductBytes": uploaded_product_bytes, "published": published, "unchanged": unchanged},
             sort_keys=True,
         )
     )

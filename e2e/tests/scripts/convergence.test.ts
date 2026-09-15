@@ -95,6 +95,49 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("repeated publication sends no product PUT and rejects changed bytes before writes", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import argparse, copy, json, sys, zipfile
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+candidate = json.loads(sys.argv[3])
+source = root / "build.zip"
+with zipfile.ZipFile(source, "w") as archive: archive.writestr("entry.txt", "original")
+path = root / "candidate.json"
+path.write_text(json.dumps(candidate))
+args = argparse.Namespace(isolated=False, candidate=path, products_root=root, output_dir=root / "out", timeout=1)
+storage = {"endpoint": "https://r2.example", "bucket": "test", "access_key_id": "test", "secret_access_key": "test", "public_origin": "https://results.example"}
+objects = {}
+writes = []
+def put(*, key, file, **kwargs):
+    writes.append(key)
+    objects[key] = file.read_bytes()
+def get(url, timeout):
+    body = objects.get(url.removeprefix("https://results.example/"))
+    return json.loads(body) if body is not None else None
+with patch("convergence.storage_config", return_value=storage), patch.object(c.R2Client, "put_file", side_effect=put), patch("convergence.existing_receipt", side_effect=get):
+    c.publish_command(args)
+    assert len(writes) == 2 and writes[0].startswith("workload-products/") and writes[1].startswith("workload-results/")
+    writes.clear()
+    candidate["provenance"]["runId"] = 13
+    candidate["results"][0]["receipt"]["validated"]["runId"] = 13
+    path.write_text(json.dumps(candidate))
+    c.publish_command(args)
+    assert writes == [], "repeated result reuploaded a product"
+    with zipfile.ZipFile(source, "w") as archive: archive.writestr("entry.txt", "different")
+    try: c.publish_command(args)
+    except c.ConfigError as error: assert "collision" in str(error)
+    else: raise AssertionError("accepted different product content under one recipe")
+    assert writes == [], "collision caused a write before validation"
+`, path.dirname(convergenceScript), fixture.root, JSON.stringify(candidate({ bundle: { type: "job", source: "build" } }))], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('"uploadedProductBytes": 0');
+  });
+
   test("reads all jobs from the exact attempt and rejects malformed API responses", () => {
     const result = spawnSync("python3", ["-c", `
 import sys
