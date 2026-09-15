@@ -177,6 +177,7 @@ function runFixturePostinstall(sandbox: string, env: Record<string, string | und
     env: {
       ...process.env,
       npm_execpath: join(sandbox, "pnpm-stub.mjs"),
+      OPEN_DESIGN_POSTINSTALL_TARGETS: undefined,
       ...env,
     },
   });
@@ -197,6 +198,44 @@ function eventIndex(events: StubEvent[], event: StubEvent["event"], target: stri
 }
 
 describe("postinstall script contract", () => {
+  it("[P2] selects a transitive tool build closure without compiling unrelated applications", () => {
+    const sandbox = createSandbox();
+    try {
+      writeTarget(sandbox, "packages/release", { name: "@open-design/release" });
+      writeTarget(sandbox, "packages/contracts", {
+        name: "@open-design/contracts", dependencies: { "@open-design/release": "workspace:*" },
+      });
+      writeTarget(sandbox, "tools/pack", {
+        name: "@open-design/tools-pack", dependencies: { "@open-design/contracts": "workspace:*" },
+      });
+      writeTarget(sandbox, "apps/daemon", { name: "@open-design/daemon" });
+      const log = writePnpmStub(sandbox);
+      const result = runFixturePostinstall(sandbox, {
+        OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/pack"]',
+        OPEN_DESIGN_POSTINSTALL_CONCURRENCY: "2",
+      });
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(readStubEvents(log).filter((event) => event.event === "start").map((event) => event.target))
+        .toEqual(["packages/release", "packages/contracts", "tools/pack"]);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['"tools/pack"', '["tools/missing"]', '[42]', '{'])
+    ("[P2] rejects invalid install build scopes before invoking builds: %s", (scope) => {
+      const sandbox = createSandbox();
+      try {
+        writeTarget(sandbox, "packages/release", { name: "@open-design/release" });
+        const log = writePnpmStub(sandbox);
+        const result = runFixturePostinstall(sandbox, { OPEN_DESIGN_POSTINSTALL_TARGETS: scope });
+        expect(result.status).not.toBe(0);
+        expect(readStubEvents(log)).toEqual([]);
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    });
+
   it("[P2] keeps consumed workspace bin entries linkable before postinstall", () => {
     const manifests = new Map(workspacePackageDirectories().map((directory) => [directory, readJson(`${directory}/package.json`)]));
     const consumedWorkspacePackages = new Set<string>();
@@ -313,7 +352,7 @@ describe("postinstall script contract", () => {
     }
   });
 
-  it("[P2] rebuilds better-sqlite3 when the native addon cannot load", () => {
+  it.each([undefined, "[]"])("[P2] retains native-addon validation with install build scope %s", (scope) => {
     const sandbox = createSandbox();
     try {
       writeTarget(sandbox, "apps/daemon", { name: "@open-design/daemon", tsconfig: false });
@@ -326,7 +365,7 @@ describe("postinstall script contract", () => {
       );
       const invocationLog = writePnpmStub(sandbox);
 
-      const result = runFixturePostinstall(sandbox, {});
+      const result = runFixturePostinstall(sandbox, { OPEN_DESIGN_POSTINSTALL_TARGETS: scope });
       expect(result.status, String(result.stderr)).toBe(0);
       expect(result.stdout).toContain("postinstall: rebuilding better-sqlite3");
       expect(readStubEvents(invocationLog)).toContainEqual({

@@ -195,7 +195,28 @@ async function runBuildTargetsInParallel(targets, concurrency) {
 }
 
 async function runBuildTargets() {
-  const targets = availableBuildTargets();
+  const available = availableBuildTargets();
+  const raw = process.env.OPEN_DESIGN_POSTINSTALL_TARGETS;
+  let targets = available;
+  if (raw != null && raw.trim() !== "") {
+    const requested = JSON.parse(raw);
+    if (!Array.isArray(requested) || requested.some((target) => typeof target !== "string" || !available.includes(target))) {
+      throw new Error("OPEN_DESIGN_POSTINSTALL_TARGETS must be a JSON array of available build target directories");
+    }
+    // Execution scope, not a cache policy: retain the ordinary dependency graph
+    // and rebuild selected tools plus their workspace dependencies. Install-time
+    // materialization and native-addon validation remain unconditional.
+    const dependencies = buildDependencyMap(available);
+    const selected = new Set();
+    function include(target) {
+      if (selected.has(target)) return;
+      selected.add(target);
+      for (const dependency of dependencies.get(target)) include(dependency);
+    }
+    for (const target of requested) include(target);
+    targets = available.filter((target) => selected.has(target));
+    process.stdout.write(`postinstall: selected build closure ${JSON.stringify(targets)}\n`);
+  }
   const concurrency = postinstallConcurrency();
   await runBuildTargetsInParallel(targets, concurrency);
 }

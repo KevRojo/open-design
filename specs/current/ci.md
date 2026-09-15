@@ -306,6 +306,22 @@ Moved or unavailable PR merge refs refuse admission; they do not grant reuse.
 owns protocol validation and publication orchestration; `lib/r2.py` owns only
 signed R2 transport. Write credentials never enter the low-privilege CI run.
 
+### Install-time execution scope
+
+`OPEN_DESIGN_POSTINSTALL_TARGETS` is an optional JSON array of build target
+directories from `scripts/postinstall.mjs`. The installer builds their transitive
+workspace dependency closure in its normal dependency order. Unset or blank
+preserves the full default; an explicit empty array requests no workspace builds.
+Unknown/unavailable targets and malformed selections fail before any build runs.
+Vendor materialization and native-addon validation still run for every scope.
+
+The three beta native jobs select pack/release/dev/serve tools rather than
+compiling the daemon during installation and again during source preparation.
+This is a general execution parameter, not a Plan key, hit flag, or local cache
+invalidation mechanism. Tools' bootstrap dependencies still compile; only work
+actually avoided may count toward measured savings. Linux, Docker, and ordinary
+developer installs retain their existing defaults.
+
 ### Job graph and convergence
 
 The current control flow is:

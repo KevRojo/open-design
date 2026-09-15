@@ -529,6 +529,8 @@ jobs:
             ${{ steps.mac_arm64_tools_pack_cache_key.outputs.prefix }}
 
       - name: Install dependencies
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare mac_arm64 signing certificate
@@ -912,6 +914,8 @@ jobs:
             ${{ steps.mac_x64_tools_pack_cache_key.outputs.prefix }}
 
       - name: Install dependencies
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare mac_x64 signing certificate
@@ -1216,6 +1220,8 @@ jobs:
             ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
 
       - name: Install dependencies
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
         run: pnpm install --frozen-lockfile
 
       - name: Setup NSIS

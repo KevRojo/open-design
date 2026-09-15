@@ -2332,6 +2332,23 @@ process.stdin.on("end", () => {
     expect(beta).not.toContain("uses: ./.github/workflows/release-prerelease.yml");
   });
 
+  it("[P2] limits beta native install compilation to tools and their dependency closure", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const targets = '["tools/pack","tools/release","tools/dev","tools/serve"]';
+    for (const [start, end] of [
+      ["build_mac_arm64", "build_mac_x64"],
+      ["build_mac_x64", "build_win_x64"],
+      ["build_win_x64", "build_linux_x64"],
+    ]) {
+      const job = sectionBetween(workflow, `\n  ${start}:`, `\n  ${end}:`);
+      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
+      expect(job).toContain("run: pnpm install --frozen-lockfile");
+      expect(job).not.toContain("--ignore-scripts");
+    }
+    const linux = sectionBetween(workflow, "\n  build_linux_x64:", "\n  publish:");
+    expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
+  });
+
   it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");
