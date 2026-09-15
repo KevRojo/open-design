@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 3 },
+    schema: { version: 4 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -95,6 +95,73 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("shares only explicit identical recipes from declared producers, preserving isolation otherwise", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import copy, json, sys, urllib.error
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+path = root / "convergence.json"
+raw = json.loads(path.read_text())
+raw["workflows"]["release-stable"] = copy.deepcopy(raw["workflows"]["ci"])
+raw["workflows"]["release-stable"]["policy"] = "stable-v1"
+path.write_text(json.dumps(raw))
+contract = c.ConvergenceContract(path)
+runners = {"worker": ["ubuntu-24.04"]}
+assert c.calculate(contract, root, "ci", runners)["a"]["digest"] != c.calculate(contract, root, "release-stable", runners)["a"]["digest"]
+source = {"workflow": "ci", "policy": "test-v1", "workload": "a"}
+for workflow in raw["workflows"].values():
+    workflow["workloads"]["a"]["recipe"] = "shared-test"
+raw["workflows"]["release-stable"]["workloads"]["a"]["trustedSources"] = [source]
+path.write_text(json.dumps(raw))
+contract = c.ConvergenceContract(path)
+producer = c.calculate(contract, root, "ci", runners)["a"]
+consumer = c.calculate(contract, root, "release-stable", runners)["a"]
+assert producer["digest"] == consumer["digest"]
+receipt = json.loads(sys.argv[3])["results"][0]["receipt"]
+receipt["digest"] = producer["digest"]
+workflow = contract.workflow("release-stable")
+c.validate_result(receipt, repository_id=42, workflow=workflow, identity="a", expected=consumer)
+urls = []
+def fetch(url, timeout):
+    urls.append(url)
+    if "/workflows/release-stable/" in url: raise urllib.error.HTTPError(url, 404, "missing", {}, None)
+    return receipt
+with patch("convergence.fetch_result", side_effect=fetch):
+    hits, _, results = c.resolve_results("https://results.example", 42, workflow, {"a": consumer}, 1)
+    assert hits == {"a": True} and len(urls) == 2
+    assert results["a"]["workflow"] == "ci", "producer provenance was relabelled"
+for mutation in ("no-trust", "policy", "recipe", "runner", "steps", "input"):
+    changed = copy.deepcopy(consumer)
+    value = copy.deepcopy(receipt)
+    if mutation == "no-trust": changed["trustedSources"] = []
+    if mutation == "policy": value["policy"] = "untrusted-v1"
+    if mutation == "recipe": changed["digest"] = "f" * 64
+    if mutation == "runner": value["executionClass"]["labels"] = ["other-os"]
+    if mutation in ("steps", "input"):
+        edited = copy.deepcopy(raw)
+        declaration = edited["workflows"]["release-stable"]["workloads"]["a"]
+        if mutation == "steps": declaration["success"]["Job a"].append("Additional coverage")
+        else: declaration["inputs"].append("b.txt")
+        path.write_text(json.dumps(edited))
+        changed = c.calculate(c.ConvergenceContract(path), root, "release-stable", runners)["a"]
+    try: c.validate_result(value, repository_id=42, workflow=workflow, identity="a", expected=changed)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted " + mutation)
+# Shared recipe names cannot alias different declared inputs in one calculate call.
+edited = copy.deepcopy(raw)
+edited["workflows"]["ci"]["workloads"]["b"] = copy.deepcopy(edited["workflows"]["ci"]["workloads"]["a"])
+edited["workflows"]["ci"]["workloads"]["b"]["inputs"].append("b.txt")
+path.write_text(json.dumps(edited))
+calculated = c.calculate(c.ConvergenceContract(path), root, "ci", runners)
+assert calculated["a"]["digest"] != calculated["b"]["digest"]
+`, path.dirname(convergenceScript), fixture.root, JSON.stringify(candidate({}))], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("repeated publication sends no product PUT and rejects changed bytes before writes", () => {
     const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `
@@ -354,7 +421,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 3");
+    expect(stale.stderr).toContain("requires schema.version 4");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();

@@ -1,5 +1,5 @@
 {
-  "schema": { "version": 3 },
+  "schema": { "version": 4 },
   "suites": {
     "convergence-control": [
       ".github/config/convergence-exact.json",

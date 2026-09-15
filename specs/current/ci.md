@@ -247,6 +247,16 @@ contract participates in identity; hashing or declaration interpretation changes
 require a bump of the sole `schema.version`. Cycles, dangling suites, unsafe paths, empty matches, schema
 drift, and scope/convergence identity drift fail at the plan entrypoint.
 
+Workflows remain isolated by default. A reusable workload may opt into a named
+`recipe` and list `trustedSources` as explicit `{workflow, policy, workload}`
+coordinates. Only then can an identical recipe digest be read from another
+producer's partition. Git inputs, execution class, product mode, schema version,
+and success coverage still have to match. Merely using the same recipe name is
+insufficient. Published receipts retain the original producer's provenance;
+consumers do not relabel or republish imported success. Trust configuration
+controls admission to reuse, not source identity. Initial workflow integrations
+must align actual execution contracts before enabling these declarations.
+
 Reuse is valid only for a workload with no products or a complete typed product
 manifest. A manifest is one JSON value even when the job has several products;
 partial product reuse is invalid. Entries use `{type: "url" | "job", source:
@@ -255,6 +265,11 @@ artifact produced by the workload. The trusted atom promotes its archive to an
 immutable, normalized, credential-free `url` source, records its SHA-256 in the
 manifest, and verifies that digest on reuse before the result becomes a hit. If
 that production cannot be modeled cleanly, the workload remains non-reusable.
+Repeated contribution compares the complete normalized result before issuing
+product writes. An existing identical successful result causes zero product
+PUTs; changed bytes under one identity fail before writes. Incomplete or racing
+first publication still uses immutable conditional writes, and a success receipt
+is written only after every product is available.
 
 CI reads immutable result receipts through the public base URL. A missing
 secret, 404, timeout, malformed receipt, product mismatch, or unavailable

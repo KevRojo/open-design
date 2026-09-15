@@ -40,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -78,7 +78,7 @@ class Workload:
         expected = {"inputs", "runnerClass", "products", "reusable"}
         if value.get("reusable") is True:
             expected.add("success")
-        if set(value) != expected:
+        if not expected.issubset(value) or set(value) - expected - {"recipe", "trustedSources"}:
             raise ConfigError(
                 f"convergence.workflows.{workflow}.workloads.{identity} keys must be {sorted(expected)}"
             )
@@ -100,6 +100,24 @@ class Workload:
                     or any(not isinstance(step, str) or not step for step in steps)
                     or len(set(steps)) != len(steps)):
                 raise ConfigError(f"success job {job} requires unique non-empty execution steps")
+        self.recipe = require_identity(value["recipe"], "shared recipe") if "recipe" in value else None
+        self.trusted_sources = value.get("trustedSources", [])
+        if not isinstance(self.trusted_sources, list):
+            raise ConfigError("trustedSources must be an array")
+        seen: set[str] = set()
+        for source in self.trusted_sources:
+            source = object_value(source, "trusted source")
+            if set(source) != {"workflow", "policy", "workload"}:
+                raise ConfigError("trusted source requires workflow, policy, and workload")
+            for field, item in source.items():
+                require_identity(item, f"trusted source {field}")
+            if canonical_json(source) in seen:
+                raise ConfigError("duplicate trusted source")
+            seen.add(canonical_json(source))
+        if (self.recipe is not None or self.trusted_sources) and not self.reusable:
+            raise ConfigError("shared recipes require reusable workloads")
+        if self.trusted_sources and self.recipe is None:
+            raise ConfigError("trustedSources requires an explicit shared recipe")
 
 
 class WorkflowContract:
@@ -300,16 +318,18 @@ def calculate(
         input_digest = digest_tokens(
             contract,
             fingerprinter,
-            f"workload-inputs://{workflow_name}/{identity}",
+            f"recipe-inputs://{workload.recipe}" if workload.recipe else f"workload-inputs://{workflow_name}/{identity}",
             workload.inputs,
-            resolved,
+            {} if workload.recipe else resolved,
         )
         execution_class = canonical_json({"runnerClass": workload.runner_class, "labels": labels})
         # Control source is an admission boundary, not a global cache input.
         # Workloads declare execution-affecting source/configuration explicitly.
         digest = hashlib.sha256(canonical_json({
             "schemaVersion": contract.schema_version, "protocol": PROTOCOL,
-            "workflow": workflow_name, "policy": workflow.policy, "workload": identity,
+            "identity": {"recipe": workload.recipe} if workload.recipe else {
+                "workflow": workflow_name, "policy": workflow.policy, "workload": identity,
+            },
             "inputs": input_digest, "executionClass": json.loads(execution_class),
             "products": workload.products, "reusable": workload.reusable,
             "success": workload.success,
@@ -319,6 +339,7 @@ def calculate(
             "executionClass": json.loads(execution_class),
             "products": workload.products,
             "reusable": workload.reusable,
+            "trustedSources": workload.trusted_sources,
         }
     return results
 
@@ -490,12 +511,12 @@ def validate_result(
         "schemaVersion": 1,
         "protocol": PROTOCOL,
         "repositoryId": repository_id,
-        "workflow": workflow.name,
-        "policy": workflow.policy,
-        "workload": identity,
         "digest": expected["digest"],
         "executionClass": expected["executionClass"],
     }
+    source = {key: result.get(key) for key in ("workflow", "policy", "workload")}
+    if source not in result_sources(workflow, identity, expected):
+        raise ConfigError("workload result producer is not explicitly trusted")
     for key, expected_value in checks.items():
         if result.get(key) != expected_value:
             raise ConfigError(f"workload result {key} mismatch")
@@ -592,6 +613,11 @@ def normalize_product_archive(source: Path, destination: Path) -> None:
                     shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
 
 
+def result_sources(workflow: WorkflowContract, identity: str, expected: dict[str, Any]) -> list[dict[str, str]]:
+    own = {"workflow": workflow.name, "policy": workflow.policy, "workload": identity}
+    return [own, *[source for source in expected.get("trustedSources", []) if source != own]]
+
+
 def resolve_results(
     base_url: str | None,
     repository_id: int,
@@ -614,34 +640,26 @@ def resolve_results(
             return identity, False, "reuse-disabled", None
         if not base_url:
             return identity, False, "base-url-invalid" if invalid_base_url else "base-url-missing", None
-        key = result_key(repository_id, workflow.name, workflow.policy, identity, expected["digest"])
-        url = f"{base_url.rstrip('/')}/{key}"
-        try:
-            value = fetch_result(url, timeout)
-            result = validate_result(
-                value,
-                repository_id=repository_id,
-                workflow=workflow,
-                identity=identity,
-                expected=expected,
-            )
-            for product in result["products"].values():
-                # Scheduling observes availability, never materializes payloads.
-                # Consumers must verify SHA-256 before exposing restored bytes.
-                probe_product(product["source"], timeout)
-            return identity, True, "result-hit", result
-        except urllib.error.HTTPError as error:
-            return identity, False, "result-missing" if error.code == 404 else f"read-http-{error.code}", None
-        except (
-            ConfigError,
-            json.JSONDecodeError,
-            UnicodeError,
-            http.client.HTTPException,
-            OSError,
-            urllib.error.URLError,
-            TimeoutError,
-        ) as error:
-            return identity, False, f"read-unavailable:{type(error).__name__}", None
+        reason = "result-missing"
+        for source in result_sources(workflow, identity, expected):
+            key = result_key(repository_id, source["workflow"], source["policy"], source["workload"], expected["digest"])
+            url = f"{base_url.rstrip('/')}/{key}"
+            try:
+                value = fetch_result(url, timeout)
+                result = validate_result(value, repository_id=repository_id, workflow=workflow,
+                                         identity=identity, expected=expected)
+                if any(result[field] != source[field] for field in source):
+                    raise ConfigError("workload result producer differs from requested storage key")
+                for product in result["products"].values():
+                    # Planning observes availability, never materializes payloads.
+                    probe_product(product["source"], timeout)
+                return identity, True, "result-hit", result
+            except urllib.error.HTTPError as error:
+                reason = "result-missing" if error.code == 404 else f"read-http-{error.code}"
+            except (ConfigError, json.JSONDecodeError, UnicodeError, http.client.HTTPException,
+                    OSError, urllib.error.URLError, TimeoutError) as error:
+                reason = f"read-unavailable:{type(error).__name__}"
+        return identity, False, reason, None
     # Bound independent public metadata reads; preserve declaration order and
     # per-workload fail-open decisions regardless of completion order.
     if calculated:
