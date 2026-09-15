@@ -162,6 +162,7 @@ describe("smoke-artifacts", () => {
     };
     await expect(run("stage", { ...env, EXPECTED_CHANNEL: "beta" })).rejects.toThrow(/channel is prerelease, not beta/);
     await expect(run("stage", { ...env, EXPECTED_VERSION: "0.22.1-beta.1" })).rejects.toThrow(/not the dispatched/);
+    await expect(run("stage", { ...env, EXPECTED_COMMIT: "a".repeat(40) })).rejects.toThrow(/expected source commit/);
     expect(existsSync(env.BUILD_JSON_PATH)).toBe(false);
   });
 
@@ -262,6 +263,7 @@ describe("smoke-artifacts", () => {
           VERSION_METADATA_URL: `${origin}/prerelease/versions/${VERSION}/metadata.json`,
         }),
       ).rejects.toThrow(/does not match published/);
+      expect(existsSync(join(workDir, "corrupt", "out", "mac", "namespaces", "release-prerelease", "dmg", "Open Design-release-prerelease.dmg"))).toBe(false);
     } finally {
       corruptDmg = false;
     }

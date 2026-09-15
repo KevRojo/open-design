@@ -30,6 +30,7 @@ type AssetEntry = { name?: unknown; sha256Url?: unknown; size?: unknown; url?: u
 type TargetEntry = { artifacts?: Record<string, AssetEntry>; status?: unknown };
 type VersionMetadata = {
   channel?: unknown;
+  github?: { commit?: unknown };
   releaseVersion?: unknown;
   releaseTargets?: Record<string, TargetEntry>;
 };
@@ -82,6 +83,10 @@ async function fetchJson(url: string): Promise<VersionMetadata> {
   if (expectedChannel && metadata.channel !== expectedChannel) {
     throw new Error(`version metadata channel is ${String(metadata.channel)}, not ${expectedChannel}`);
   }
+  const expectedCommit = optional("EXPECTED_COMMIT");
+  if (expectedCommit && metadata.github?.commit !== expectedCommit) {
+    throw new Error("version metadata does not match the expected source commit");
+  }
   return metadata;
 }
 
@@ -129,13 +134,19 @@ function artifactDestination(target: ReleaseTarget, toolsPackDir: string, namesp
   return join(toolsPackDir, "out", "mac", "namespaces", namespace, "dmg", `Open Design-${token}.dmg`);
 }
 
-async function download(url: string, destination: string): Promise<{ bytes: number; sha256: string }> {
+async function download(
+  url: string, destination: string,
+  verify: (result: { bytes: number; sha256: string }) => void | Promise<void>,
+): Promise<{ bytes: number; sha256: string }> {
   const response = await fetch(url, { redirect: "follow" });
   if (!response.ok) throw new Error(`GET ${url} failed: HTTP ${response.status}`);
   const buffer = Buffer.from(await response.arrayBuffer());
+  const result = { bytes: buffer.byteLength, sha256: createHash("sha256").update(buffer).digest("hex") };
+  // A rejected download must never overwrite the installable artifact.
+  await verify(result);
   mkdirSync(dirname(destination), { recursive: true });
   writeFileSync(destination, buffer);
-  return { bytes: buffer.byteLength, sha256: createHash("sha256").update(buffer).digest("hex") };
+  return result;
 }
 
 async function verifyChecksum(sha256Url: string, actual: string): Promise<void> {
@@ -190,8 +201,7 @@ async function stage(): Promise<void> {
   if (optional("EXPECTED_CHANNEL") && !asset.sha256Url) throw new Error("published artifact lacks required sha256 sidecar");
   const destination = artifactDestination(target, toolsPackDir, namespace);
   console.log(`staging ${asset.url}\n     -> ${destination}`);
-  const { bytes, sha256 } = await download(asset.url, destination);
-  await verifyChecksum(asset.sha256Url, sha256);
+  const { bytes, sha256 } = await download(asset.url, destination, ({ sha256 }) => verifyChecksum(asset.sha256Url, sha256));
 
   writeBuildJson(buildJsonPath, {
     source: "published-artifact",
@@ -259,8 +269,9 @@ async function stageDogfood(): Promise<void> {
   const toolsPackDir = required("TOOLS_PACK_DIR");
   const namespace = required("RELEASE_NAMESPACE");
   const destination = artifactDestination(target as ReleaseTarget, toolsPackDir, namespace);
-  const actual = await download(file.url, destination);
-  if (actual.sha256 !== file.sha256 || actual.bytes !== file.size) throw new Error("dogfood artifact checksum/size mismatch");
+  await download(file.url, destination, (actual) => {
+    if (actual.sha256 !== file.sha256 || actual.bytes !== file.size) throw new Error("dogfood artifact checksum/size mismatch");
+  });
   writeBuildJson(required("BUILD_JSON_PATH"), {
     source: "dogfood-artifact",
     releaseVersion: receipt.version,
