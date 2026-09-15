@@ -76,6 +76,21 @@ Its JS/map pairs stay pristine: release-specific sourcemap injection/upload and
 map removal remain on the packaging materialization path. A restored public Web
 result must preserve those pairs until that path runs.
 
+On macOS, `tools-pack mac build` remains the complete local build with its
+workspace cache. `tools-pack mac package` instead consumes completed
+`packages/daemon/web/shell` outputs at their normal workspace locations, without
+calling source builders or acquiring the workspace cache. It checks output
+completeness before any packaging side effect, then runs release-specific
+sourcemap processing and the same native packaging stages as `build`.
+The caller must supply matching source/configuration outputs and pristine Web
+maps for each invocation. This is an execution boundary, not a cache-admission
+or freshness protocol: there is no new manifest, workflow identity, or key.
+Windows exposes the same `win package` execution boundary. It retains its own
+downstream tarball/resource/native caches and their existing local determinants,
+without acquiring the source workspace cache or receiving any external identity.
+Plan's key and artifact checksums are never combined with those local keys.
+The Linux/Docker paths are unchanged.
+
 ## Determinant rules
 
 **R1 — A node key must cover every input that determines the node's output.**

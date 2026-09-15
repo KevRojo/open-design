@@ -7,6 +7,7 @@ import {
   installPackedMacDmg,
   inspectPackedMacApp,
   packMac,
+  packageMac,
   readPackedMacLogs,
   startPackedMacApp,
   stopPackedMacApp,
@@ -19,6 +20,7 @@ import {
   inspectPackedWinApp,
   listPackedWinNamespaces,
   packWin,
+  packageWin,
   readPackedWinLogs,
   resetPackedWinNamespaces,
   startPackedWinApp,
@@ -133,12 +135,15 @@ cli.command('verify-runtime', 'Verify installed prerelease Vela/OpenCode identit
     printJson(await verifyPackagedRuntime({ ...options, expectedOpenCode: options.expectedOpencode }));
   });
 
-addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging commands: build|install|start|stop|logs|uninstall|cleanup|inspect"))).action(
+addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging commands: build|package|install|start|stop|logs|uninstall|cleanup|inspect"))).action(
   async (action: string, options: CliOptions) => {
     const config = resolveToolPackConfig("mac", options);
     switch (action) {
       case "build":
         printJson(await packMac(config));
+        return;
+      case "package":
+        printJson(await packageMac(config));
         return;
       case "install":
         printJson(await installPackedMacDmg(config));
@@ -172,7 +177,7 @@ addWinLifecycleOptions(
     addSharedOptions(
       cli.command(
         "win <action>",
-        "Windows packaging commands: build|install|start|stop|logs|uninstall|cleanup|list|reset|inspect|diagnose-ipc|validate-payload",
+        "Windows packaging commands: build|package|install|start|stop|logs|uninstall|cleanup|list|reset|inspect|diagnose-ipc|validate-payload",
       ),
     ),
     "win",
@@ -182,6 +187,9 @@ addWinLifecycleOptions(
   switch (action) {
     case "build":
       printJson(await packWin(config));
+      return;
+    case "package":
+      printJson(await packageWin(config));
       return;
     case "install":
       printJson(await installPackedWinApp(config));

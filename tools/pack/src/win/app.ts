@@ -32,7 +32,9 @@ import {
   shouldInstallInternalPackageForWinPrebundle,
   shouldUseWinStandalonePrebundle,
 } from "./prebundle.js";
-import { ensureWorkspaceBuildArtifacts } from "../workspace-build.js";
+import { createWorkspaceBuildCacheKey, ensureWorkspaceBuildArtifacts, workspaceBuildUnitResult } from "../workspace-build.js";
+import { WORKSPACE_BUILD_UNITS } from "../workspace/units.js";
+import { processWebSourcemaps } from "../web-sourcemaps.js";
 import {
   ELECTRON_BUILDER_BUILD_DEPENDENCIES_FROM_SOURCE,
   ELECTRON_REBUILD_MODE,
@@ -133,6 +135,14 @@ export async function ensureWinWorkspaceBuild(config: ToolPackConfig, cache: Too
     cache,
     async (args, extraEnv) => await runPnpm(config, args, extraEnv),
   );
+}
+
+/** Consume source outputs while retaining Windows' own downstream cache determinants. */
+export async function materializeWinWorkspaceOutputs(config: ToolPackConfig): Promise<string> {
+  for (const unit of WORKSPACE_BUILD_UNITS) await workspaceBuildUnitResult(config, unit);
+  const key = await createWorkspaceBuildCacheKey(config);
+  await processWebSourcemaps(config);
+  return key;
 }
 
 export async function createWorkspaceTarballsCacheKey(

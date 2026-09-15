@@ -1,5 +1,8 @@
 import { ToolPackCache } from "../cache/index.js";
 import type { ToolPackConfig } from "../config/index.js";
+import { workspaceBuildUnitResult } from "../workspace-build.js";
+import { WORKSPACE_BUILD_UNITS } from "../workspace/units.js";
+import { processWebSourcemaps } from "../web-sourcemaps.js";
 import { collectWorkspaceTarballs, copyResourceTree, writeAssembledApp } from "./app.js";
 import { seedPackagedAppConfig } from "./app-config.js";
 import { finalizeMacArtifacts } from "./artifacts.js";
@@ -19,6 +22,15 @@ function logMacBuildProgress(message: string, fields: Record<string, unknown> = 
 }
 
 export async function packMac(config: ToolPackConfig): Promise<MacPackResult> {
+  return executeMacPackaging(config, "build");
+}
+
+/** Package caller-built/restored source outputs; source provenance belongs to the caller. */
+export async function packageMac(config: ToolPackConfig): Promise<MacPackResult> {
+  return executeMacPackaging(config, "existing");
+}
+
+async function executeMacPackaging(config: ToolPackConfig, source: "build" | "existing"): Promise<MacPackResult> {
   const paths = resolveMacPaths(config);
   const targets = resolveElectronBuilderTargets(config.to as MacBuildOutput);
   const cache = new ToolPackCache(config.roots.cacheRoot);
@@ -42,9 +54,16 @@ export async function packMac(config: ToolPackConfig): Promise<MacPackResult> {
     }
   };
 
-  await runPhase("workspace-build", async () => {
-    await ensureMacWorkspaceBuild(config, cache);
-  });
+  if (source === "build") {
+    await runPhase("workspace-build", async () => ensureMacWorkspaceBuild(config, cache));
+  } else {
+    await runPhase("workspace-inputs", async () => {
+      for (const unit of WORKSPACE_BUILD_UNITS) await workspaceBuildUnitResult(config, unit);
+    });
+    // Public source results preserve pristine maps. Per-release upload and
+    // stripping are packaging work even when source compilation was omitted.
+    await runPhase("web-sourcemaps", async () => processWebSourcemaps(config));
+  }
   await runPhase("seed-app-config", async () => {
     await seedPackagedAppConfig(config);
   });
