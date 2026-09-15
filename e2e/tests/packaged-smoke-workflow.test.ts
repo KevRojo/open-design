@@ -2349,6 +2349,28 @@ process.stdin.on("end", () => {
     expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
   });
 
+  it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
+    for (const [target, next] of [["mac_arm64", "mac_x64"], ["mac_x64", "win_x64"], ["win_x64", "linux_x64"]]) {
+      const job = sectionBetween(workflow, `\n  build_${target}:`, `\n  build_${next}:`);
+      expect(job).toContain("needs: [metadata, plan_tests]");
+      expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
+      expect(job).toContain("uses: ./.github/actions/workspace-products");
+      expect(job).toContain(`target: ${target}`);
+      expect(job.indexOf("[build] Workspace source products")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
+      expect(job).toContain(target === "win_x64" ? '"tools-pack", "win", "package"' : "exec tools-pack mac package");
+      expect(config.workflows["release-beta"].workloads[`source_${target}`]).toMatchObject({
+        inputs: ["suite://workspace-source"], products: "manifest", runnerClass: `source_${target}`,
+        success: { [`Build beta ${target}`]: ["[build] Workspace source products"] },
+      });
+    }
+    const collection = sectionBetween(workflow, "\n  test_results:", "\n  cache_test_results:");
+    expect(collection).toContain("--workload \"source_$target\"");
+    expect(collection).toContain(".run and (.resultHit | not)");
+    expect(collection).not.toContain("download-artifact.*beta-source");
+  });
+
   it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");

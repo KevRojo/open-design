@@ -1,0 +1,43 @@
+name: Workspace source products
+description: Consume a frozen source workload decision before native packaging
+inputs:
+  pending-artifact:
+    required: true
+    description: Frozen Plan artifact from the Linux control job
+  target:
+    required: true
+    description: mac_arm64, mac_x64, or win_x64
+runs:
+  using: composite
+  steps:
+    - name: '[restore] Frozen Plan decision'
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.pending-artifact }}
+        path: ${{ runner.temp }}/source-plan
+    - name: '[build] Restore or build workspace source'
+      id: source
+      shell: bash
+      env:
+        SOURCE_TARGET: ${{ inputs.target }}
+      run: >-
+        node .github/scripts/release/workspace-products.ts
+        "$RUNNER_TEMP/source-plan/pending-convergence.json"
+        "$SOURCE_TARGET" "$RUNNER_TEMP/source-products/$SOURCE_TARGET"
+    - name: '[retain] Pristine source product'
+      if: ${{ steps.source.outputs.produced == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: beta-source-${{ inputs.target }}
+        path: ${{ runner.temp }}/source-products/${{ inputs.target }}/product/workspace.tar.gz
+        compression-level: 0
+        if-no-files-found: error
+        retention-days: 7
+    - name: '[report] Source execution witness'
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: beta-source-report-${{ inputs.target }}
+        path: ${{ runner.temp }}/source-products/${{ inputs.target }}/report.json
+        if-no-files-found: ignore
+        retention-days: 7

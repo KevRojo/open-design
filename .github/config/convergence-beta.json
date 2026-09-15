@@ -1,6 +1,10 @@
 {
   "schema": { "version": 5 },
   "resources": {
+    "workspace-source": {
+      "paths": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "apps/daemon/", "apps/web/", "apps/desktop/", "apps/packaged/", "packages/", "tools/", "scripts/postinstall.mjs", ".github/scripts/release/workspace-products.ts", ".github/actions/workspace-products/", ".github/workflows/release-beta.yml"],
+      "exclude": ["apps/packaged/package.json", "**/tests/**", "**/*.test.ts", "**/vitest.config.ts", "**/tsconfig.tests.json"]
+    },
     "repository-validation": {
       "paths": ["*"], "exclude": ["apps/packaged/package.json"]
     },
@@ -9,10 +13,12 @@
     }
   },
   "suites": {
+    "workspace-source": ["resource://workspace-source", "resource://packaged-execution"],
     "repository-validation": ["resource://repository-validation", "resource://packaged-execution"],
     "convergence-control": [
       ".github/config/convergence-beta.json", ".github/scripts/convergence.py",
       ".github/scripts/handoff.py", ".github/scripts/lib/",
+      ".github/scripts/release/workspace-products.ts", ".github/actions/workspace-products/",
       ".github/workflows/convergence.atom.yml", ".github/workflows/release-beta.yml"
     ]
   },
@@ -20,6 +26,18 @@
     "release-beta": {
       "policy": "beta-isolated-v1",
       "workloads": {
+        "source_mac_arm64": {
+          "inputs": ["suite://workspace-source"], "runnerClass": "source_mac_arm64", "products": "manifest", "reusable": true,
+          "success": { "Build beta mac_arm64": ["[build] Workspace source products"] }
+        },
+        "source_mac_x64": {
+          "inputs": ["suite://workspace-source"], "runnerClass": "source_mac_x64", "products": "manifest", "reusable": true,
+          "success": { "Build beta mac_x64": ["[build] Workspace source products"] }
+        },
+        "source_win_x64": {
+          "inputs": ["suite://workspace-source"], "runnerClass": "source_win_x64", "products": "manifest", "reusable": true,
+          "success": { "Build beta win_x64": ["[build] Workspace source products"] }
+        },
         "test_e2e_vitest": {
           "inputs": ["suite://repository-validation"], "runnerClass": "release_tests", "products": "none", "reusable": true,
           "success": { "[test] beta E2E Vitest": ["Prebuild workspace type declarations", "Run E2E Vitest"] }

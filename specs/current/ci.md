@@ -265,6 +265,27 @@ Product code and build tools do not interpret Plan identities or cache receipts.
 The beta declaration remains conservative for other source changes until paired
 execution evidence justifies narrower groups.
 
+The first native source-product integration groups packages/daemon/Web/shell
+outputs per platform and architecture, on the existing native runner. Its source
+projection excludes test directories/configuration and the packaged version;
+the four advisory test workloads retain their conservative validation closure.
+There is no cross-platform source product reuse, and changing one application
+source currently rebuilds the aggregate group. Finer application groups remain
+an optimization to validate, not an already-delivered skip claim.
+
+The native executor consumes the frozen decision without recomputing identities.
+It verifies the product checksum, restores generated leaf directories from a
+fresh staging tree, and calls ordinary `tools-pack workspace result` validation.
+Unavailable/corrupt products fall back to source execution without replacing the
+immutable hit. Cold results are retained before version-specific sourcemap
+processing, using a dereferenced tar payload inside the existing opaque product
+ZIP so executable permissions and pristine maps survive artifact transport.
+Only `convergence.atom.yml` publishes receipts/products. Native jobs call
+`tools-pack mac|win package`; their existing full-build failure fallback and
+tools-pack's internal native caches stay independent of Plan. Source receipts
+currently require their containing native job to succeed; a native failure may
+therefore forgo a source-cache contribution even after a successful source build.
+
 Workflows remain isolated by default. A reusable workload may opt into a named
 `recipe` and list `trustedSources` as explicit `{workflow, policy, workload}`
 coordinates. Only then can an identical recipe digest be read from another

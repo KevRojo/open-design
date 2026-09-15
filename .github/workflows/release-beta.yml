@@ -391,6 +391,8 @@ jobs:
           node-version: 24
 
       - name: Install dependencies
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
         run: pnpm install --frozen-lockfile
 
       - name: Resolve built identity
@@ -476,7 +478,7 @@ jobs:
 
   build_mac_arm64:
     name: Build beta mac_arm64
-    needs: metadata
+    needs: [metadata, plan_tests]
     if: ${{ inputs.enable_mac_arm64 }}
     runs-on: macos-14
     outputs:
@@ -533,6 +535,12 @@ jobs:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
         run: pnpm install --frozen-lockfile
 
+      - name: '[build] Workspace source products'
+        uses: ./.github/actions/workspace-products
+        with:
+          pending-artifact: ${{ needs.plan_tests.outputs.pending_artifact }}
+          target: mac_arm64
+
       - name: Prepare mac_arm64 signing certificate
         if: ${{ inputs.mac_arm64_sign_mode != 'no' }}
         env:
@@ -569,7 +577,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/tools-pack"
           : > "$RUNNER_TEMP/release-build/mac_arm64/build.log"
           build_args=(
-            exec tools-pack mac build
+            exec tools-pack mac package
             --dir "$RUNNER_TEMP/tools-pack"
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta
@@ -863,7 +871,7 @@ jobs:
 
   build_mac_x64:
     name: Build beta mac_x64
-    needs: metadata
+    needs: [metadata, plan_tests]
     if: ${{ inputs.enable_mac_x64 }}
     runs-on: macos-15-intel
     outputs:
@@ -918,6 +926,12 @@ jobs:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
         run: pnpm install --frozen-lockfile
 
+      - name: '[build] Workspace source products'
+        uses: ./.github/actions/workspace-products
+        with:
+          pending-artifact: ${{ needs.plan_tests.outputs.pending_artifact }}
+          target: mac_x64
+
       - name: Prepare mac_x64 signing certificate
         if: ${{ inputs.mac_x64_sign_mode != 'no' }}
         env:
@@ -947,7 +961,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/tools-pack"
           : > "$RUNNER_TEMP/release-build/mac_x64/build.log"
           build_args=(
-            exec tools-pack mac build
+            exec tools-pack mac package
             --dir "$RUNNER_TEMP/tools-pack"
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta-x64
@@ -1168,7 +1182,7 @@ jobs:
 
   build_win_x64:
     name: Build beta win_x64
-    needs: metadata
+    needs: [metadata, plan_tests]
     if: ${{ inputs.enable_win_x64 }}
     runs-on: windows-latest
     outputs:
@@ -1224,6 +1238,12 @@ jobs:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
         run: pnpm install --frozen-lockfile
 
+      - name: '[build] Workspace source products'
+        uses: ./.github/actions/workspace-products
+        with:
+          pending-artifact: ${{ needs.plan_tests.outputs.pending_artifact }}
+          target: win_x64
+
       - name: Setup NSIS
         shell: pwsh
         run: |
@@ -1265,7 +1285,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
           pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
-          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.metadata.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
+          $buildArgs = @("exec", "tools-pack", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.metadata.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
           $buildOutput = pnpm.cmd @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win build failed with exit code $LASTEXITCODE" }
@@ -1784,7 +1804,7 @@ jobs:
   # Validation is deliberately not in build/publish needs. For this branch
   # it stays in the registered beta workflow; its tail is reported separately.
   plan_tests:
-    name: '[plan] beta source validation'
+    name: '[plan] beta source results'
     needs: metadata
     runs-on: ubuntu-24.04
     outputs:
@@ -1828,7 +1848,7 @@ jobs:
           PLAN_MODE: ${{ steps.mode.outputs.mode }}
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
         run: |
-          runners="$(jq -c '. + {release_tests:["ubuntu-latest"]}' <<< "$RUNNER_PLAN")"
+          runners="$(jq -c '. + {release_tests:["ubuntu-latest"],source_mac_arm64:["macos-14"],source_mac_x64:["macos-15-intel"],source_win_x64:["windows-latest"]}' <<< "$RUNNER_PLAN")"
           python3 .github/scripts/convergence.py --root plan-source --config .github/config/convergence-beta.json github-output \
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
             --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
@@ -1954,7 +1974,7 @@ jobs:
 
   test_results:
     name: '[collect] beta successful source results'
-    needs: [plan_tests, test_functional_e2e, test_e2e_vitest, test_daemon_unit_tests, test_verify]
+    needs: [plan_tests, build_mac_arm64, build_mac_x64, build_win_x64, test_functional_e2e, test_e2e_vitest, test_daemon_unit_tests, test_verify]
     if: ${{ !cancelled() && needs.plan_tests.result == 'success' && needs.plan_tests.outputs.contribution == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -1971,6 +1991,22 @@ jobs:
         with:
           name: ${{ needs.plan_tests.outputs.pending_artifact }}
           path: ${{ runner.temp }}
+      - name: '[collect] Source product references'
+        env:
+          SOURCE_JOBS: ${{ toJSON(needs) }}
+        run: |
+          for target in mac_arm64 mac_x64 win_x64; do
+            if [ "$(jq -r --arg job "build_$target" '.[$job].result' <<< "$SOURCE_JOBS")" != success ]; then
+              continue
+            fi
+            if ! jq -e --arg id "source_$target" '.workloads[$id] | .run and (.resultHit | not)' "$RUNNER_TEMP/pending-convergence.json" >/dev/null; then
+              continue
+            fi
+            python3 .github/scripts/convergence.py --config .github/config/convergence-beta.json contribute \
+              --pending "$RUNNER_TEMP/pending-convergence.json" --workload "source_$target" \
+              --products-json "{\"bundle\":{\"type\":\"job\",\"source\":\"beta-source-$target\"}}" \
+              --output-dir "$RUNNER_TEMP/products"
+          done
       - name: '[validate] Per-workload execution evidence'
         id: handoff
         env:
