@@ -410,7 +410,14 @@ describe("packaged smoke workflow", () => {
     expect(ci).not.toContain("plan-foundation.yml");
     expect(ci).not.toContain("plan-foundation.json");
     expect(ci).toContain("uses: ./.github/workflows/convergence.atom.yml");
-    expect(ci).toContain("!cancelled() && needs.validate.result == 'success'");
+    const cacheResults = sectionBetween(ci, "  cache_results:", "  platform_restore:");
+    // Successful workload evidence is independently checked by the atom;
+    // an unrelated failed validation job must not discard those results.
+    expect(cacheResults).toContain("needs: validate");
+    expect(cacheResults).toContain("!cancelled() && github.event_name == 'workflow_dispatch'");
+    expect(cacheResults).toContain("github.ref == 'refs/heads/feat/plan-foundation'");
+    expect(cacheResults).toContain("inputs.workloads != ''");
+    expect(cacheResults).not.toContain("needs.validate.result == 'success'");
     expect(ci).toContain('run: test "$PUBLICATION_RESULT" = success');
     expect(ci).toContain("name: '[build] packages/platform'");
     expect(ci).toContain("name: '[test] packages/platform'");
