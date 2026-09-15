@@ -410,6 +410,8 @@ describe("packaged smoke workflow", () => {
     expect(ci).not.toContain("plan-foundation.yml");
     expect(ci).not.toContain("plan-foundation.json");
     expect(ci).toContain("uses: ./.github/workflows/convergence.atom.yml");
+    expect(ci).toContain("!cancelled() && needs.validate.result == 'success'");
+    expect(ci).toContain('run: test "$PUBLICATION_RESULT" = success');
     expect(ci).toContain("name: '[build] packages/platform'");
     expect(ci).toContain("name: '[test] packages/platform'");
     expect(ci.match(/pnpm --filter @open-design\/platform test/g)).toHaveLength(1);

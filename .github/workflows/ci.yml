@@ -1198,17 +1198,21 @@ jobs:
   cache_results:
     name: '[cache] Isolated successful CI results'
     needs: validate
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && inputs.workloads != '' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && inputs.workloads != '' }}
     uses: ./.github/workflows/convergence.atom.yml
     secrets: inherit
 
   platform_restore:
     name: '[validate] Restored platform package'
     needs: [plan, runners, cache_results]
-    if: ${{ fromJSON(needs.plan.outputs.enabled).platform_build }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && inputs.workloads != '' && fromJSON(needs.plan.outputs.enabled).platform_build }}
     runs-on: ${{ fromJSON(needs.runners.outputs.runs_on).workspace_unit }}
     timeout-minutes: 5
     steps:
+      - name: '[validate] Publication must have completed'
+        env:
+          PUBLICATION_RESULT: ${{ needs.cache_results.result }}
+        run: test "$PUBLICATION_RESULT" = success
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-node@v6.4.0
         with:
