@@ -13,6 +13,14 @@ on:
       handoff_id:
         type: string
         default: ci-results
+      pending_artifact:
+        description: Collect a completed result lane directly from its frozen Plan
+        type: string
+        default: ''
+      products:
+        description: Result lane to collect (manifest or none)
+        type: string
+        default: none
   workflow_run:
     workflows: [ci]
     types: [completed]
@@ -22,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: convergence-${{ github.event.workflow_run.id || github.run_id }}
+  group: convergence-${{ github.event.workflow_run.id || github.run_id }}-${{ inputs.handoff_id || 'ci-results' }}
   cancel-in-progress: false
 
 jobs:
@@ -43,15 +51,34 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
       - name: '[resolve] Gate handoff name'
+        if: ${{ inputs.pending_artifact == '' }}
         id: artifact
         env:
           HANDOFF_ID: ${{ inputs.handoff_id }}
         run: echo "name=$(python3 .github/scripts/handoff.py artifact-name convergence "$HANDOFF_ID")" >> "$GITHUB_OUTPUT"
       - name: '[collect] Successful gate handoff'
+        if: ${{ inputs.pending_artifact == '' }}
         uses: actions/download-artifact@v8
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: ${{ runner.temp }}/handoff-convergence
+      - name: '[collect] Frozen execution plan'
+        if: ${{ inputs.pending_artifact != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.pending_artifact }}
+          path: ${{ runner.temp }}/plan
+      - name: '[validate] Completed workload evidence'
+        if: ${{ inputs.pending_artifact != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONVERGENCE_CONFIG: ${{ inputs.config }}
+          HANDOFF_ID: ${{ inputs.handoff_id }}
+          PRODUCT_MODE: ${{ inputs.products }}
+        run: >-
+          python3 .github/scripts/convergence.py --config "$CONVERGENCE_CONFIG" handoff
+          --pending "$RUNNER_TEMP/plan/pending-convergence.json" --products-root "$RUNNER_TEMP/references"
+          --products "$PRODUCT_MODE" --handoff-root "$RUNNER_TEMP/handoff-convergence" --id "$HANDOFF_ID"
       - name: '[validate] Branch, run and isolated storage identity'
         id: trust
         env:

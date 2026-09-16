@@ -54,7 +54,7 @@
           "runnerClass": "source_mac_arm64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_arm64": ["[build] Source packages", "[retain] Source products"]}
+          "success": {"[build] macOS arm64": ["[build] Source packages", "[retain] Source products"]}
         },
         "source_mac_arm64_daemon": {
           "successBoundary": "steps",
@@ -62,7 +62,7 @@
           "runnerClass": "source_mac_arm64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_arm64": ["[build] Source daemon", "[retain] Source products"]}
+          "success": {"[build] macOS arm64": ["[build] Source daemon", "[retain] Source products"]}
         },
         "source_mac_arm64_web": {
           "successBoundary": "steps",
@@ -70,7 +70,7 @@
           "runnerClass": "source_mac_arm64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_arm64": ["[build] Source web", "[retain] Source products"]}
+          "success": {"[build] macOS arm64": ["[build] Source web", "[retain] Source products"]}
         },
         "source_mac_arm64_shell": {
           "successBoundary": "steps",
@@ -78,7 +78,7 @@
           "runnerClass": "source_mac_arm64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_arm64": ["[build] Source shell", "[retain] Source products"]}
+          "success": {"[build] macOS arm64": ["[build] Source shell", "[retain] Source products"]}
         },
         "source_mac_x64_packages": {
           "successBoundary": "steps",
@@ -86,7 +86,7 @@
           "runnerClass": "source_mac_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_x64": ["[build] Source packages", "[retain] Source products"]}
+          "success": {"[build] macOS x64": ["[build] Source packages", "[retain] Source products"]}
         },
         "source_mac_x64_daemon": {
           "successBoundary": "steps",
@@ -94,7 +94,7 @@
           "runnerClass": "source_mac_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_x64": ["[build] Source daemon", "[retain] Source products"]}
+          "success": {"[build] macOS x64": ["[build] Source daemon", "[retain] Source products"]}
         },
         "source_mac_x64_web": {
           "successBoundary": "steps",
@@ -102,7 +102,7 @@
           "runnerClass": "source_mac_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_x64": ["[build] Source web", "[retain] Source products"]}
+          "success": {"[build] macOS x64": ["[build] Source web", "[retain] Source products"]}
         },
         "source_mac_x64_shell": {
           "successBoundary": "steps",
@@ -110,7 +110,7 @@
           "runnerClass": "source_mac_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta mac_x64": ["[build] Source shell", "[retain] Source products"]}
+          "success": {"[build] macOS x64": ["[build] Source shell", "[retain] Source products"]}
         },
         "source_win_x64_packages": {
           "successBoundary": "steps",
@@ -118,7 +118,7 @@
           "runnerClass": "source_win_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta win_x64": ["[build] Source packages", "[retain] Source products"]}
+          "success": {"[build] Windows x64": ["[build] Source packages", "[retain] Source products"]}
         },
         "source_win_x64_daemon": {
           "successBoundary": "steps",
@@ -126,7 +126,7 @@
           "runnerClass": "source_win_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta win_x64": ["[build] Source daemon", "[retain] Source products"]}
+          "success": {"[build] Windows x64": ["[build] Source daemon", "[retain] Source products"]}
         },
         "source_win_x64_web": {
           "successBoundary": "steps",
@@ -134,7 +134,7 @@
           "runnerClass": "source_win_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta win_x64": ["[build] Source web", "[retain] Source products"]}
+          "success": {"[build] Windows x64": ["[build] Source web", "[retain] Source products"]}
         },
         "source_win_x64_shell": {
           "successBoundary": "steps",
@@ -142,7 +142,7 @@
           "runnerClass": "source_win_x64",
           "products": "manifest",
           "reusable": true,
-          "success": {"Build beta win_x64": ["[build] Source shell", "[retain] Source products"]}
+          "success": {"[build] Windows x64": ["[build] Source shell", "[retain] Source products"]}
         },
         "test_e2e_vitest": {
           "inputs": ["suite://repository-validation"],

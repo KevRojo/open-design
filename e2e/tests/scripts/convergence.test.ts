@@ -151,6 +151,14 @@ jobs = [{"id": 1, "name": "Native", "run_id": 12, "run_attempt": 1, "head_sha": 
          (("Build a", "success"), ("Build b", "failure"), ("Retain", "success"))]}]
 candidate = c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs)
 assert [entry["receipt"]["workload"] for entry in candidate["results"]] == ["a"]
+assert c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs,
+                            products_mode="manifest") == candidate
+assert c.finalize_candidate(root / "pending.json", provenance, root / "absent", contract, jobs,
+                            products_mode="none")["results"] == []
+try: c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs,
+                          products_mode="unknown")
+except c.ConfigError: pass
+else: raise AssertionError("accepted unknown result lane")
 with patch("convergence.run_jobs", return_value=jobs):
     c.validate_admitted_plan(candidate, contract, root, tree)
     bad = copy.deepcopy(candidate)

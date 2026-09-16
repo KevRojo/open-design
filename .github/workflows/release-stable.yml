@@ -205,7 +205,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -279,7 +279,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -334,7 +334,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -591,7 +591,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -705,7 +705,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -961,7 +961,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -1176,7 +1176,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

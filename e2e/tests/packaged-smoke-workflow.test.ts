@@ -2359,7 +2359,7 @@ process.stdin.on("end", () => {
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
     for (const [target, next] of [["mac_arm64", "mac_x64"], ["mac_x64", "win_x64"], ["win_x64", "linux_x64"]]) {
       const job = sectionBetween(workflow, `\n  build_${target}:`, `\n  build_${next}:`);
-      expect(job).toContain("needs: [metadata, plan_tests]");
+      expect(job).toContain("needs: plan");
       expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
       expect(job).not.toContain("uses: ./.github/actions/workspace-product");
@@ -2382,19 +2382,18 @@ process.stdin.on("end", () => {
         expect(job).toContain(`requests/source_${target}/${unit}.json`);
         expect(config.workflows["release-beta"].workloads[`source_${target}_${unit}`]).toMatchObject({
           inputs: [`suite://source-${unit}`], products: "manifest", runnerClass: `source_${target}`,
-          success: { [`Build beta ${target}`]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
+          success: { [target === "mac_arm64" ? "[build] macOS arm64" : target === "mac_x64" ? "[build] macOS x64" : "[build] Windows x64"]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
         });
         expect(config.workflows["release-beta"].batches[`source_${target}`].entries[unit]).toEqual({
           workload: `source_${target}_${unit}`, request: { units: [unit] }, product: "bundle",
         });
       }
     }
-    const collection = sectionBetween(workflow, "\n  test_results:", "\n  cache_test_results:");
-    expect(collection).toContain("contribute-batches");
-    expect(collection).not.toContain("for unit in");
-    expect(collection).not.toContain("SOURCE_JOBS");
+    const collection = sectionBetween(workflow, "\n  cache_build_results:", "\n  cache_test_results:");
+    expect(collection).toContain("products: manifest");
+    expect(collection).not.toContain("test_verify");
     expect(collection).not.toContain("needs.build_mac_arm64.result == 'success'");
-    expect(collection).not.toContain("download-artifact.*beta-source");
+
   });
 
   it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
@@ -2403,29 +2402,34 @@ process.stdin.on("end", () => {
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
     for (const id of ["functional_e2e", "e2e_vitest", "daemon_unit_tests", "verify"]) {
-      expect(workflow.includes(`  test_${id}:\n    needs: [metadata, plan_tests]`)).toBe(true);
-      expect(workflow.includes(`if: \${{ fromJSON(needs.plan_tests.outputs.run).test_${id} }}`)).toBe(true);
+      expect(workflow.includes(`  test_${id}:\n    needs: plan`)).toBe(true);
+      expect(workflow.includes(`if: \${{ fromJSON(needs.plan.outputs.run).test_${id} }}`)).toBe(true);
     }
-    const plan = sectionBetween(workflow, "  plan_tests:", "  test_functional_e2e:");
-    expect(plan).toContain("needs.metadata.outputs.commit == github.sha");
-    expect(plan).toContain("--root plan-source --config .github/config/convergence-beta.json");
+    const plan = sectionBetween(workflow, "  plan:", "  build_mac_arm64:");
+    expect(plan).toContain("steps.identity.outputs.commit == github.sha");
+    expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json"');
     expect(plan).toContain("--all-workloads");
-    expect(plan).toContain("steps.plan.outputs.expects_contributions == 'true'");
-    expect(plan).not.toContain("pnpm install");
-    const collection = sectionBetween(workflow, "  test_results:", "  cache_test_results:");
-    expect(collection).toContain("--id beta-results");
-    expect(collection).not.toContain("needs.test_verify.result == 'success'");
+    expect(plan).toContain("contributions: ${{ steps.plan.outputs.contributions }}");
+    expect(plan).toContain("steps.identity.outputs.commit != github.sha");
+    expect(plan).not.toContain("fetch-depth: 0");
+    expect(plan).toContain("OPEN_DESIGN_RELEASE_TAG_REMOTE: origin");
+    expect(workflow).not.toContain("  plan_tests:");
+    expect(workflow).not.toContain("  test_results:");
     const cache = sectionBetween(workflow, "  cache_test_results:", "  smoke_mac_arm64:");
     expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
     expect(cache).toContain("config: .github/config/convergence-beta.json");
-    expect(cache).toContain("!cancelled() && needs.test_results.result == 'success'");
+    expect(cache).toContain("products: none");
+    expect(cache).toContain("fromJSON(needs.plan.outputs.contributions).none");
+    expect(cache).not.toContain("build_mac");
     const writer = await readFile(join(workspaceRoot, ".github/workflows/convergence.atom.yml"), "utf8");
     expect(writer).toContain("!cancelled() && github.event_name == 'workflow_dispatch'");
+    expect(writer).toContain('--products "$PRODUCT_MODE"');
+    expect(writer).toContain("inputs.handoff_id || 'ci-results'");
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = workflow.slice(workflow.indexOf(`\n  smoke_${target}:`)).split(/\n  [a-z_0-9]+:/)[1];
       expect(job).toContain("always() && !cancelled()");
       expect(job).toContain(`inputs.${target}_smoke_mode == 'core'`);
-      expect(job).toContain("ref: ${{ needs.metadata.outputs.commit }}");
+      expect(job).toContain("ref: ${{ needs.plan.outputs.commit }}");
       expect(job).toContain("smoke-artifacts.ts stage-dogfood");
       expect(job).toContain("smoke-artifacts.ts stage");
       expect(job).toContain("EXPECTED_CHANNEL: beta");
@@ -2566,7 +2570,7 @@ process.stdin.on("end", () => {
 
     const releaseCommitEnv = "RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}";
     // Beta is the working reference that already populates the commit.
-    expect(betaWorkflow).toContain(releaseCommitEnv);
+    expect(betaWorkflow).toContain("RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}");
 
     const jobBounds: Array<[string, string]> = [
       ["  build_mac:", "  build_mac_intel:"],
@@ -2612,7 +2616,7 @@ process.stdin.on("end", () => {
 
     for (const [label, job] of [["mac_arm64", macJob], ["win_x64", winJob]] as const) {
       expect(job, label).toContain("pnpm exec tools-release publish-dogfood");
-      expect(job, label).toContain("DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}");
+      expect(job, label).toContain("DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}");
       expect(job, label).toContain("DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
       // Artifact paths come from the build's own --json output, so whichever
       // targets the parameterised --to actually produced are what get uploaded.
@@ -2830,7 +2834,7 @@ process.stdin.on("end", () => {
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(notifyDailyFeishuWorkflowPath, "utf8"),
     ]);
-    const metadataJob = sectionBetween(betaWorkflow, "  metadata:", "  build_mac_arm64:");
+    const metadataJob = sectionBetween(betaWorkflow, "  plan:", "  build_mac_arm64:");
     const publisherGuard = sectionBetween(
       metadataJob,
       "- name: Validate shared beta publisher",
@@ -2879,7 +2883,7 @@ process.stdin.on("end", () => {
     expect(winJob).toContain("id: win_x64_platform_outputs");
 
     const publishJob = betaWorkflow.slice(betaWorkflow.indexOf("  publish:"));
-    expect(publishJob).toContain("needs.metadata.outputs.promote == 'true'");
+    expect(publishJob).toContain("needs.plan.outputs.promote == 'true'");
     expect(publishJob).toContain("ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'");
     expect(dailyWorkflow).toContain("resolve-daily-beta-recovery.ts");
     expect(dailyWorkflow).toContain("force: ${{ needs.resolve.outputs.force == 'true' }}");
@@ -3525,7 +3529,7 @@ process.stdin.on("end", () => {
     expect(releaseBetaWorkflow).toContain("tools-release publish-platform");
     expect(releaseBetaWorkflow).toContain("tools-release publish-metadata");
     expect(releaseBetaWorkflow).toContain("RELEASE_MANIFEST_DIR:");
-    expect(releaseBetaWorkflow).toContain("RELEASE_ASSET_SUFFIX: ${{ needs.metadata.outputs.asset_version_suffix }}");
+    expect(releaseBetaWorkflow).toContain("RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}");
     expect(platformPublishScript).toContain("artifacts.payload");
     expect(platformPublishScript).toContain("open-design-${releaseVersion}${assetSuffix}-mac-${arch}-payload.zip");
     expect(platformPublishScript).toContain("open-design-${releaseVersion}${assetSuffix}-win-x64-payload.7z");

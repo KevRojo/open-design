@@ -94,6 +94,16 @@ the immutable cache. Do not equate batch success with every member's success or
 introduce a composite action per cache identity. Runtime dependencies and pnpm
 store preparation continue through `setup-workspace` and its existing trust policy.
 
+Release graphs separate delivery, source validation, and reusable-result publication.
+Beta prepares metadata and Plan in one root job, reusing the source checkout unless
+the workflow control SHA differs. Build and test result lanes call the existing
+convergence atom independently with a frozen Plan and product mode; collection and
+trusted publication share a runner, not another transport-only job. Each lane has
+its own concurrency identity. Neither cache lane gates beta publication. Stable's
+existing validation gates remain intact. Prefer shallow checkouts; when beta needs
+the stable version floor, tools-release reads remote tag names explicitly instead
+of assuming a shallow checkout contains every tag or downloading full history.
+
 ## Handoff contract
 
 Use `.github/scripts/handoff.py` for all CI follow-on artifact names and paths. The canonical layout is:

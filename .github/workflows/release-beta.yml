@@ -278,19 +278,19 @@ on:
     outputs:
       beta_version:
         description: "The beta version that was built."
-        value: ${{ jobs.metadata.outputs.beta_version }}
+        value: ${{ jobs.plan.outputs.beta_version }}
       branch:
         description: "The branch that was built."
-        value: ${{ jobs.metadata.outputs.branch }}
+        value: ${{ jobs.plan.outputs.branch }}
       commit:
         description: "The commit SHA that was built."
-        value: ${{ jobs.metadata.outputs.commit }}
+        value: ${{ jobs.plan.outputs.commit }}
       previous_commit:
         description: "Commit SHA of the previously published beta."
-        value: ${{ jobs.metadata.outputs.previous_commit }}
+        value: ${{ jobs.plan.outputs.previous_commit }}
       release_state:
         description: "complete | partial | failed."
-        value: ${{ jobs.publish.outputs.release_state || (jobs.metadata.outputs.promote == 'false' && 'partial') }}
+        value: ${{ jobs.publish.outputs.release_state || (jobs.plan.outputs.promote == 'false' && 'partial') }}
       version_metadata_url:
         description: "Public URL of this build's version metadata.json."
         value: ${{ jobs.publish.outputs.version_metadata_url }}
@@ -355,14 +355,18 @@ env:
   RELEASE_WORKFLOW: ${{ github.workflow }}
 
 jobs:
-  metadata:
-    name: Prepare beta metadata
+  plan:
+    name: '[plan] Beta preparation and execution'
     if: github.repository == 'nexu-io/open-design'
     runs-on: ubuntu-latest
     env:
       RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
       OPEN_DESIGN_BETA_METADATA_URL: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}/beta/latest/metadata.json
     outputs:
+      run: ${{ steps.plan.outputs.run }}
+      pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
+      contribution: ${{ steps.mode.outputs.contribution }}
+      contributions: ${{ steps.plan.outputs.contributions }}
       asset_version_suffix: ${{ steps.beta.outputs.asset_version_suffix }}
       base_version: ${{ steps.beta.outputs.base_version }}
       beta_version: ${{ inputs.release_version != '' && inputs.release_version || steps.beta.outputs.beta_version }}
@@ -378,7 +382,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -473,12 +477,59 @@ jobs:
         env:
           GITHUB_SHA: ${{ env.BUILT_SHA }}
           GITHUB_REF_NAME: ${{ inputs.ref != '' && inputs.ref || github.ref_name }}
+          OPEN_DESIGN_RELEASE_TAG_REMOTE: origin
           OPEN_DESIGN_RELEASE_FORCE: ${{ inputs.force && '1' || '' }}
         run: pnpm exec tools-release prepare beta
 
+      - name: '[prepare] Distinct workflow control snapshot'
+        if: ${{ steps.identity.outputs.commit != github.sha }}
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: plan-control
+          fetch-depth: 1
+      - name: '[resolve] Actual source runner profiles'
+        id: runners
+        env:
+          OD_CI_RUNNER_MODE: ${{ vars.OD_CI_RUNNER_MODE }}
+        run: python3 .github/scripts/runners.py
+      - name: '[resolve] Authorized result consumption'
+        id: mode
+        env:
+          AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && steps.identity.outputs.commit == github.sha }}
+        run: |
+          echo "contribution=$AUTHORIZED" >> "$GITHUB_OUTPUT"
+          if [ "$AUTHORIZED" = true ]; then
+            echo "mode=enforce" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=shadow" >> "$GITHUB_OUTPUT"
+          fi
+      - name: '[plan] Frozen source test results'
+        id: plan
+        env:
+          RUNNER_PLAN: ${{ steps.runners.outputs.runs_on }}
+          CONTROL_ROOT: ${{ steps.identity.outputs.commit == github.sha && '.' || 'plan-control' }}
+          PLAN_MODE: ${{ steps.mode.outputs.mode }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+        run: |
+          runners="$(jq -c '. + {release_tests:["ubuntu-latest"],source_mac_arm64:["macos-14"],source_mac_x64:["macos-15-intel"],source_win_x64:["windows-latest"]}' <<< "$RUNNER_PLAN")"
+          python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json" github-output \
+            --workflow release-beta --all-workloads --runner-plan-json "$runners" \
+            --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
+      - name: '[retain] Frozen Plan witness'
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/pending-convergence.json
+            ${{ runner.temp }}/requests
+          if-no-files-found: error
+          retention-days: 7
+
+
   build_mac_arm64:
-    name: Build beta mac_arm64
-    needs: [metadata, plan_tests]
+    name: '[build] macOS arm64'
+    needs: plan
     if: ${{ inputs.enable_mac_arm64 }}
     runs-on: macos-14
     outputs:
@@ -486,12 +537,12 @@ jobs:
       mac_arm64_url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
       smoke_result: ${{ steps.mac_arm64_smoke.outcome }}
     env:
-      RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
 
       - name: '[prepare] Workspace source tools'
         uses: ./.github/actions/setup-workspace
@@ -501,7 +552,7 @@ jobs:
       - name: '[restore] Source execution requests'
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          name: ${{ needs.plan.outputs.pending_artifact }}
           path: ${{ runner.temp }}/source-plan
 
       - name: '[build] Source packages'
@@ -596,7 +647,7 @@ jobs:
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta
             --portable
-            --app-version "${{ needs.metadata.outputs.beta_version }}"
+            --app-version "${{ needs.plan.outputs.beta_version }}"
             --mac-compression normal
             --to "${{ inputs.mac_arm64_target }}"
             --json
@@ -635,7 +686,7 @@ jobs:
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta
             --portable
-            --app-version "${{ needs.metadata.outputs.beta_version }}"
+            --app-version "${{ needs.plan.outputs.beta_version }}"
             --mac-compression normal
             --to "${{ inputs.mac_arm64_target }}"
             --json
@@ -680,16 +731,16 @@ jobs:
         if: ${{ !cancelled() && !inputs.publish }}
         continue-on-error: true
         env:
-          EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
           EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           RELEASE_TARGET: mac_arm64
-          EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+          EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
           DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-mac_arm64.json
           DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           DOGFOOD_BUILD_JSON_KEYS: dmgPath
           DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
-          DOGFOOD_LABEL: macOS arm64 beta ${{ needs.metadata.outputs.beta_version }}
-          DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          DOGFOOD_LABEL: macOS arm64 beta ${{ needs.plan.outputs.beta_version }}
+          DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
           RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
@@ -705,7 +756,7 @@ jobs:
         if: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' }}
         run: |
           set -euo pipefail
-          version="${{ needs.metadata.outputs.beta_version }}"
+          version="${{ needs.plan.outputs.beta_version }}"
           if [[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
             update_version="${BASH_REMATCH[1]}-beta.$((BASH_REMATCH[2] + 1))"
           else
@@ -746,7 +797,7 @@ jobs:
           OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: ${{ inputs.mac_arm64_smoke_mode }}
           OD_PACKAGED_E2E_NAMESPACE: release-beta
           OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
-          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/release-report/mac_arm64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
@@ -770,7 +821,7 @@ jobs:
           RELEASE_SMOKE_MODE: ${{ inputs.mac_arm64_smoke_mode }}
           RELEASE_SMOKE_OUTCOME: ${{ steps.mac_arm64_smoke.outcome }}
           RELEASE_TARGET: mac_arm64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: mac_arm64 beta build
         run: pnpm exec tools-release write-report
 
@@ -786,10 +837,10 @@ jobs:
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_arm64
           RELEASE_CHANNEL: beta
           RELEASE_NAMESPACE: release-beta
-          RELEASE_NOTES: OpenDesign beta ${{ needs.metadata.outputs.beta_version }}.signed
+          RELEASE_NOTES: OpenDesign beta ${{ needs.plan.outputs.beta_version }}.signed
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           RELEASE_TARGET: mac_arm64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
 
@@ -813,7 +864,7 @@ jobs:
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_SUMMARY_PATH: ${{ runner.temp }}/release-platform-outputs/mac_arm64.md
           RELEASE_TARGET: mac_arm64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
 
       - name: Read mac_arm64 platform outputs
@@ -835,19 +886,19 @@ jobs:
           if-no-files-found: error
 
   build_mac_x64:
-    name: Build beta mac_x64
-    needs: [metadata, plan_tests]
+    name: '[build] macOS x64'
+    needs: plan
     if: ${{ inputs.enable_mac_x64 }}
     runs-on: macos-15-intel
     outputs:
       dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
     env:
-      RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
 
       - name: '[prepare] Workspace source tools'
         uses: ./.github/actions/setup-workspace
@@ -857,7 +908,7 @@ jobs:
       - name: '[restore] Source execution requests'
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          name: ${{ needs.plan.outputs.pending_artifact }}
           path: ${{ runner.temp }}/source-plan
 
       - name: '[build] Source packages'
@@ -945,7 +996,7 @@ jobs:
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta-x64
             --portable
-            --app-version "${{ needs.metadata.outputs.beta_version }}"
+            --app-version "${{ needs.plan.outputs.beta_version }}"
             --mac-compression normal
             --to "${{ inputs.mac_x64_target }}"
             --json
@@ -979,7 +1030,7 @@ jobs:
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta-x64
             --portable
-            --app-version "${{ needs.metadata.outputs.beta_version }}"
+            --app-version "${{ needs.plan.outputs.beta_version }}"
             --mac-compression normal
             --to "${{ inputs.mac_x64_target }}"
             --json
@@ -1012,16 +1063,16 @@ jobs:
         if: ${{ !cancelled() && !inputs.publish }}
         continue-on-error: true
         env:
-          EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
           EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           RELEASE_TARGET: mac_x64
-          EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+          EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
           DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-mac_x64.json
           DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           DOGFOOD_BUILD_JSON_KEYS: dmgPath
           DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
-          DOGFOOD_LABEL: macOS x64 beta ${{ needs.metadata.outputs.beta_version }}
-          DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          DOGFOOD_LABEL: macOS x64 beta ${{ needs.plan.outputs.beta_version }}
+          DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
           RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
@@ -1042,7 +1093,7 @@ jobs:
           OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: ${{ inputs.mac_x64_smoke_mode }}
           OD_PACKAGED_E2E_NAMESPACE: release-beta-x64
           OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
-          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/release-report/mac_x64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
@@ -1060,7 +1111,7 @@ jobs:
           RELEASE_REPORT_SUMMARY_PATH: ${{ runner.temp }}/release-report/mac_x64/summary.md
           RELEASE_SMOKE_MODE: ${{ inputs.mac_x64_smoke_mode }}
           RELEASE_TARGET: mac_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: mac_x64 beta build
         run: pnpm exec tools-release write-report
 
@@ -1078,7 +1129,7 @@ jobs:
           RELEASE_NAMESPACE: release-beta-x64
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           RELEASE_TARGET: mac_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
 
@@ -1099,7 +1150,7 @@ jobs:
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_TARGET: mac_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
 
       - name: Upload mac_x64 publish manifest
@@ -1111,8 +1162,8 @@ jobs:
           if-no-files-found: error
 
   build_win_x64:
-    name: Build beta win_x64
-    needs: [metadata, plan_tests]
+    name: '[build] Windows x64'
+    needs: plan
     if: ${{ inputs.enable_win_x64 }}
     runs-on: windows-latest
     outputs:
@@ -1120,12 +1171,12 @@ jobs:
       smoke_result: ${{ steps.win_x64_smoke.outcome }}
       win_x64_url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
     env:
-      RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
 
       - name: Compute Windows tools-pack cache key
         id: win_tools_pack_cache_key
@@ -1159,7 +1210,7 @@ jobs:
       - name: '[restore] Source execution requests'
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          name: ${{ needs.plan.outputs.pending_artifact }}
           path: ${{ runner.temp }}/source-plan
 
       - name: '[build] Source packages'
@@ -1254,13 +1305,13 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
           pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
-          $buildArgs = @("exec", "tools-pack", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.metadata.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
+          $buildArgs = @("exec", "tools-pack", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.plan.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
           $buildOutput = pnpm.cmd @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win build failed with exit code $LASTEXITCODE" }
           $buildOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\build.json" -Encoding utf8
           $build = $buildOutput | ConvertFrom-Json
-          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.metadata.outputs.beta_version }}" --json
+          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.plan.outputs.beta_version }}" --json
 
       - name: Retry beta win_x64 without restored cache
         id: win_tools_pack_build_retry
@@ -1273,13 +1324,13 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "${{ runner.temp }}\tools-pack-cache"
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
           pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
-          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.metadata.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
+          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.plan.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
           $buildOutput = pnpm.cmd @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win fallback build failed with exit code $LASTEXITCODE" }
           $buildOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\build.json" -Encoding utf8
           $build = $buildOutput | ConvertFrom-Json
-          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.metadata.outputs.beta_version }}" --json
+          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.plan.outputs.beta_version }}" --json
 
       - name: Upload win_x64 installer for manual distribution
         # Only when NOT publishing to the release feed, mirroring the mac DMG
@@ -1309,16 +1360,16 @@ jobs:
         if: ${{ !cancelled() && !inputs.publish }}
         continue-on-error: true
         env:
-          EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
           EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           RELEASE_TARGET: win_x64
-          EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+          EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
           DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-win_x64.json
           DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           DOGFOOD_BUILD_JSON_KEYS: installerPath,portableZipPath
           DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
-          DOGFOOD_LABEL: Windows x64 beta ${{ needs.metadata.outputs.beta_version }}
-          DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          DOGFOOD_LABEL: Windows x64 beta ${{ needs.plan.outputs.beta_version }}
+          DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
           RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
@@ -1346,8 +1397,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $match = [regex]::Match("${{ needs.metadata.outputs.beta_version }}", "^(?<base>\d+\.\d+\.\d+)-beta\.(?<number>\d+)$")
-          if (-not $match.Success) { throw "full Windows smoke requires a counted beta version; got ${{ needs.metadata.outputs.beta_version }}" }
+          $match = [regex]::Match("${{ needs.plan.outputs.beta_version }}", "^(?<base>\d+\.\d+\.\d+)-beta\.(?<number>\d+)$")
+          if (-not $match.Success) { throw "full Windows smoke requires a counted beta version; got ${{ needs.plan.outputs.beta_version }}" }
           $updateVersion = "{0}-beta.{1}" -f $match.Groups["base"].Value, ([int]$match.Groups["number"].Value + 1)
           $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\release-work\win_x64\tools-pack-update-fixture", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--app-version", $updateVersion, "--to", "nsis", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
@@ -1366,7 +1417,7 @@ jobs:
           OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
           OD_PACKAGED_E2E_NAMESPACE: release-beta-win
           OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
-          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}\release-report\win_x64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}\tools-pack
           OD_PACKAGED_E2E_WIN: "1"
@@ -1392,7 +1443,7 @@ jobs:
           RELEASE_SMOKE_MODE: ${{ inputs.win_x64_smoke_mode }}
           RELEASE_SMOKE_OUTCOME: ${{ steps.win_x64_smoke.outcome }}
           RELEASE_TARGET: win_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: win_x64 beta build
         run: pnpm exec tools-release write-report
 
@@ -1437,7 +1488,7 @@ jobs:
             -ReleaseAssetsDir "${{ runner.temp }}\release-assets\win_x64" `
             -BuildJsonPath "${{ runner.temp }}\release-build\win_x64\build.json" `
             -ReleaseNamespace release-beta-win `
-            -ReleaseVersion "${{ needs.metadata.outputs.beta_version }}" `
+            -ReleaseVersion "${{ needs.plan.outputs.beta_version }}" `
             -ReleaseAssetSuffix ".unsigned" `
             -ReleaseChannel beta `
             -ReleasePublicOrigin "${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}" `
@@ -1461,7 +1512,7 @@ jobs:
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_TARGET: win_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
 
       - name: Read win_x64 platform outputs
@@ -1483,17 +1534,17 @@ jobs:
           if-no-files-found: error
 
   build_linux_x64:
-    name: Build beta linux_x64
-    needs: metadata
+    name: '[build] Linux x64'
+    needs: plan
     if: ${{ inputs.enable_linux_x64 }}
     runs-on: ubuntu-latest
     env:
-      RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -1526,7 +1577,7 @@ jobs:
           RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/linux_x64
           RELEASE_SMOKE_MODE: ${{ inputs.linux_x64_smoke_mode }}
           RELEASE_TARGET: linux_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           RELEASE_WORK_DIR: ${{ runner.temp }}/release-work/linux_x64
           TOOLS_PACK_CACHE_DIR: ${{ runner.temp }}/tools-pack-cache
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
@@ -1545,7 +1596,7 @@ jobs:
           RELEASE_REPORT_SUMMARY_PATH: ${{ runner.temp }}/release-report/linux_x64/summary.md
           RELEASE_SMOKE_MODE: ${{ inputs.linux_x64_smoke_mode }}
           RELEASE_TARGET: linux_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: linux_x64 beta build
         run: pnpm exec tools-release write-report
 
@@ -1562,7 +1613,7 @@ jobs:
           RELEASE_NAMESPACE: release-beta-linux
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           RELEASE_TARGET: linux_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
 
@@ -1584,7 +1635,7 @@ jobs:
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_TARGET: linux_x64
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
 
       - name: Upload linux_x64 publish manifest
@@ -1596,9 +1647,9 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish beta metadata
+    name: '[publish] Beta distribution'
     needs:
-      - metadata
+      - plan
       - build_mac_arm64
       - build_mac_x64
       - build_win_x64
@@ -1608,8 +1659,8 @@ jobs:
         always() &&
         !cancelled() &&
         inputs.publish &&
-        needs.metadata.outputs.promote == 'true' &&
-        needs.metadata.result == 'success' &&
+        needs.plan.outputs.promote == 'true' &&
+        needs.plan.result == 'success' &&
         (inputs.enable_mac_arm64 || inputs.enable_win_x64 || inputs.enable_mac_x64 || inputs.enable_linux_x64) &&
         (!inputs.enable_mac_arm64 || needs.build_mac_arm64.result == 'success') &&
         (!inputs.enable_win_x64 || needs.build_win_x64.result == 'success') &&
@@ -1625,13 +1676,13 @@ jobs:
       mac_x64_url: ${{ steps.outputs.outputs.mac_x64_dmg_url }}
       linux_x64_url: ${{ steps.outputs.outputs.linux_x64_appImage_url }}
     env:
-      GITHUB_SHA: ${{ needs.metadata.outputs.commit }}
-      RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+      GITHUB_SHA: ${{ needs.plan.outputs.commit }}
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
 
       - name: Download mac_arm64 publish manifest
         if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
@@ -1687,7 +1738,7 @@ jobs:
           RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: |
           pnpm exec tools-release prepare-release-note
           pnpm exec tools-release publish-release-note
@@ -1695,7 +1746,7 @@ jobs:
 
       - name: Publish beta metadata
         env:
-          BASE_VERSION: ${{ needs.metadata.outputs.base_version }}
+          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
           ENABLE_LINUX_X64: ${{ inputs.enable_linux_x64 }}
           ENABLE_MAC_ARM64: ${{ inputs.enable_mac_arm64 }}
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
@@ -1703,7 +1754,7 @@ jobs:
           LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
           MAC_ARM64_RESULT: ${{ needs.build_mac_arm64.result }}
           MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
-          RELEASE_ASSET_SUFFIX: ${{ needs.metadata.outputs.asset_version_suffix }}
+          RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}
           RELEASE_CHANNEL: beta
           RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
           RELEASE_LAUNCHER_VERSION_MIN_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_STABLE }}
@@ -1720,8 +1771,8 @@ jobs:
           RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
-          STATE_SOURCE: ${{ needs.metadata.outputs.state_source }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
+          STATE_SOURCE: ${{ needs.plan.outputs.state_source }}
           WIN_X64_RESULT: ${{ needs.build_win_x64.result }}
         run: pnpm exec tools-release publish-metadata
 
@@ -1750,7 +1801,7 @@ jobs:
           RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE }}
           RELEASE_METADATA_URL: ${{ steps.outputs.outputs.version_metadata_url }}
           RELEASE_NOTE_MANIFEST_PATH: ${{ runner.temp }}/release-metadata/release-note-publication.json
-          RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           WIN_X64_RESULT: ${{ needs.build_win_x64.result }}
         run: pnpm exec tools-release verify-metadata
 
@@ -1772,78 +1823,17 @@ jobs:
           ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
 
-  # Validation is deliberately not in build/publish needs. For this branch
-  # it stays in the registered beta workflow; its tail is reported separately.
-  plan_tests:
-    name: '[plan] beta source results'
-    needs: metadata
-    runs-on: ubuntu-24.04
-    outputs:
-      run: ${{ steps.plan.outputs.run }}
-      hit: ${{ steps.plan.outputs.hit }}
-      pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
-      contribution: ${{ steps.mode.outputs.contribution == 'true' && steps.plan.outputs.expects_contributions == 'true' }}
-    steps:
-      - name: '[prepare] Workflow control snapshot'
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - name: '[prepare] Actual source snapshot'
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.metadata.outputs.commit }}
-          path: plan-source
-          fetch-depth: 1
-      - name: '[resolve] Actual source runner profiles'
-        id: runners
-        working-directory: plan-source
-        env:
-          OD_CI_RUNNER_MODE: ${{ vars.OD_CI_RUNNER_MODE }}
-        run: python3 .github/scripts/runners.py
-      - name: '[resolve] Authorized result consumption'
-        id: mode
-        env:
-          AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && needs.metadata.outputs.commit == github.sha }}
-        run: |
-          echo "contribution=$AUTHORIZED" >> "$GITHUB_OUTPUT"
-          if [ "$AUTHORIZED" = true ]; then
-            echo "mode=enforce" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=shadow" >> "$GITHUB_OUTPUT"
-          fi
-      - name: '[plan] Frozen source test results'
-        id: plan
-        env:
-          RUNNER_PLAN: ${{ steps.runners.outputs.runs_on }}
-          PLAN_MODE: ${{ steps.mode.outputs.mode }}
-          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-        run: |
-          runners="$(jq -c '. + {release_tests:["ubuntu-latest"],source_mac_arm64:["macos-14"],source_mac_x64:["macos-15-intel"],source_win_x64:["windows-latest"]}' <<< "$RUNNER_PLAN")"
-          python3 .github/scripts/convergence.py --root plan-source --config .github/config/convergence-beta.json github-output \
-            --workflow release-beta --all-workloads --runner-plan-json "$runners" \
-            --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
-      - name: '[retain] Frozen Plan witness'
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/pending-convergence.json
-            ${{ runner.temp }}/requests
-          if-no-files-found: error
-          retention-days: 7
-
   test_functional_e2e:
-    needs: [metadata, plan_tests]
-    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_functional_e2e }}
+    needs: plan
+    if: ${{ fromJSON(needs.plan.outputs.run).test_functional_e2e }}
     name: "[test] beta P0 Functional E2E"
     uses: ./.github/workflows/ui-extended-main.yml
     with:
-      ref: ${{ needs.metadata.outputs.commit }}
+      ref: ${{ needs.plan.outputs.commit }}
       suite: p0
   test_e2e_vitest:
-    needs: [metadata, plan_tests]
-    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_e2e_vitest }}
+    needs: plan
+    if: ${{ fromJSON(needs.plan.outputs.run).test_e2e_vitest }}
     name: "[test] beta E2E Vitest"
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1851,7 +1841,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -1884,8 +1874,8 @@ jobs:
       - name: Run E2E Vitest
         run: pnpm --filter @open-design/e2e test
   test_daemon_unit_tests:
-    needs: [metadata, plan_tests]
-    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_daemon_unit_tests }}
+    needs: plan
+    if: ${{ fromJSON(needs.plan.outputs.run).test_daemon_unit_tests }}
     name: "[test] beta Daemon tests (${{ matrix.shard }}/4)"
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1897,7 +1887,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
         with:
@@ -1913,15 +1903,15 @@ jobs:
           OD_WATCHER_TEST_DEBUG: "1"
         run: pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4
   test_verify:
-    needs: [metadata, plan_tests]
-    if: ${{ fromJSON(needs.plan_tests.outputs.run).test_verify }}
+    needs: plan
+    if: ${{ fromJSON(needs.plan.outputs.run).test_verify }}
     name: "[test] beta Verify build (typecheck + tests)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
           # Shallow: nothing here reads git history. `pnpm guard` uses
           # `git ls-files` (the index, not history), and a full clone of this
           # repository is a 2.2 GiB pack.
@@ -1945,58 +1935,33 @@ jobs:
       - name: Check repository layout policies
         run: pnpm guard
 
-  test_results:
-    name: '[collect] beta successful source results'
-    needs: [plan_tests, build_mac_arm64, build_mac_x64, build_win_x64, test_functional_e2e, test_e2e_vitest, test_daemon_unit_tests, test_verify]
-    if: ${{ !cancelled() && needs.plan_tests.result == 'success' && needs.plan_tests.outputs.contribution == 'true' }}
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: '[prepare] Authorized control snapshot'
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - name: '[collect] Frozen Plan'
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.plan_tests.outputs.pending_artifact }}
-          path: ${{ runner.temp }}
-      - name: '[collect] Source product references'
-        run: >-
-          python3 .github/scripts/convergence.py --config .github/config/convergence-beta.json contribute-batches
-          --pending "$RUNNER_TEMP/pending-convergence.json" --output-dir "$RUNNER_TEMP/products"
-      - name: '[validate] Per-workload execution evidence'
-        id: handoff
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          python3 .github/scripts/convergence.py --config .github/config/convergence-beta.json handoff
-          --pending "$RUNNER_TEMP/pending-convergence.json" --products-root "$RUNNER_TEMP/products"
-          --handoff-root "$RUNNER_TEMP/handoff" --id beta-results
-      - name: '[retain] Successful workload handoff'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.handoff.outputs.name }}
-          path: ${{ steps.handoff.outputs.path }}
-          if-no-files-found: error
-          retention-days: 7
-
-  cache_test_results:
-    name: '[cache] beta source results'
-    needs: test_results
-    if: ${{ !cancelled() && needs.test_results.result == 'success' }}
+  cache_build_results:
+    name: '[cache] Build results'
+    needs: [plan, build_mac_arm64, build_mac_x64, build_win_x64]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).manifest }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence-beta.json
-      handoff_id: beta-results
+      handoff_id: beta-build-results
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: manifest
+    secrets: inherit
+
+  cache_test_results:
+    name: '[cache] Test results'
+    needs: [plan, test_functional_e2e, test_e2e_vitest, test_daemon_unit_tests, test_verify]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).none }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence-beta.json
+      handoff_id: beta-test-results
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: none
     secrets: inherit
 
   smoke_mac_arm64:
     name: "[validate] beta mac_arm64 downloaded artifact"
-    needs: [metadata, build_mac_arm64, publish]
+    needs: [plan, build_mac_arm64, publish]
     if: >-
       ${{
         always() && !cancelled() &&
@@ -2012,16 +1977,16 @@ jobs:
       contents: read
     env:
       RELEASE_NAMESPACE: release-beta
-      EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+      EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
       EXPECTED_CHANNEL: beta
-      EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+      EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
       EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       RELEASE_TARGET: mac_arm64
     steps:
       - name: Checkout built source
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -2050,7 +2015,7 @@ jobs:
           OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: core
           OD_PACKAGED_E2E_NAMESPACE: release-beta
           OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
-          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/download-smoke/mac_arm64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
@@ -2072,7 +2037,7 @@ jobs:
 
   smoke_mac_x64:
     name: "[validate] beta mac_x64 downloaded artifact"
-    needs: [metadata, build_mac_x64, publish]
+    needs: [plan, build_mac_x64, publish]
     if: >-
       ${{
         always() && !cancelled() &&
@@ -2088,16 +2053,16 @@ jobs:
       contents: read
     env:
       RELEASE_NAMESPACE: release-beta-x64
-      EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+      EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
       EXPECTED_CHANNEL: beta
-      EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+      EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
       EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       RELEASE_TARGET: mac_x64
     steps:
       - name: Checkout built source
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -2126,7 +2091,7 @@ jobs:
           OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: core
           OD_PACKAGED_E2E_NAMESPACE: release-beta-x64
           OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
-          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/download-smoke/mac_x64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
@@ -2148,7 +2113,7 @@ jobs:
 
   smoke_win_x64:
     name: "[validate] beta win_x64 downloaded artifact"
-    needs: [metadata, build_win_x64, publish]
+    needs: [plan, build_win_x64, publish]
     if: >-
       ${{
         always() && !cancelled() &&
@@ -2164,16 +2129,16 @@ jobs:
       contents: read
     env:
       RELEASE_NAMESPACE: release-beta-win
-      EXPECTED_VERSION: ${{ needs.metadata.outputs.beta_version }}
+      EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
       EXPECTED_CHANNEL: beta
-      EXPECTED_COMMIT: ${{ needs.metadata.outputs.commit }}
+      EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
       EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       RELEASE_TARGET: win_x64
     steps:
       - name: Checkout built source
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -2202,7 +2167,7 @@ jobs:
           OD_PACKAGED_E2E_WIN_SMOKE_PROFILE: core
           OD_PACKAGED_E2E_NAMESPACE: release-beta-win
           OD_PACKAGED_E2E_RELEASE_CHANNEL: beta
-          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}
+          OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/download-smoke/win_x64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts

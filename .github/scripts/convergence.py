@@ -956,6 +956,10 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
             "would_run": compact_json(would_run),
             "expects_contributions": str(any(run[name] and calculated[name]["reusable"] and not hits[name]
                                              for name in calculated)).lower(),
+            "contributions": compact_json({
+                mode: any(run[name] and value["reusable"] and not hits[name] and value["products"] == mode
+                          for name, value in calculated.items()) for mode in ("none", "manifest")
+            }),
         }
     )
     lines = [
@@ -999,6 +1003,7 @@ def finalize_candidate(
     products_root: Path,
     contract: ConvergenceContract,
     jobs: list[dict[str, Any]],
+    *, products_mode: str | None = None,
 ) -> dict[str, Any]:
     pending = object_value(load_json(pending_path), "pending convergence")
     workflow = contract.workflow(require_string(pending.get("workflow"), "pending workflow"))
@@ -1007,9 +1012,13 @@ def finalize_candidate(
     provenance = validated_provenance(provenance)
     workloads = object_value(pending.get("workloads"), "pending workloads")
     receipts = []
+    if products_mode not in {None, "none", "manifest"}:
+        raise ConfigError("unknown collection product mode")
     for identity, raw in workloads.items():
         if identity not in workflow.workloads:
             raise ConfigError(f"pending convergence has unknown workload {identity}")
+        if products_mode is not None and workflow.workloads[identity].products != products_mode:
+            continue
         value = object_value(raw, f"pending workloads.{identity}")
         if (
             not value.get("reusable")
@@ -1116,7 +1125,11 @@ def producer_context(payload: dict[str, Any]) -> dict[str, Any]:
 def handoff_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
     context = producer_context(event_payload())
     jobs = run_jobs(context["repository"], context["provenance"]["runId"], context["provenance"]["runAttempt"])
-    candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract, jobs)
+    products_mode = getattr(args, "products", None)
+    if products_mode == "manifest":
+        contribute_batches_command(argparse.Namespace(pending=args.pending, output_dir=args.products_root), contract)
+    candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract, jobs,
+                                   products_mode=products_mode)
     if candidate.get("repositoryId") != context["repositoryId"] or candidate.get("repository") != context["repository"]:
         raise ConfigError("pending convergence repository differs from the producing run")
     handoff_contract.write_convergence(args.handoff_root, args.id, candidate)
@@ -1750,6 +1763,7 @@ def parse_args() -> argparse.Namespace:
     handoff.add_argument("--products-root", type=Path, required=True)
     handoff.add_argument("--handoff-root", type=Path, required=True)
     handoff.add_argument("--id", default="ci-results")
+    handoff.add_argument("--products", choices=["none", "manifest"], help="collect one independent result lane")
     restore = sub.add_parser("restore")
     restore.add_argument("--pending", type=Path, required=True)
     restore.add_argument("--workload", required=True)
