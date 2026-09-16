@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 5 },
+    schema: { version: 6 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -358,8 +358,11 @@ for response in ({}, {"jobs": None}, {"jobs": [None]}):
     expect(result.status, result.stderr).toBe(0);
   });
 
-  test("contributes independent successes but rejects forged successful-step evidence", () => {
+  test.each(["job", "steps"])("contributes independent %s successes but rejects forged successful-step evidence", (boundary) => {
     const fixture = createRepository();
+    const config = JSON.parse(readFileSync(fixture.configPath, "utf8"));
+    config.workflows.ci.workloads.a.successBoundary = boundary;
+    writeFileSync(fixture.configPath, JSON.stringify(config));
     runPlan(fixture);
     const result = spawnSync("python3", ["-c", `
 import copy, json, subprocess, sys
@@ -378,6 +381,9 @@ jobs = [{"id": i, "name": f"Job {name}", "run_id": 12, "run_attempt": 1, "head_s
          "labels": ["ubuntu-24.04"],
          "steps": [{"name": "Execute", "status": "completed", "conclusion": "success"}]}
         for i, name in enumerate(("a", "b"), 1)]
+if contract.workflow("ci").workloads["a"].success_boundary == "steps":
+    jobs[0]["conclusion"] = "failure"
+    jobs[0]["steps"].append({"name": "Native package", "status": "completed", "conclusion": "failure"})
 # Failed b has no manifest. Its absence must not suppress successful a.
 contract.workflow("ci").workloads["b"].products = "manifest"
 candidate = c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs)
@@ -396,6 +402,9 @@ for mutation in ("step", "attempt", "missing", "duplicate"):
         else: raise AssertionError("accepted false success: " + mutation)
 before = c.calculate(contract, root, "ci", {"worker": ["ubuntu-24.04"]})["a"]["digest"]
 contract.workflow("ci").workloads["a"].success["Job a"].append("Additional validation")
+assert c.calculate(contract, root, "ci", {"worker": ["ubuntu-24.04"]})["a"]["digest"] != before
+contract.workflow("ci").workloads["a"].success["Job a"].pop()
+contract.workflow("ci").workloads["a"].success_boundary = "steps" if contract.workflow("ci").workloads["a"].success_boundary == "job" else "job"
 assert c.calculate(contract, root, "ci", {"worker": ["ubuntu-24.04"]})["a"]["digest"] != before
 `, path.dirname(convergenceScript), fixture.root], { cwd: fixture.root, encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
@@ -459,6 +468,21 @@ jobs = [{"id": i, "name": name, "run_id": 12, "run_attempt": 2, "head_sha": "a" 
         for i, (name, steps) in enumerate(required.items(), 1)]
 assert c.successful_workload_jobs(jobs, required, provenance, execution) == [1, 2]
 assert c.successful_workload_jobs(jobs[:1], required, provenance, execution) is None
+failed_native = copy.deepcopy(jobs)
+failed_native[1]["conclusion"] = "failure"
+failed_native[1]["steps"].append({"name": "Unrelated native packaging", "status": "completed", "conclusion": "failure"})
+assert c.successful_workload_jobs(failed_native, required, provenance, execution, boundary="steps") == [1, 2]
+for state in ("cancelled", "skipped", None):
+    bad = copy.deepcopy(failed_native)
+    bad[1]["conclusion"] = state
+    assert c.successful_workload_jobs(bad, required, provenance, execution, boundary="steps") is None
+for state in ("failure", "cancelled", "skipped", None):
+    bad = copy.deepcopy(failed_native)
+    bad[1]["steps"][1]["conclusion"] = state
+    assert c.successful_workload_jobs(bad, required, provenance, execution, boundary="steps") is None
+try: c.successful_workload_jobs(jobs, required, provenance, execution, boundary="anything")
+except c.ConfigError: pass
+else: raise AssertionError("accepted unknown success boundary")
 for state in ("failure", "cancelled", "skipped", None):
     bad = copy.deepcopy(jobs)
     bad[1]["conclusion"] = state
@@ -555,7 +579,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 5");
+    expect(stale.stderr).toContain("requires schema.version 6");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();

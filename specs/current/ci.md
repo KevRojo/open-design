@@ -343,6 +343,19 @@ Moved or unavailable PR merge refs refuse admission; they do not grant reuse.
 owns protocol validation and publication orchestration; `lib/r2.py` owns only
 signed R2 transport. Write credentials never enter the low-privilege CI run.
 
+Schema 6 adds an explicit `successBoundary`: the default `job` requires the
+whole job and all declared steps to succeed. `steps` permits a completed job
+whose unrelated tail failed, but every declared step must still succeed; an
+unfinished, cancelled or skipped job remains ineligible. Both the collector and
+trusted writer apply this contract, and the boundary participates in identity.
+Only the three beta source workloads currently opt into `steps`. Their required
+composite includes source construction and pristine-product retention, so a
+later native-package failure does not discard a completed source result. Source
+reference manifests are not success proofs: the collector may describe a cold
+candidate before filtering it through actual attempt-scoped execution evidence.
+The original CI and publication gates remain unchanged. Older schema results
+are not relabelled; this declaration change intentionally requires a cold seed.
+
 ### Install-time execution scope
 
 The beta native source executor permits one fallback build only for enumerated

@@ -40,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -78,7 +78,7 @@ class Workload:
         expected = {"inputs", "runnerClass", "products", "reusable"}
         if value.get("reusable") is True:
             expected.add("success")
-        if not expected.issubset(value) or set(value) - expected - {"recipe", "trustedSources"}:
+        if not expected.issubset(value) or set(value) - expected - {"recipe", "trustedSources", "successBoundary"}:
             raise ConfigError(
                 f"convergence.workflows.{workflow}.workloads.{identity} keys must be {sorted(expected)}"
             )
@@ -91,6 +91,11 @@ class Workload:
         if not isinstance(value["reusable"], bool):
             raise ConfigError(f"workload {workflow}/{identity}.reusable must be boolean")
         self.reusable = value["reusable"]
+        self.success_boundary = value.get("successBoundary", "job")
+        if not isinstance(self.success_boundary, str) or self.success_boundary not in {"job", "steps"}:
+            raise ConfigError("successBoundary must be job or steps")
+        if "successBoundary" in value and not self.reusable:
+            raise ConfigError("successBoundary requires a reusable workload")
         self.success = object_value(value.get("success", {}), f"workload {workflow}/{identity}.success")
         if self.reusable and not self.success:
             raise ConfigError(f"reusable workload {workflow}/{identity} requires success jobs")
@@ -389,6 +394,7 @@ def calculate(
             "inputs": input_digest, "executionClass": json.loads(execution_class),
             "products": workload.products, "reusable": workload.reusable,
             "success": workload.success,
+            "successBoundary": workload.success_boundary,
         }).encode())
         results[identity] = {
             "digest": digest.hexdigest(),
@@ -447,14 +453,19 @@ def validate_candidate_plan(
 def successful_workload_jobs(
     jobs: list[dict[str, Any]], required: dict[str, list[str]],
     provenance: dict[str, Any], execution_class: dict[str, Any],
+    *, boundary: str = "job",
 ) -> list[int] | None:
     """Accept all declared shards and required steps from a trusted attempt API response.
 
     `required` belongs to trusted workflow configuration, never a candidate.
-    Missing/failed/cancelled/skipped execution is a cache miss, not a success.
+    Missing/failed/cancelled/skipped required execution is never a success.
+    Explicit steps boundaries permit a completed job whose unrelated tail failed;
+    cancellation and incomplete jobs remain ineligible. The default is job-wide.
     Contradictory or ambiguous identities are invalid evidence. Older attempts
     are not silently borrowed; their independently published receipts remain usable.
     """
+    if boundary not in {"job", "steps"}:
+        raise ConfigError("unknown workload success boundary")
     if not required or any(not steps for steps in required.values()):
         raise ConfigError("workload success requires jobs with explicit execution steps")
     accepted = []
@@ -470,7 +481,8 @@ def successful_workload_jobs(
                                 ("head_sha", provenance["headSha"])):
             if job.get(field) != expected:
                 raise ConfigError(f"workload job {name} {field} differs from producing attempt")
-        if job.get("status") != "completed" or job.get("conclusion") != "success":
+        conclusions = {"success", "failure"} if boundary == "steps" else {"success"}
+        if job.get("status") != "completed" or job.get("conclusion") not in conclusions:
             return None
         if job.get("labels") != execution_class["labels"]:
             raise ConfigError(f"workload job {name} runner labels differ from plan")
@@ -919,7 +931,8 @@ def finalize_candidate(
         ):
             continue
         if successful_workload_jobs(jobs, workflow.workloads[identity].success,
-                                    provenance, value["executionClass"]) is None:
+                                    provenance, value["executionClass"],
+                                    boundary=workflow.workloads[identity].success_boundary) is None:
             continue
         products_mode = workflow.workloads[identity].products
         if products_mode == "manifest":
@@ -1191,7 +1204,8 @@ def validate_admitted_plan(
         execution = object_value(receipt.get("executionClass"), "receipt execution class")
         if set(execution) != {"runnerClass", "labels"} or execution["runnerClass"] != workload.runner_class:
             raise ConfigError(f"candidate {identity} runner class differs from declaration")
-        if successful_workload_jobs(jobs, workload.success, provenance, execution) is None:
+        if successful_workload_jobs(jobs, workload.success, provenance, execution,
+                                    boundary=workload.success_boundary) is None:
             raise ConfigError(f"candidate {identity} lacks successful execution in producing attempt")
         if workload.runner_class in runners and runners[workload.runner_class] != execution["labels"]:
             raise ConfigError("candidate has inconsistent runner class labels")

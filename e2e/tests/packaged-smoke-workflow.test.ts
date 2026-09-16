@@ -2376,11 +2376,14 @@ process.stdin.on("end", () => {
       expect(config.workflows["release-beta"].workloads[`source_${target}`]).toMatchObject({
         inputs: ["suite://workspace-source"], products: "manifest", runnerClass: `source_${target}`,
         success: { [`Build beta ${target}`]: ["[build] Workspace source products"] },
+        successBoundary: "steps",
       });
     }
     const collection = sectionBetween(workflow, "\n  test_results:", "\n  cache_test_results:");
     expect(collection).toContain("--workload \"source_$target\"");
     expect(collection).toContain(".run and (.resultHit | not)");
+    expect(collection).not.toContain("SOURCE_JOBS");
+    expect(collection).not.toContain("needs.build_mac_arm64.result == 'success'");
     expect(collection).not.toContain("download-artifact.*beta-source");
   });
 

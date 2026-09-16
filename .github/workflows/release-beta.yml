@@ -1795,13 +1795,8 @@ jobs:
           name: ${{ needs.plan_tests.outputs.pending_artifact }}
           path: ${{ runner.temp }}
       - name: '[collect] Source product references'
-        env:
-          SOURCE_JOBS: ${{ toJSON(needs) }}
         run: |
           for target in mac_arm64 mac_x64 win_x64; do
-            if [ "$(jq -r --arg job "build_$target" '.[$job].result' <<< "$SOURCE_JOBS")" != success ]; then
-              continue
-            fi
             if ! jq -e --arg id "source_$target" '.workloads[$id] | .run and (.resultHit | not)' "$RUNNER_TEMP/pending-convergence.json" >/dev/null; then
               continue
             fi

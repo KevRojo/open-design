@@ -1,5 +1,5 @@
 {
-  "schema": { "version": 5 },
+  "schema": { "version": 6 },
   "resources": {
     "workspace-source": {
       "paths": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "apps/daemon/", "apps/web/", "apps/desktop/", "apps/packaged/", "packages/", "tools/", "scripts/postinstall.mjs", ".github/scripts/release/workspace-products.ts", ".github/actions/workspace-products/"],
@@ -27,14 +27,17 @@
       "policy": "beta-isolated-v1",
       "workloads": {
         "source_mac_arm64": {
+          "successBoundary": "steps",
           "inputs": ["suite://workspace-source"], "runnerClass": "source_mac_arm64", "products": "manifest", "reusable": true,
           "success": { "Build beta mac_arm64": ["[build] Workspace source products"] }
         },
         "source_mac_x64": {
+          "successBoundary": "steps",
           "inputs": ["suite://workspace-source"], "runnerClass": "source_mac_x64", "products": "manifest", "reusable": true,
           "success": { "Build beta mac_x64": ["[build] Workspace source products"] }
         },
         "source_win_x64": {
+          "successBoundary": "steps",
           "inputs": ["suite://workspace-source"], "runnerClass": "source_win_x64", "products": "manifest", "reusable": true,
           "success": { "Build beta win_x64": ["[build] Workspace source products"] }
         },
