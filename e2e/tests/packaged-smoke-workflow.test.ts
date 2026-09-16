@@ -2427,7 +2427,7 @@ process.stdin.on("end", () => {
       expect(tests).toContain(`fromJSON(needs.plan.outputs.run).${id}`);
       expect(tests).toContain(`fromJSON(needs.plan.outputs.${id}_matrix)`);
       expect(tests).toContain("fail-fast: false");
-      expect(tests).toContain("name: ${{ matrix.name }}");
+      expect(tests).toContain("name: ${{ matrix.name || '[test]");
       expect(tests).toContain("runs-on: ${{ matrix.runner }}");
       const cache = workflowJob(workflow, `cache_${id}`);
       expect(cache).toContain(`- ${id}`);

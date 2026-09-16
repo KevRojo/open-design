@@ -523,7 +523,7 @@ jobs:
           retention-days: 7
 
   common:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name || '[build] Shared JavaScript' }}
     needs: plan
     if: ${{ needs.plan.outputs.contribution == 'true' && needs.plan.outputs.common_count != '0' }}
     runs-on: ${{ matrix.runner }}
@@ -1648,7 +1648,7 @@ jobs:
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
 
   test_e2e_vitest:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name || '[test] E2E Vitest' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
@@ -1731,7 +1731,7 @@ jobs:
       - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_e2e_vitest }}
   cache_test_e2e_vitest:
-    name: "[cache] test_e2e_vitest"
+    name: "[cache] E2E Vitest result"
     needs:
       - plan
       - test_e2e_vitest
@@ -1745,7 +1745,7 @@ jobs:
       products: none
     secrets: inherit
   test_verify:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name || '[test] Verify' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
@@ -1828,7 +1828,7 @@ jobs:
       - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_verify }}
   cache_test_verify:
-    name: "[cache] test_verify"
+    name: "[cache] Verify result"
     needs:
       - plan
       - test_verify
@@ -1842,7 +1842,7 @@ jobs:
       products: none
     secrets: inherit
   test_daemon_unit_tests:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name || '[test] Daemon' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
@@ -1925,7 +1925,7 @@ jobs:
       - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_daemon_unit_tests }}
   cache_test_daemon_unit_tests:
-    name: "[cache] test_daemon_unit_tests"
+    name: "[cache] Daemon result"
     needs:
       - plan
       - test_daemon_unit_tests
@@ -1939,7 +1939,7 @@ jobs:
       products: none
     secrets: inherit
   test_functional_e2e:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name || '[test] UI P0' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
@@ -2022,7 +2022,7 @@ jobs:
       - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_functional_e2e }}
   cache_test_functional_e2e:
-    name: "[cache] test_functional_e2e"
+    name: "[cache] UI P0 result"
     needs:
       - plan
       - test_functional_e2e
