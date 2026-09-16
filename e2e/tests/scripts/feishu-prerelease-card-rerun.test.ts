@@ -21,8 +21,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // Driven through the real script rather than a unit harness because the bug
 // lives in the poll loop's carry-forward between cycles, which only exists when
 // the script runs for real.
-const releaseRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const watcherScript = join(releaseRoot, "src", "notifications", "prerelease-progress-card.ts");
+const releaseRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const watcherScript = join(releaseRoot, ".github/scripts/feishu.py");
 
 const ORIGIN_RUN_ID = "4242";
 const TESTS_RUN_ID = "34333568105";
@@ -178,7 +178,7 @@ async function runWatcher(options: {
 }): Promise<number> {
   await writeFile(options.outputFile, "");
   return await new Promise<number>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--experimental-strip-types", watcherScript], {
+    const child = spawn("python3", [watcherScript, "watch"], {
       env: {
         ...process.env,
         CARD_POLL_INTERVAL_MS: "10",

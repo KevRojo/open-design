@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // The watcher's self-report is what the fallback job keys on, so it has to be
 // exercised through the real script: the interesting case is one where the
 // script exits 0, which is exactly what a job-result-only signal cannot see.
-const releaseRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const watcherScript = join(releaseRoot, "src", "notifications", "prerelease-progress-card.ts");
+const releaseRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const watcherScript = join(releaseRoot, ".github/scripts/feishu.py");
 
 type JobStub = { name: string; status: string; conclusion: string | null; started_at?: string; completed_at?: string };
 
@@ -116,7 +116,7 @@ async function runWatcher(outputFile: string, baseUrl: string): Promise<number> 
   // "the script wrote nothing" is a real assertion here, not an absent file.
   await writeFile(outputFile, "");
   return await new Promise<number>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--experimental-strip-types", watcherScript], {
+    const child = spawn("python3", [watcherScript, "watch"], {
       env: {
         ...process.env,
         CARD_POLL_INTERVAL_MS: "10",

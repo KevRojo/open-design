@@ -128,11 +128,6 @@ jobs:
           fi
           echo "file=$file" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - name: Post Feishu card
         env:
           # Daily and release-push streams share one Feishu bot; both post to
@@ -156,7 +151,7 @@ jobs:
           STREAM_LABEL: "每日定时"
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: node --experimental-strip-types tools/release/src/notifications/feishu.ts
+        run: python3 .github/scripts/feishu.py release
 
   notify_failure:
     name: Notify Feishu when daily beta fails
@@ -171,11 +166,6 @@ jobs:
         with:
           ref: main
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - name: Post daily beta failure card
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_RELEASE_WEBHOOK }}
@@ -189,4 +179,4 @@ jobs:
 
             独立的 prerelease Windows canary 不受该 metadata 门禁影响；请结合两个 workflow 判断是发布状态问题还是产品 smoke 问题。
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: node --experimental-strip-types tools/release/src/notifications/feishu-notice.ts
+        run: python3 .github/scripts/feishu.py notice

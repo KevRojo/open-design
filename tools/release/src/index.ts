@@ -140,11 +140,5 @@ cli
     await import("./report/write-report.ts");
   });
 
-cli
-  .command("notify feishu", "Send a Feishu release notification")
-  .action(async () => {
-    await import("./notifications/feishu.ts");
-  });
-
 cli.help();
 cli.parse();

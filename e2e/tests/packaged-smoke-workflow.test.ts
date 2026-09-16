@@ -79,14 +79,10 @@ const releasePrereleaseWorkflowPath = join(workspaceRoot, ".github", "workflows"
 const releasePrereleaseTestsWorkflowPath = join(workspaceRoot, ".github", "workflows", "release-prerelease-tests.yml");
 const releasePrereleaseSmokeWorkflowPath = join(workspaceRoot, ".github", "workflows", "release-prerelease-smoke.yml");
 const releasePrereleaseCardWorkflowPath = join(workspaceRoot, ".github", "workflows", "release-prerelease-card.yml");
-const prereleaseCardScriptPath = join(workspaceRoot, "tools", "release", "src", "notifications", "prerelease-progress-card.ts");
+const prereleaseCardScriptPath = join(workspaceRoot, ".github/scripts/lib/notification_watch.py");
 const prereleaseFallbackScriptPath = join(
   workspaceRoot,
-  "tools",
-  "release",
-  "src",
-  "notifications",
-  "prerelease-fallback-notice.ts",
+  ".github/scripts/feishu.py",
 );
 const mainPrereleaseWinSmokeWorkflowPath = join(
   workspaceRoot,
@@ -106,8 +102,8 @@ const notifyReleaseFeishuWorkflowPath = join(workspaceRoot, ".github", "workflow
 const cutReleaseWorkflowPath = join(workspaceRoot, ".github", "workflows", "cut-release.yml");
 const cutPatchReleaseWorkflowPath = join(workspaceRoot, ".github", "workflows", "cut-patch-release.yml");
 const patchCutPreflightScriptPath = join(workspaceRoot, "tools/release/src/metadata/patch-cut.ts");
-const feishuCardScriptPath = join(workspaceRoot, "tools", "release", "src", "notifications", "feishu.ts");
-const feishuNoticeScriptPath = join(workspaceRoot, "tools", "release", "src", "notifications", "feishu-notice.ts");
+const feishuCardScriptPath = join(workspaceRoot, ".github/scripts/feishu.py");
+const feishuNoticeScriptPath = feishuCardScriptPath;
 const dshBootstrapPublishWorkflowPath = join(workspaceRoot, ".github", "workflows", "dsh-bootstrap-publish.yml");
 const catalogPublishWorkflowPath = join(workspaceRoot, ".github", "workflows", "catalog-publish.yml");
 const catalogValidateWorkflowPath = join(workspaceRoot, ".github", "workflows", "catalog-validate.yml");
@@ -366,49 +362,11 @@ process.exit(1);
 }
 
 async function renderFeishuBuildCard(env: Record<string, string>): Promise<Record<string, unknown>> {
-  let payload: Record<string, unknown> | undefined;
-  const server = createServer((request, response) => {
-    void (async () => {
-      let raw = "";
-      for await (const chunk of request) raw += chunk.toString();
-      payload = JSON.parse(raw) as Record<string, unknown>;
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ code: 0 }));
-    })();
+  const result = await execFileAsync("python3", [feishuCardScriptPath, "release", "--dry-run"], {
+    cwd: workspaceRoot,
+    env: { ...process.env, BUILD_STATE: "success", CHANNEL_LABEL: "Beta", VERSION: "0.19.0-beta.1", ...env },
   });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (address == null || typeof address === "string") {
-    throw new Error("Feishu card fixture did not bind to a TCP port");
-  }
-
-  try {
-    await execFileAsync(process.execPath, ["--experimental-strip-types", feishuCardScriptPath], {
-      cwd: workspaceRoot,
-      env: {
-        ...process.env,
-        BUILD_STATE: "success",
-        CHANNEL_LABEL: "Beta",
-        FEISHU_WEBHOOK: `http://127.0.0.1:${address.port}`,
-        VERSION: "0.19.0-beta.1",
-        ...env,
-      },
-    });
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error == null ? resolve() : reject(error)));
-    });
-  }
-
-  if (payload == null) throw new Error("Feishu card fixture received no payload");
-  return payload;
+  return { card: JSON.parse(result.stdout) };
 }
 
 describe("packaged smoke workflow", () => {
@@ -3007,7 +2965,7 @@ process.stdin.on("end", () => {
     // stale main version can fail silently every day without reaching smoke.
     expect(workflow).toContain("  notify_failure:");
     expect(workflow).toContain("if: ${{ always() && needs.build.result == 'failure' }}");
-    expect(workflow).toContain("tools/release/src/notifications/feishu-notice.ts");
+    expect(workflow).toContain(".github/scripts/feishu.py notice");
   });
 
   it("[P1] skips the scheduled minor cut until the highest release branch is published stable", async () => {
@@ -3062,7 +3020,7 @@ process.stdin.on("end", () => {
     expect(canary).toContain("github.event_name != 'workflow_dispatch' && needs.smoke.result == 'failure'");
     expect(canary).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
     expect(canary).toContain("tools-pack win validate-payload");
-    expect(canary).toContain("tools/release/src/notifications/feishu-notice.ts");
+    expect(canary).toContain(".github/scripts/feishu.py notice");
 
     // This lane is a product canary, not a beta/prerelease publication. In
     // particular, a stale main package version must not prevent Windows from
@@ -3171,10 +3129,10 @@ process.stdin.on("end", () => {
     expect(prerelease).not.toContain("prerelease-progress-card.ts");
     expect(prerelease).toContain("dispatch-validation.sh release-prerelease-card.yml");
 
-    expect(card).toContain("tools/release/src/notifications/prerelease-progress-card.ts");
+    expect(card).toContain(".github/scripts/feishu.py watch");
     expect(card).toContain("actions: read");
     expect(card).not.toContain("actions: write");
-    expect((card.match(/prerelease-progress-card\.ts/g) ?? []).length).toBe(1);
+    expect((card.match(/feishu\.py watch/g) ?? []).length).toBe(1);
     // Dispatched before any package exists, and told which lanes to wait for.
     expect(card).toContain("origin_run_id:");
     expect(card).toContain("expect_tests:");
@@ -3189,28 +3147,27 @@ process.stdin.on("end", () => {
     // the first card is posted is behaviour, not workflow topology — it is
     // asserted against the real script in
     // tools/release/tests/prerelease-card-delivery-signal.test.ts.)
-    expect(watcher).toContain("/repos/${repo}/actions/runs/${runId}/jobs");
-    expect(watcher).toContain("origin-run ${originRunId}");
-    expect(watcher).toContain("timingOf(job)");
+    expect(watcher).toContain("/repos/{self.repo}/actions/runs/{run}/jobs");
+    expect(watcher).toContain("origin-run {self.origin}");
+    expect(watcher).toContain("timing(job)");
     // A wrong URL would ship a 404 button to the whole channel.
-    expect(watcher).toContain("verifyDownloadUrl");
+    expect(watcher).toContain('method="HEAD"');
 
     // The transitional one-shot webhook card is retired. `notify-release-feishu`
     // is now a build-only entry point: a second poster would reintroduce exactly
     // the duplicate notification the transition existed to end, and the PATCH
     // card cannot be co-owned.
     expect(notify).not.toContain("  notify:");
-    expect(notify).not.toContain("tools/release/src/notifications/feishu.ts");
+    expect(notify).not.toContain(".github/scripts/feishu.py release");
     expect(notify).not.toContain("FEISHU_RELEASE_WEBHOOK");
     expect(notify).not.toContain("FEISHU_RELEASE_SIGN_SECRET");
 
     // feishu.ts itself survives the retirement — notify-daily-feishu.yml renders
     // the beta download card with it — so its "a red pipeline does not mean no
     // package" rule has to keep holding for that lane.
-    expect(feishuCard).toContain("const packagePublished = versionMetadataUrl.length > 0 || buildState === \"success\";");
-    expect(feishuCard).toContain("const smokeFailures = packagePublished");
-    expect(feishuCard).toContain("return packagePublished ? \"blue\" : \"red\";");
-    expect(notifyDaily).toContain("tools/release/src/notifications/feishu.ts");
+    expect(feishuCard).toContain('published = bool(env("VERSION_METADATA_URL")) or env("BUILD_STATE", "success") == "success"');
+    expect(feishuCard).toContain('if published and env(key) == "failure"');
+    expect(notifyDaily).toContain(".github/scripts/feishu.py release");
   });
 
   it("[P1] alerts through the other Feishu bot when the prerelease card lane goes silent", async () => {
@@ -3237,8 +3194,8 @@ process.stdin.on("end", () => {
     expect(card).toContain("FEISHU_SIGN_SECRET: ${{ secrets.FEISHU_RELEASE_SIGN_SECRET }}");
     expect(fallbackJob).not.toContain("${{ secrets.FEISHU_APP_SECRET }}");
     expect(fallbackJob).not.toContain("${{ secrets.FEISHU_APP_ID }}");
-    expect(fallbackJob).toContain("tools/release/src/notifications/feishu-notice.ts");
-    expect(notice).toContain('required("FEISHU_WEBHOOK")');
+    expect(fallbackJob).toContain(".github/scripts/feishu.py notice");
+    expect(notice).toContain("send_webhook(payload)");
 
     // 2. Reachable. A job with `needs` carries an implicit success(), which
     //    would skip the fallback in exactly the case it exists for — the trap
@@ -3249,8 +3206,8 @@ process.stdin.on("end", () => {
     // tools/pack/tests/release-workflows.test.ts), and a step needs no such
     // edge to read the dispatch outcome.
     const dispatchJob = sectionBetween(prerelease, "  dispatch_validation:", "  build_mac:");
-    expect(dispatchJob).toContain("tools/release/src/notifications/prerelease-fallback-notice.ts");
-    expect(dispatchJob).toContain("tools/release/src/notifications/feishu-notice.ts");
+    expect(dispatchJob).toContain(".github/scripts/feishu.py fallback");
+    expect(dispatchJob).toContain(".github/scripts/feishu.py notice");
     expect(dispatchJob).toContain("STAGE: dispatch");
     // `always()` so a dispatch that failed above still reaches the notifier.
     expect(dispatchJob).toContain("always() && github.repository == 'nexu-io/open-design' &&");
@@ -3264,8 +3221,8 @@ process.stdin.on("end", () => {
       "!(needs.card.result == 'success' && needs.card.outputs.delivered == 'true')",
     );
     expect(card).toContain("delivered: ${{ steps.track.outputs.card_delivered }}");
-    expect(watcher).toContain('appendFileSync(file, "card_delivered=true\\n")');
-    expect(watcher).toContain("if (chatHoldsLatest) reportDelivered();");
+    expect(watcher).toContain('stream.write("card_delivered=true\\n")');
+    expect(watcher).toContain('if delivered and observer.get("GITHUB_OUTPUT"):');
     expect(dispatchJob).toContain("CARD_DISPATCHED: ${{ steps.card_dispatch.outputs.dispatched }}");
     // The dispatch helper exits non-zero on failure and `run:` blocks stop at
     // the first failure, so the marker is only written when a card workflow was
@@ -3277,8 +3234,8 @@ process.stdin.on("end", () => {
     // The notice itself has to stand alone: version, whether a package shipped,
     // and where to look.
     expect(fallback).toContain("VERSION_METADATA_URL");
-    expect(fallback).toContain("probeMetadata");
-    expect(fallback).toContain('setOutput("alert", "false")');
+    expect(fallback).toContain("public_probe");
+    expect(fallback).toContain('output("alert", "false")');
   });
 
   it("[P1] keeps download actions on a beta card with a failed Windows smoke", async () => {
@@ -3380,7 +3337,7 @@ process.stdin.on("end", () => {
     // Skip path: no branch, no build — only the Feishu notice runs, gated on !published.
     const noticeStep = sectionBetween(workflow, "- name: Notify Feishu that the patch cut was skipped", "- name: Stop here when skipping");
     expect(noticeStep).toContain("if: steps.guard.outputs.published != 'true'");
-    expect(noticeStep).toContain("tools/release/src/notifications/feishu-notice.ts");
+    expect(noticeStep).toContain(".github/scripts/feishu.py notice");
     // Every branch-cutting step must be gated on the guard passing: assert the
     // guard `if:` is the line immediately after each step name.
     for (const step of ["Bail out if the branch already exists", "Create branch + bump version + push", "Create backport label"]) {
@@ -3398,7 +3355,7 @@ process.stdin.on("end", () => {
     expect(workflow).toContain('git commit --allow-empty -am "chore(release): v$VERSION"');
 
     // The notice card is a standalone poster with the same signed-webhook contract.
-    expect(notice).toContain("msg_type: \"interactive\"");
+    expect(notice).toContain("def notice_card():");
     expect(notice).toContain('required("NOTICE_TITLE")');
     expect(notice).toContain('required("NOTICE_BODY")');
   });
@@ -3406,7 +3363,7 @@ process.stdin.on("end", () => {
   it("[P2] posts an immediate branch-cut Feishu card naming the backport label on both cut workflows", async () => {
     // Cutting a release branch triggers a ~20-40 min prerelease build before the
     // download card lands, so both cut workflows post an eager "branch cut" notice
-    // the moment the branch exists. Each must: reuse feishu-notice.ts, run AFTER the
+    // the moment the branch exists. Each must: reuse feishu.py notice, run AFTER the
     // branch push + label creation, and name the exact backport label so the team
     // knows which label to apply for backports.
     const [minorCut, patchCut] = await Promise.all([
@@ -3420,7 +3377,7 @@ process.stdin.on("end", () => {
     ] as const) {
       const step = sectionBetween(workflow, "- name: Notify Feishu that the branch was cut", "\n        run:");
       // Same standalone notifier + the shared release webhook/secret.
-      expect(workflow, label).toContain("run: node --experimental-strip-types tools/release/src/notifications/feishu-notice.ts");
+      expect(workflow, label).toContain("run: python3 .github/scripts/feishu.py notice");
       expect(step, label).toContain("FEISHU_WEBHOOK: ${{ secrets.FEISHU_RELEASE_WEBHOOK }}");
       // Names the version's backport label in the card body.
       expect(step, label).toContain("backport release/v${{ steps.ver.outputs.version }}");

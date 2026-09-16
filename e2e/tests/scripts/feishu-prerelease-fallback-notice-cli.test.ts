@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // The composer hands its verdict to the workflow through $GITHUB_OUTPUT, and
 // the workflow branches on one key. Both properties below are about that file,
 // so they are exercised through the real script rather than the pure module.
-const releaseRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const composerScript = join(releaseRoot, "src", "notifications", "prerelease-fallback-notice.ts");
+const releaseRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const composerScript = join(releaseRoot, ".github/scripts/feishu.py");
 
 async function compose(outputFile: string, env: Record<string, string>): Promise<number> {
   await writeFile(outputFile, "");
   return await new Promise<number>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--experimental-strip-types", composerScript], {
+    const child = spawn("python3", [composerScript, "fallback"], {
       env: {
         ...process.env,
         CHANNEL_LABEL: "Prerelease",
@@ -41,7 +41,7 @@ function keyOrder(raw: string): string[] {
   const keys: string[] = [];
   const lines = raw.split("\n");
   for (let index = 0; index < lines.length; index += 1) {
-    const match = /^([a-z_]+)<<(od-fallback-[0-9a-f-]+)$/.exec(lines[index] ?? "");
+    const match = /^([a-z_]+)<<(notify-[0-9a-f-]+)$/.exec(lines[index] ?? "");
     if (match?.[1] == null || match[2] == null) continue;
     keys.push(match[1]);
     while (index < lines.length && lines[index + 1] !== match[2]) index += 1;
@@ -72,7 +72,7 @@ describe("prerelease fallback composer CLI", () => {
   it("writes `alert` only after every field a poster reads", async () => {
     // The workflow branches on `alert`, and $GITHUB_OUTPUT is append-only. If
     // `alert` went first, a crash between two appends would leave `alert=true`
-    // beside an empty body and feishu-notice.ts would die on a required env
+    // beside an empty body and feishu.py notice would die on a required env
     // instead of delivering. Written last, `alert=true` means the whole notice
     // is on disk — which is what makes the workflow's gate safe.
     const outputFile = join(workdir, "silent.txt");

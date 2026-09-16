@@ -101,11 +101,6 @@ jobs:
           # commit: the watcher is infrastructure, and pinning it to the build's
           # commit would run whatever notifier that branch happened to carry.
           fetch-depth: 1
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - name: Compute changelog since last prerelease
         id: changelog
         env:
@@ -185,7 +180,7 @@ jobs:
           RELEASE_CHANNEL: prerelease
           RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           VERSION: ${{ inputs.version }}
-        run: node --experimental-strip-types tools/release/src/notifications/prerelease-progress-card.ts
+        run: python3 .github/scripts/feishu.py watch
 
   fallback_notice:
     name: Alert when the card never reached the group
@@ -228,15 +223,10 @@ jobs:
       - name: Checkout notifier
         uses: actions/checkout@v6.0.2
         with:
-          # Both scripts below import nothing but node builtins, so this job
+          # Both commands below use only Python stdlib, so this job
           # needs no dependency install — which is the point: the last-resort
           # path should have as little between it and the POST as possible.
           fetch-depth: 1
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - name: Compose the fallback notice
         id: notice
         env:
@@ -260,7 +250,7 @@ jobs:
           RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           STAGE: watch
           VERSION: ${{ inputs.version }}
-        run: node --experimental-strip-types tools/release/src/notifications/prerelease-fallback-notice.ts
+        run: python3 .github/scripts/feishu.py fallback
 
       - name: Fail loudly when the fallback bot is itself unconfigured
         # Both notification paths being down at once is an incident of its own,
@@ -289,4 +279,4 @@ jobs:
           NOTICE_TEMPLATE: ${{ steps.notice.outputs.template }}
           NOTICE_TITLE: ${{ steps.notice.outputs.title }}
           RUN_URL: ${{ steps.notice.outputs.run_url }}
-        run: node --experimental-strip-types tools/release/src/notifications/feishu-notice.ts
+        run: python3 .github/scripts/feishu.py notice

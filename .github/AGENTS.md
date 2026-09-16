@@ -49,6 +49,7 @@ Default rule: do not add a new domain-specific follow-on workflow such as `foo.c
 - `.github/workflows/` contains GitHub Actions workflow entrypoints.
 - `.github/actions/` contains reusable composite actions for workflow setup steps.
 - `.github/scripts/` contains workflow-owned scripts and contracts that are not general repo developer commands.
+- `.github/scripts/feishu.py` owns release notices, download cards, progressive cards, and fallback decisions. Its stdlib-only Python helpers under `lib/` consume workflow/publication observations; they must not import product tools, require npm installation, or authorize publication. Keep the application bot and fallback webhook credentials independent.
 - `.github/scripts/release/` contains release workflow implementation helpers. Keep release-only helpers there and CI handoff helpers at `.github/scripts/`.
 - Root `scripts/` remains for repo-level developer checks, product scripts, and guard/test logic. Do not move workflow-only handoff glue there just to make it look more general.
 

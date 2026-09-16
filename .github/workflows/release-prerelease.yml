@@ -380,15 +380,6 @@ jobs:
       # card workflow IS running, release-prerelease-card.yml's own
       # `fallback_notice` job owns the rest of the lane — the two are mutually
       # exclusive, so a release can never draw both.
-      - name: Setup Node.js for the fallback notifier
-        if: >-
-          ${{
-            always() && github.repository == 'nexu-io/open-design' &&
-            steps.checkout.outcome == 'success'
-          }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
       - name: Compose the fallback notice
         id: notice
         if: >-
@@ -411,7 +402,7 @@ jobs:
           RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
           STAGE: dispatch
           VERSION: ${{ needs.metadata.outputs.release_version }}
-        run: node --experimental-strip-types tools/release/src/notifications/prerelease-fallback-notice.ts
+        run: python3 .github/scripts/feishu.py fallback
       - name: Fail loudly when the fallback bot is itself unconfigured
         # Both notification paths down at once is an incident of its own, and a
         # red job is the only channel left to say so. Only reachable on this
@@ -440,7 +431,7 @@ jobs:
           NOTICE_TEMPLATE: ${{ steps.notice.outputs.template }}
           NOTICE_TITLE: ${{ steps.notice.outputs.title }}
           RUN_URL: ${{ steps.notice.outputs.run_url }}
-        run: node --experimental-strip-types tools/release/src/notifications/feishu-notice.ts
+        run: python3 .github/scripts/feishu.py notice
   build_mac:
     name: Build prerelease mac arm64
     # Deliberately NOT gated on any test suite, and neither is `publish`. A

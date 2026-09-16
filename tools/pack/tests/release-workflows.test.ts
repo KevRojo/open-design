@@ -184,7 +184,7 @@ describe("release workflows", () => {
       readFile(new URL("../../../.github/workflows/release-stable.yml", import.meta.url), "utf8"),
     ]);
 
-    expect(workflows.map((workflow) => countOccurrences(workflow, "keep=1"))).toEqual([2, 2, 0]);
+    expect(workflows.map((workflow) => countOccurrences(workflow, "keep=1"))).toEqual([0, 2, 0]);
     expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([1, 1, 1]);
     for (const workflow of workflows) {
       expect(workflow).not.toContain("keep=3");
@@ -206,11 +206,11 @@ describe("release workflows", () => {
       readFile(new URL("../../../apps/desktop/src/main/updater/payload.ts", import.meta.url), "utf8"),
       readFile(new URL("../../../scripts/install-unsafe-dmg.sh", import.meta.url), "utf8"),
     ]);
-    const mac = sectionBetween(beta, "  build_mac_arm64:", "  build_mac_x64:");
-    const macX64 = sectionBetween(beta, "  build_mac_x64:", "  build_win_x64:");
-    const win = sectionBetween(beta, "  build_win_x64:", "  build_linux_x64:");
-    const linux = sectionBetween(beta, "  build_linux_x64:", "  publish:");
-    const betaMetadata = sectionBetween(beta, "  metadata:", "  build_mac_arm64:");
+    const mac = sectionBetween(beta, "      - name: Build beta mac_arm64", "      - name: Prepare mac_x64 signing certificate");
+    const macX64 = sectionBetween(beta, "      - name: Prepare mac_x64 signing certificate", "      - name: Build beta win_x64");
+    const win = sectionBetween(beta, "      - name: Build beta win_x64", "  publish:");
+    const linux = sectionBetween(beta, "      - name: Build beta linux_x64", "  publish:");
+    const betaMetadata = sectionBetween(beta, "  plan:", "  common:");
     const betaPublish = sectionAfter(beta, "  publish:");
     const prereleaseMetadata = sectionBetween(prerelease, "  metadata:", "  dispatch_validation:");
     const prereleasePublish = sectionBetween(prerelease, "  publish:", "  cleanup_partial_release_assets:");
@@ -222,27 +222,18 @@ describe("release workflows", () => {
 
     expect(mac).not.toContain("bash tools/release/scripts/build-platform.sh");
     expect(macX64).not.toContain("bash tools/release/scripts/build-platform.sh");
-    expect(countOccurrences(mac, "--require-vela-cli")).toBe(3);
-    expect(countOccurrences(macX64, "--require-vela-cli")).toBe(2);
-    expect(countOccurrences(win, "--require-vela-cli")).toBe(3);
+    expect(countOccurrences(mac, "--require-vela-cli")).toBe(2);
+    expect(countOccurrences(macX64, "--require-vela-cli")).toBe(1);
+    expect(countOccurrences(win, "--require-vela-cli")).toBe(2);
     expect(mac.match(/RELEASE_ARTIFACT_MODE: dmg-and-payload/g)?.length ?? 0).toBe(2);
     expect(macX64.match(/RELEASE_ARTIFACT_MODE: \$\{\{ inputs\.mac_x64_target == 'all' && 'all' \|\| 'dmg-and-payload' \}\}/g)?.length ?? 0).toBe(2);
-    expect(mac).toContain("uses: actions/cache/restore@v5");
-    expect(mac).toContain("uses: actions/cache/save@v5");
-    expect(mac).toContain("tools-pack-mac-v1-beta-${RUNNER_OS}-arm64-");
-    expect(mac).toContain("pnpm exec tools-pack mac cleanup --dir \"$RUNNER_TEMP/tools-pack\" --namespace release-beta --json");
-    expect(mac).toContain("exec tools-pack mac build");
+    expect(mac).toContain("exec tools-pack mac package");
     expect(mac).toContain("build_args+=(--signed --notarize)");
     expect(mac).toContain("Build beta mac_arm64 update fixture");
     expect(mac).toContain("OD_PACKAGED_E2E_MAC_UPDATE_BUILD_JSON_PATH: ${{ steps.mac_arm64_update_fixture.outputs.update_build_json_path }}");
     expect(mac).toContain("OD_PACKAGED_E2E_MAC_UPDATE_FIXTURE: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' && 'tools-serve' || '' }}");
     expect(mac).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
-    expect(mac).toContain("bash .github/scripts/release/cache/mac.sh");
-    expect(macX64).toContain("uses: actions/cache/restore@v5");
-    expect(macX64).toContain("uses: actions/cache/save@v5");
-    expect(macX64).toContain("tools-pack-mac-v1-beta-${RUNNER_OS}-x64-");
-    expect(macX64).toContain("pnpm exec tools-pack mac cleanup --dir \"$RUNNER_TEMP/tools-pack\" --namespace release-beta-x64 --json");
-    expect(macX64).toContain("exec tools-pack mac build");
+    expect(macX64).toContain("exec tools-pack mac package");
     expect(macX64).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
     expect(buildMac).toContain("build_args+=(--require-vela-cli)");
     expect(buildMac).toContain("update_args+=(--require-vela-cli)");
@@ -275,9 +266,9 @@ describe("release workflows", () => {
       expect(workflow).toContain("tools-release check-storage");
     }
     expect(win).not.toContain("tools\\release\\scripts\\build-platform.ps1");
-    expect(win).toContain("uses: actions/cache/restore@v5");
+    expect(beta).toContain("uses: actions/cache/restore@v5");
     expect(win).toContain("uses: actions/cache/save@v5");
-    expect(win).toContain("tools-pack-win-v1-beta-$env:RUNNER_OS-");
+    expect(beta).toContain("tools-pack-win-v1-beta-$env:RUNNER_OS-");
     expect(win).toContain('pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\\tools-pack" --namespace release-beta-win --json');
     expect(win).toContain('"tools-pack", "win", "build"');
     expect(buildWin).toContain('$buildArgs += "--require-vela-cli"');
@@ -578,7 +569,7 @@ describe("release workflows", () => {
     // The notifier group inside `dispatch_validation` sits after two dispatch
     // steps that can fail, so every step of it needs a status function.
     const dispatchSteps = parseWorkflowSteps(prerelease).filter((step) => step.job === "dispatch_validation");
-    const notifierStart = dispatchSteps.findIndex((step) => step.name === "Setup Node.js for the fallback notifier");
+    const notifierStart = dispatchSteps.findIndex((step) => step.name === "Compose the fallback notice");
     expect(notifierStart, "release-prerelease.yml must still carry the fallback notifier").toBeGreaterThan(0);
     const stranded = dispatchSteps
       .slice(notifierStart)
@@ -592,7 +583,7 @@ describe("release workflows", () => {
     // consumer must require the composer to have SUCCEEDED. `alert` is written
     // last precisely so a half-written notice cannot claim to be one, and the
     // outcome check says the same thing at the workflow layer, so neither a
-    // crashed nor a skipped composer can hand feishu-notice.ts an empty body.
+    // crashed nor a skipped composer can hand feishu.py notice an empty body.
     for (const [file, content] of [
       ["release-prerelease.yml", prerelease],
       ["release-prerelease-card.yml", card],
@@ -691,8 +682,8 @@ describe("release workflows", () => {
     expect(tests).not.toContain("needs.metadata.outputs.commit");
 
     // Smoke installs the PUBLISHED artifact, not a local build directory.
-    expect(smoke).toContain("smoke-artifacts.ts plan");
-    expect(smoke).toContain("smoke-artifacts.ts stage");
+    expect(smoke).toContain("tools-release artifact plan");
+    expect(smoke).toContain("tools-pack stage-artifact");
     expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
     expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
     expect(smoke).not.toContain("tools-pack mac build");
@@ -709,7 +700,7 @@ describe("release workflows", () => {
     // The card watcher reads job state and writes only to Feishu.
     expect(card).toContain("actions: read");
     expect(card).not.toContain("actions: write");
-    expect(card).toContain("tools/release/src/notifications/prerelease-progress-card.ts");
+    expect(card).toContain(".github/scripts/feishu.py watch");
     expect(card).toContain("FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}");
     expect(card).toContain("FEISHU_RELEASE_CHAT_ID: ${{ secrets.FEISHU_RELEASE_CHAT_ID }}");
   });
