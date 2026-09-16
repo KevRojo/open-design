@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 7 },
+    schema: { version: 8 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -95,6 +95,90 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("projects configured matrices independently and rejects incomplete execution declarations", () => {
+    const result = spawnSync("python3", ["-c", `
+import copy, json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+contract = c.ConvergenceContract(Path(sys.argv[2]) / ".github/config/convergence/release-beta.json")
+w = contract.workflow("release-beta")
+ids = [key for key in w.workloads if key.startswith("test_")]
+targets = [row["target"] for row in w.matrices["build"]]
+runners = {x.runner_class: ["test-runner"] for x in w.workloads.values()}
+for mask in range(16):
+    inputs = {"enable_" + target: bool(mask & (1 << i)) for i, target in enumerate(targets)}
+    run = {key: bool(mask & (1 << i)) for i, key in enumerate(ids)}
+    projected = c.project_matrices(w, run, runners, inputs)
+    builds = json.loads(projected["build_matrix"])["include"]
+    tests = json.loads(projected["test_matrix"])["include"]
+    assert [r["target"] for r in builds] == [t for t in targets if inputs["enable_" + t]]
+    assert len(builds) == int(projected["build_count"])
+    assert len(tests) == int(projected["test_count"])
+    assert sorted(r["name"] for r in tests) == sorted(name for key in ids if run[key] for name in w.workloads[key].success)
+    assert all(r["runner"] == ["test-runner"] for r in tests)
+for bad in ({}, {"enable_" + t: "true" for t in targets}):
+    try: c.project_matrices(w, {key: True for key in ids}, runners, bad)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted missing/nonboolean platform selection")
+raw = json.loads((Path(sys.argv[2]) / ".github/config/convergence/release-beta.json").read_text())["workflows"]["release-beta"]
+for mutation in ("duplicate", "unknown", "runner", "missing-shard"):
+    value = copy.deepcopy(raw)
+    rows = value["matrices"]["test"]
+    if mutation == "duplicate": rows.append(copy.deepcopy(rows[0]))
+    if mutation == "unknown": rows[0]["workload"] = "unknown"
+    if mutation == "runner": rows[0]["runner"] = "other"
+    if mutation == "missing-shard": rows.pop()
+    try: c.WorkflowContract("release-beta", value)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted invalid matrix: " + mutation)
+`, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  test("beta test identities follow source, fixtures and their own execution instead of publication", () => {
+    const result = spawnSync("python3", ["-c", `
+import copy, os, subprocess, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
+ids = {"test_daemon_unit_tests", "test_functional_e2e", "source_mac_arm64_daemon"}
+runners = {"release_tests": ["ubuntu-latest"], "ui_p0": ["ui-runner"], "source_mac_arm64": ["macos-14"]}
+with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
+    index = Path(scratch) / "index"
+    env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    def git(*args, content=None):
+        return subprocess.check_output(["git", *args], cwd=root, env=env, input=content, text=True).strip()
+    def keys(config=contract):
+        return {key: value["digest"] for key, value in c.calculate(config, root, "release-beta", runners, index=index, identities=ids).items()}
+    git("read-tree", "HEAD")
+    baseline = keys()
+    cases = {
+      ".github/workflows/release-beta.yml": set(),
+      "apps/daemon/src/plan-witness.ts": ids,
+      "apps/daemon/tests/plan-witness.test.ts": {"test_daemon_unit_tests"},
+      "apps/web/src/plan-witness.ts": {"test_functional_e2e"},
+      "plugins/registry/plan-witness.json": {"test_daemon_unit_tests", "test_functional_e2e"},
+      "packages/contracts/src/plan-witness.ts": ids,
+      "packages/contracts/tests/plan-witness.test.ts": set(),
+    }
+    for path, expected in cases.items():
+        git("read-tree", "HEAD")
+        oid = git("hash-object", "-w", "--stdin", content="identity witness")
+        git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
+        changed = {key for key, value in keys().items() if value != baseline[key]}
+        assert changed == expected, (path, changed, expected)
+    git("read-tree", "HEAD")
+    changed = copy.deepcopy(contract)
+    row = next(r for r in changed.workflow("release-beta").matrices["test"] if r["kind"] == "daemon")
+    row["command"] += " --bail=1"
+    assert {key for key, value in keys(changed).items() if value != baseline[key]} == {"test_daemon_unit_tests"}
+`, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("projects execution batches and independently admits products from one transport", () => {
     const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `
@@ -191,7 +275,7 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import convergence as c
 root = Path(sys.argv[2])
-contract = c.ConvergenceContract(root / ".github/config/convergence-beta.json")
+contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
 with tempfile.TemporaryDirectory(prefix="beta-source-identity-") as scratch:
     index = Path(scratch) / "index"
     env = {**os.environ, "GIT_INDEX_FILE": str(index)}
@@ -222,7 +306,7 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import convergence as c
 root = Path(sys.argv[2])
-contract = c.ConvergenceContract(root / ".github/config/convergence-beta.json")
+contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
 ids = {"source_mac_arm64_" + unit for unit in ("packages", "daemon", "web", "shell")}
 with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
     index = Path(scratch) / "index"
@@ -709,7 +793,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 7");
+    expect(stale.stderr).toContain("requires schema.version 8");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();

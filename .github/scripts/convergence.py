@@ -40,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -128,14 +128,44 @@ class Workload:
 class WorkflowContract:
     def __init__(self, name: str, raw: Any):
         value = object_value(raw, f"convergence.workflows.{name}")
-        if not {"policy", "workloads"}.issubset(value) or set(value) - {"policy", "workloads", "batches"}:
-            raise ConfigError(f"convergence.workflows.{name} requires policy, workloads and optional batches")
+        if not {"policy", "workloads"}.issubset(value) or set(value) - {"policy", "workloads", "batches", "matrices"}:
+            raise ConfigError(f"convergence.workflows.{name} requires policy, workloads and optional batches/matrices")
         self.name = require_identity(name, "convergence workflow")
         self.policy = require_identity(value["policy"], f"convergence.workflows.{name}.policy")
         workloads = object_value(value["workloads"], f"convergence.workflows.{name}.workloads")
         if not workloads:
             raise ConfigError(f"convergence.workflows.{name}.workloads must not be empty")
         self.workloads = {identity: Workload(name, identity, raw_workload) for identity, raw_workload in workloads.items()}
+        self.matrices = object_value(value.get("matrices", {}), "execution matrices")
+        self.executions: dict[str, list[Any]] = {}
+        for matrix_name, rows in self.matrices.items():
+            require_identity(matrix_name, "matrix name")
+            if not isinstance(rows, list) or not rows:
+                raise ConfigError("execution matrix requires nonempty rows")
+            names: set[str] = set()
+            for row in rows:
+                row = object_value(row, "matrix row")
+                name = require_string(row.get("name"), "matrix row name")
+                if name in names:
+                    raise ConfigError("duplicate matrix row name")
+                names.add(name)
+                if ("workload" in row) == ("enabledInput" in row):
+                    raise ConfigError("matrix row requires exactly one workload or enabledInput")
+                if "workload" in row:
+                    identity = row["workload"]
+                    if not isinstance(identity, str) or identity not in self.workloads:
+                        raise ConfigError("matrix row references unknown workload")
+                    if name not in self.workloads[identity].success:
+                        raise ConfigError("matrix row lacks a matching success proof")
+                    if "runner" in row:
+                        raise ConfigError("workload matrix runner comes from its execution class")
+                    self.executions.setdefault(identity, []).append(row)
+                else:
+                    require_identity(row["enabledInput"], "matrix enabled input")
+                    require_string(row.get("runner"), "matrix runner")
+        for identity, rows in self.executions.items():
+            if {row["name"] for row in rows} != set(self.workloads[identity].success):
+                raise ConfigError("matrix rows must cover every workload success job")
         self.batches = object_value(value.get("batches", {}), "execution batches")
         self.requests: dict[str, Any] = {}
         self.contributions: dict[str, Any] = {}
@@ -425,6 +455,7 @@ def calculate(
             "success": workload.success,
             "successBoundary": workload.success_boundary,
             "request": workflow.requests.get(identity),
+            "execution": workflow.executions.get(identity),
         }).encode())
         results[identity] = {
             "digest": digest.hexdigest(),
@@ -836,6 +867,33 @@ def project_batches(workflow: WorkflowContract, pending: dict[str, Any], output:
             write_json_atomic(output / batch_name / f"{name}.json", request)
 
 
+def project_matrices(workflow: WorkflowContract, run: dict[str, bool],
+                     runners: dict[str, Any], inputs: dict[str, Any]) -> dict[str, str]:
+    """Project independent unit decisions; no aggregate hot/cold policy."""
+    outputs = {}
+    for name, rows in workflow.matrices.items():
+        selected = []
+        for row in rows:
+            member = dict(row)
+            if "workload" in row:
+                identity = row["workload"]
+                if identity not in run:
+                    raise ConfigError("matrix workload lacks a Plan decision")
+                if not run[identity]:
+                    continue
+                member["runner"] = runners[workflow.workloads[identity].runner_class]
+            else:
+                enabled = inputs.get(row["enabledInput"])
+                if type(enabled) is not bool:
+                    raise ConfigError("matrix selection input must be boolean")
+                if not enabled:
+                    continue
+            selected.append(member)
+        outputs[f"{name}_matrix"] = compact_json({"include": selected})
+        outputs[f"{name}_count"] = str(len(selected))
+    return outputs
+
+
 def contribute_batches_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
     pending = load_json(args.pending)
     workflow = contract.workflow(pending["workflow"])
@@ -949,6 +1007,8 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
     }
     write_json_atomic(args.pending, pending)
     project_batches(workflow, pending, args.pending.parent / "requests")
+    append_outputs(project_matrices(workflow, run, json.loads(args.runner_plan_json),
+                                    object_value(json.loads(args.execution_inputs_json), "execution inputs")))
     append_outputs(
         {
             "run": compact_json(run),
@@ -1752,6 +1812,7 @@ def parse_args() -> argparse.Namespace:
     scope.add_argument("--scope-plan", type=Path)
     scope.add_argument("--all-workloads", action="store_true", help="select every declared workload, without changed-path routing")
     plan.add_argument("--runner-plan-json", required=True)
+    plan.add_argument("--execution-inputs-json", default="{}")
     plan.add_argument("--repository-id", type=int)
     plan.add_argument("--repository")
     plan.add_argument("--base-url", default="")

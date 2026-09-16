@@ -95,8 +95,15 @@ introduce a composite action per cache identity. Runtime dependencies and pnpm
 store preparation continue through `setup-workspace` and its existing trust policy.
 
 Release graphs separate delivery, source validation, and reusable-result publication.
-Beta schedules selected native platforms and same-environment tests through matrices;
-matrix grouping does not merge workload identities or change success-proof job names.
+Beta declares its input suites and execution rows in
+`.github/config/convergence/release-beta.json`. Python projects one platform build
+matrix and one test matrix; runner labels for reusable test rows come from their
+workload execution classes. Each row's command, preparation and parameters enter
+that workload's identity. Matrix grouping does not merge workload identities;
+all declared shard job names must be covered by the matching success proof.
+Do not add aggregate hot-run switches or new actions just to narrow cache inputs.
+Keep publication-only edits outside daemon/UI test inputs; repository topology
+tests and repository-wide validation may intentionally retain broader inputs.
 Native outputs are platform-named and emitted only by the owning matrix member.
 Unpublished beta builds may retain GitHub artifacts but have no alternate R2 upload
 or receipt protocol. CDN installation validation requires published version metadata.

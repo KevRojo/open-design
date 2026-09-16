@@ -364,10 +364,10 @@ jobs:
       OPEN_DESIGN_BETA_METADATA_URL: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}/beta/latest/metadata.json
     outputs:
       run: ${{ steps.plan.outputs.run }}
-      build_matrix: ${{ steps.build_matrix.outputs.matrix }}
-      build_count: ${{ steps.build_matrix.outputs.count }}
-      test_matrix: ${{ steps.test_matrix.outputs.matrix }}
-      test_count: ${{ steps.test_matrix.outputs.count }}
+      build_matrix: ${{ steps.plan.outputs.build_matrix }}
+      build_count: ${{ steps.plan.outputs.build_count }}
+      test_matrix: ${{ steps.plan.outputs.test_matrix }}
+      test_count: ${{ steps.plan.outputs.test_count }}
       pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
       contribution: ${{ steps.mode.outputs.contribution }}
       contributions: ${{ steps.plan.outputs.contributions }}
@@ -511,41 +511,16 @@ jobs:
       - name: '[plan] Frozen source test results'
         id: plan
         env:
+          EXECUTION_INPUTS: ${{ toJSON(inputs) }}
           RUNNER_PLAN: ${{ steps.runners.outputs.runs_on }}
           CONTROL_ROOT: ${{ steps.identity.outputs.commit == github.sha && '.' || 'plan-control' }}
           PLAN_MODE: ${{ steps.mode.outputs.mode }}
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
         run: |
           runners="$(jq -c '. + {release_tests:["ubuntu-latest"],source_mac_arm64:["macos-14"],source_mac_x64:["macos-15-intel"],source_win_x64:["windows-latest"]}' <<< "$RUNNER_PLAN")"
-          python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json" github-output \
+          python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json" github-output \
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
-            --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
-      - name: '[plan] Selected platform execution matrix'
-        id: build_matrix
-        env:
-          BUILD_INPUTS: ${{ toJSON(inputs) }}
-        run: |
-          matrix="$(jq -cn --argjson inputs "$BUILD_INPUTS" '{include: [
-            {target:"mac_arm64", name:"[build] macOS arm64", runner:"macos-14", shell:"bash"},
-            {target:"mac_x64", name:"[build] macOS x64", runner:"macos-15-intel", shell:"bash"},
-            {target:"win_x64", name:"[build] Windows x64", runner:"windows-latest", shell:"pwsh"}
-          ]} | if all(.include[]; ($inputs["enable_" + .target] | type) == "boolean") then
-            .include |= map(select($inputs["enable_" + .target])) else error("invalid platform selection") end')"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "count=$(jq '.include | length' <<< "$matrix")" >> "$GITHUB_OUTPUT"
-      - name: '[plan] Selected test execution matrix'
-        id: test_matrix
-        env:
-          PLAN_RUN: ${{ steps.plan.outputs.run }}
-        run: |
-          matrix="$(jq -cn --argjson run "$PLAN_RUN" '{include: [
-            {workload:"test_e2e_vitest", kind:"e2e", name:"[test] beta E2E Vitest", shard:0, timeout:20},
-            {workload:"test_verify", kind:"verify", name:"[test] beta Verify build (typecheck + tests)", shard:0, timeout:360},
-            (range(1;5) | {workload:"test_daemon_unit_tests", kind:"daemon", name:("[test] beta Daemon tests (" + tostring + "/4)"), shard:., timeout:15})
-          ]} | if all(.include[]; ($run[.workload] | type) == "boolean") then
-            .include |= map(select($run[.workload])) else error("missing or invalid Plan test decision") end')"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "count=$(jq '.include | length' <<< "$matrix")" >> "$GITHUB_OUTPUT"
+            --execution-inputs-json "$EXECUTION_INPUTS" --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
       - name: '[retain] Frozen Plan witness'
         uses: actions/upload-artifact@v4
         with:
@@ -608,17 +583,20 @@ jobs:
             ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
 
       - name: '[prepare] Workspace source tools'
+        if: ${{ matrix.target != 'linux_x64' }}
         uses: ./.github/actions/setup-workspace
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
 
       - name: '[restore] Source execution requests'
+        if: ${{ matrix.target != 'linux_x64' }}
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.plan.outputs.pending_artifact }}
           path: ${{ runner.temp }}/source-plan
 
       - name: '[build] Source packages'
+        if: ${{ matrix.target != 'linux_x64' }}
         id: source_packages
         shell: bash
         run: >-
@@ -627,6 +605,7 @@ jobs:
           ${{ matrix.target }} "$RUNNER_TEMP/source-products/packages"
 
       - name: '[build] Source daemon'
+        if: ${{ matrix.target != 'linux_x64' }}
         id: source_daemon
         shell: bash
         run: >-
@@ -635,6 +614,7 @@ jobs:
           ${{ matrix.target }} "$RUNNER_TEMP/source-products/daemon"
 
       - name: '[build] Source web'
+        if: ${{ matrix.target != 'linux_x64' }}
         id: source_web
         shell: bash
         run: >-
@@ -643,6 +623,7 @@ jobs:
           ${{ matrix.target }} "$RUNNER_TEMP/source-products/web"
 
       - name: '[build] Source shell'
+        if: ${{ matrix.target != 'linux_x64' }}
         id: source_shell
         shell: bash
         run: >-
@@ -651,7 +632,7 @@ jobs:
           ${{ matrix.target }} "$RUNNER_TEMP/source-products/shell"
 
       - name: '[retain] Source products'
-        if: ${{ !cancelled() }}
+        if: ${{ matrix.target != 'linux_x64' && (!cancelled()) }}
         uses: actions/upload-artifact@v4
         with:
           name: beta-source-${{ matrix.target }}
@@ -661,7 +642,7 @@ jobs:
           retention-days: 7
 
       - name: '[report] Source execution'
-        if: ${{ !cancelled() }}
+        if: ${{ matrix.target != 'linux_x64' && (!cancelled()) }}
         uses: actions/upload-artifact@v4
         with:
           name: beta-source-report-${{ matrix.target }}
@@ -776,7 +757,7 @@ jobs:
         # Only when NOT publishing to the release feed: this is the downloadable
         # artifact for a manual dispatch (e.g. a signed feature-test build handed
         # to teammates). The normal publish=true release pipeline is unchanged.
-        if: ${{ matrix.target == 'mac_arm64' && (!cancelled() && !inputs.publish) }}
+        if: ${{ matrix.target != 'linux_x64' && (matrix.target == 'mac_arm64' && (!cancelled() && !inputs.publish)) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-arm64-dmg
@@ -1167,7 +1148,7 @@ jobs:
         # handed to a teammate without also publishing to the public feed. The
         # glob covers every win_x64_target: nsis produces the setup exe, zip the
         # portable zip, all both. The normal publish=true pipeline is unchanged.
-        if: ${{ matrix.target == 'win_x64' && (!cancelled() && !inputs.publish) }}
+        if: ${{ matrix.target != 'linux_x64' && (matrix.target == 'win_x64' && (!cancelled() && !inputs.publish)) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-win-x64-installer
@@ -1332,25 +1313,14 @@ jobs:
           path: ${{ runner.temp }}\release-platform-manifests\win_x64.json
           if-no-files-found: error
 
-  build_linux_x64:
-    name: '[build] Linux x64'
-    needs: plan
-    if: ${{ inputs.enable_linux_x64 }}
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-
       - name: Setup pnpm
+        if: ${{ matrix.target == 'linux_x64' }}
         uses: pnpm/action-setup@v5
         with:
           version: 10.33.2
 
       - name: Setup Node.js
+        if: ${{ matrix.target == 'linux_x64' }}
         uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -1358,15 +1328,17 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
+        if: ${{ matrix.target == 'linux_x64' }}
         run: pnpm install --frozen-lockfile
 
       - name: Install Linux smoke dependencies
-        if: ${{ inputs.linux_x64_smoke_mode != 'skip' }}
+        if: ${{ matrix.target == 'linux_x64' && (inputs.linux_x64_smoke_mode != 'skip') }}
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
 
       - name: Build beta linux_x64
+        if: ${{ matrix.target == 'linux_x64' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/linux_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/linux_x64/build.log
@@ -1383,7 +1355,7 @@ jobs:
         run: bash tools/release/scripts/build-platform.sh
 
       - name: Write linux_x64 release report
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'linux_x64' && (always()) }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/linux_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/linux_x64/build.log
@@ -1400,11 +1372,11 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish linux_x64 report summary
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'linux_x64' && (always()) }}
         run: cat "${{ runner.temp }}/release-report/linux_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare linux_x64 assets
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'linux_x64' && (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/linux_x64
@@ -1417,7 +1389,7 @@ jobs:
         run: bash tools/release/scripts/prepare-platform-assets.sh
 
       - name: Publish linux_x64 platform
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'linux_x64' && (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/linux_x64
@@ -1438,7 +1410,7 @@ jobs:
         run: pnpm exec tools-release publish-platform
 
       - name: Upload linux_x64 publish manifest
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'linux_x64' && (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-linux-x64-publish-manifest
@@ -1450,7 +1422,6 @@ jobs:
     needs:
       - plan
       - build
-      - build_linux_x64
     if: >-
       ${{
         always() &&
@@ -1459,8 +1430,7 @@ jobs:
         needs.plan.outputs.promote == 'true' &&
         needs.plan.result == 'success' &&
         (inputs.enable_mac_arm64 || inputs.enable_win_x64 || inputs.enable_mac_x64 || inputs.enable_linux_x64) &&
-        (needs.plan.outputs.build_count == '0' || needs.build.result == 'success') &&
-        (!inputs.enable_linux_x64 || needs.build_linux_x64.result == 'success')
+        needs.build.result == 'success'
       }}
     runs-on: ubuntu-latest
     outputs:
@@ -1501,7 +1471,7 @@ jobs:
           path: ${{ runner.temp }}/release-platform-manifests
 
       - name: Download linux_x64 publish manifest
-        if: ${{ inputs.enable_linux_x64 && needs.build_linux_x64.result == 'success' }}
+        if: ${{ inputs.enable_linux_x64 && needs.build.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-linux-x64-publish-manifest
@@ -1546,7 +1516,7 @@ jobs:
           ENABLE_MAC_ARM64: ${{ inputs.enable_mac_arm64 }}
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
           ENABLE_WIN_X64: ${{ inputs.enable_win_x64 }}
-          LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
+          LINUX_X64_RESULT: ${{ needs.build.result }}
           MAC_ARM64_RESULT: ${{ needs.build.result }}
           MAC_X64_RESULT: ${{ needs.build.result }}
           RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}
@@ -1586,7 +1556,7 @@ jobs:
           ENABLE_MAC_ARM64: ${{ inputs.enable_mac_arm64 }}
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
           ENABLE_WIN_X64: ${{ inputs.enable_win_x64 }}
-          LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
+          LINUX_X64_RESULT: ${{ needs.build.result }}
           MAC_ARM64_RESULT: ${{ needs.build.result }}
           MAC_X64_RESULT: ${{ needs.build.result }}
           RELEASE_CHANNEL: beta
@@ -1618,79 +1588,78 @@ jobs:
           ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
 
-  test_functional_e2e:
-    needs: plan
-    if: ${{ fromJSON(needs.plan.outputs.run).test_functional_e2e }}
-    name: "[test] beta P0 Functional E2E"
-    uses: ./.github/workflows/ui-extended-main.yml
-    with:
-      ref: ${{ needs.plan.outputs.commit }}
-      suite: p0
   test:
     needs: plan
     if: ${{ needs.plan.outputs.test_count != '0' }}
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}
+    env:
+      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
+      OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Configure CI parallelism
+        if: ${{ matrix.kind == 'ui' }}
+        uses: ./.github/actions/configure-ci-parallelism
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          runner-labels: ${{ toJSON(matrix.runner) }}
       - name: Setup Playwright
-        if: ${{ matrix.kind == 'e2e' }}
-        run: pnpm -C e2e exec playwright install --with-deps chromium
-      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
-      # The daemon launches the installed Chromium directly instead of through
-      # Playwright. Restore user namespaces on this ephemeral runner so the real
-      # Chromium sandbox remains enabled rather than disabling that protection.
+        if: ${{ matrix.kind == 'e2e' || matrix.kind == 'ui' }}
+        uses: ./.github/actions/setup-playwright
+        with:
+          package-json-path: e2e/package.json
+          install-command: pnpm -C e2e exec playwright install --with-deps chromium
+          runner-labels: ${{ toJSON(matrix.runner) }}
       - name: Allow Chromium user namespaces on GitHub Ubuntu
         if: ${{ matrix.kind == 'e2e' }}
-        shell: bash
         run: |
-          set -euo pipefail
           if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
-      - name: Prebuild workspace type declarations
-        if: ${{ matrix.kind == 'e2e' }}
-        run: |
-          pnpm --filter @open-design/daemon build
-          pnpm --filter @open-design/desktop build
-          pnpm --filter @open-design/web build:sidecar
-      - name: Run E2E Vitest
-        if: ${{ matrix.kind == 'e2e' }}
-        run: pnpm --filter @open-design/e2e test
-      - name: Run daemon test shard
-        if: ${{ matrix.kind == 'daemon' }}
-        env:
-          OD_WATCHER_TEST_DEBUG: "1"
-        run: pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4
-      - name: Build daemon and desktop (typecheck dependencies)
-        if: ${{ matrix.kind == 'verify' }}
-        run: |
-          pnpm --filter @open-design/daemon build
-          pnpm --filter @open-design/desktop build
-      - name: Typecheck workspaces
-        if: ${{ matrix.kind == 'verify' }}
-        run: pnpm -r --workspace-concurrency=4 --if-present run typecheck
-      - name: Check repository layout policies
-        if: ${{ matrix.kind == 'verify' }}
-        run: pnpm guard
+      - name: Prepare test dependencies
+        run: ${{ matrix.prepare }}
+      - name: Clean Playwright state
+        if: ${{ matrix.kind == 'ui' }}
+        run: pnpm -C e2e exec tsx scripts/playwright.ts clean
+      - name: Run test unit
+        run: ${{ matrix.command }}
+      - name: Preserve project-runtime domain artifact
+        if: ${{ success() && matrix.kind == 'ui' && matrix.group == 'project-runtime' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}-domain
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Run UI critical extras
+        if: ${{ matrix.extra != '' }}
+        run: ${{ matrix.extra }}
+      - name: Upload Playwright debug artifact
+        if: ${{ always() && matrix.kind == 'ui' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   cache_build_results:
     name: '[cache] Build results'
@@ -1698,7 +1667,7 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).manifest }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
-      config: .github/config/convergence-beta.json
+      config: .github/config/convergence/release-beta.json
       handoff_id: beta-build-results
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: manifest
@@ -1706,11 +1675,11 @@ jobs:
 
   cache_test_results:
     name: '[cache] Test results'
-    needs: [plan, test_functional_e2e, test]
+    needs: [plan, test]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).none }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
-      config: .github/config/convergence-beta.json
+      config: .github/config/convergence/release-beta.json
       handoff_id: beta-test-results
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: none

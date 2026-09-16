@@ -156,11 +156,11 @@ function sectionBetween(content: string, start: string, end: string): string {
 
 // Inspect the common setup plus the statically guarded steps for one member.
 function betaPlatformBuild(workflow: string, target: string): string {
-  const build = sectionBetween(workflow, "\n  build:\n", "\n  build_linux_x64:");
+  const build = sectionBetween(workflow, "\n  build:\n", "\n  publish:");
   const split = build.indexOf("    steps:\n");
   const steps = build.slice(split).split(/(?=      - name:)/).filter((step) => {
-    const guard = step.match(/if: \$\{\{ matrix\.target == '([^']+)'/);
-    return !guard || guard[1] === target;
+    const guard = step.match(/if: \$\{\{ matrix\.target (==|!=) '([^']+)'/);
+    return !guard || (guard[1] === '==' ? guard[2] === target : guard[2] !== target);
   });
   return (build.slice(0, split) + steps.join("")).replaceAll("${{ matrix.target }}", target);
 }
@@ -2357,7 +2357,7 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("uses: actions/setup-node");
       expect(job).not.toContain("--ignore-scripts");
     }
-    const linux = sectionBetween(workflow, "\n  build_linux_x64:", "\n  publish:");
+    const linux = betaPlatformBuild(workflow, "linux_x64");
     expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
   });
 
@@ -2377,7 +2377,7 @@ process.stdin.on("end", () => {
 
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
       expect(job).toContain("needs: plan");
@@ -2417,98 +2417,42 @@ process.stdin.on("end", () => {
 
   });
 
-  it("[P1] selects platform matrix members without changing cache proof names or sharing outputs", async () => {
+  it("[P1] consumes one configured build matrix and one configured test matrix", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const script = extractWorkflowRunScript(workflow, "'[plan] Selected platform execution matrix'");
-    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
-    const dir = await mkdtemp(join(tmpdir(), "od-beta-platform-matrix-"));
-    const targets = ["mac_arm64", "mac_x64", "win_x64"];
-    try {
-      for (let mask = 0; mask < 8; mask++) {
-        const selected = targets.filter((_, index) => mask & (1 << index));
-        const output = join(dir, "output");
-        await writeFile(output, "");
-        await execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
-          BUILD_INPUTS: JSON.stringify(Object.fromEntries(targets.map((target) => [`enable_${target}`, selected.includes(target)]))),
-          GITHUB_OUTPUT: output,
-        }) });
-        const values = Object.fromEntries((await readFile(output, "utf8")).trim().split("\n").map((line) => {
-          const index = line.indexOf("=");
-          return [line.slice(0, index), line.slice(index + 1)];
-        }));
-        const rows = JSON.parse(values.matrix ?? "{}").include as { target: string; name: string; shell: string; runner: string }[];
-        expect(rows.map((row) => row.target)).toEqual(selected);
-        expect(Number(values.count)).toBe(selected.length);
-        for (const row of rows) {
-          expect(Object.keys(config.workflows["release-beta"].workloads[`source_${row.target}_web`].success)).toEqual([row.name]);
-          expect(row.shell).toBe(row.target === "win_x64" ? "pwsh" : "bash");
-        }
-      }
-      await expect(execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
-        BUILD_INPUTS: "{}", GITHUB_OUTPUT: join(dir, "invalid"),
-      }) })).rejects.toThrow();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-    const build = sectionBetween(workflow, "\n  build:\n", "\n  build_linux_x64:");
-    expect(build).toContain("fail-fast: false");
-    expect(build).toContain("needs.plan.outputs.build_count != '0'");
-    for (const target of ["mac_arm64", "win_x64"]) {
-      expect(build).toContain(`${target}_smoke_result: \${{ matrix.target == '${target}' && steps.${target}_smoke.outcome || '' }}`);
-    }
-    const publish = sectionBetween(workflow, "\n  publish:\n", "\n  test_functional_e2e:");
-    expect(publish).toContain("needs.plan.outputs.build_count == '0' || needs.build.result == 'success'");
-    expect(publish).toContain("!inputs.enable_linux_x64 || needs.build_linux_x64.result == 'success'");
-  });
-
-  it("[P1] projects only selected test matrix members with unchanged success-proof names", async () => {
-    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const script = extractWorkflowRunScript(workflow, "'[plan] Selected test execution matrix'");
-    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
-    const workloads = config.workflows["release-beta"].workloads;
-    const dir = await mkdtemp(join(tmpdir(), "od-beta-test-matrix-"));
-    try {
-      for (const selected of [[], ["test_e2e_vitest"], ["test_daemon_unit_tests"], ["test_verify"],
-        ["test_e2e_vitest", "test_daemon_unit_tests", "test_verify"]]) {
-        const output = join(dir, "output");
-        await writeFile(output, "");
-        await execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
-          PLAN_RUN: JSON.stringify(Object.fromEntries(Object.keys(workloads).map((id) => [id, selected.includes(id)]))),
-          GITHUB_OUTPUT: output,
-        }) });
-        const values = Object.fromEntries((await readFile(output, "utf8")).trim().split("\n").map((line) => {
-          const index = line.indexOf("=");
-          return [line.slice(0, index), line.slice(index + 1)];
-        }));
-        const rows = JSON.parse(values.matrix ?? "{}").include as { workload: string; name: string }[];
-        expect(Number(values.count)).toBe(rows.length);
-        expect(rows.map((row) => row.name).sort()).toEqual(selected.flatMap((id) => Object.keys(workloads[id].success)).sort());
-        expect(rows.every((row) => selected.includes(row.workload))).toBe(true);
-      }
-      await expect(execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
-        PLAN_RUN: "{}", GITHUB_OUTPUT: join(dir, "invalid-output"),
-      }) })).rejects.toThrow();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
+    const { workloads, matrices } = config.workflows["release-beta"];
+    expect(matrices.build.map((row: { target: string }) => row.target)).toEqual(["mac_arm64", "mac_x64", "win_x64", "linux_x64"]);
+    expect(matrices.test).toHaveLength(12);
+    for (const row of matrices.test) expect(Object.keys(workloads[row.workload].success)).toContain(row.name);
+    expect(workflow.match(/    strategy:/g)).toHaveLength(2);
+    expect(workflow).not.toContain("  build_linux_x64:");
+    expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
+    expect(workflow).toContain('run: ${{ matrix.command }}');
+    expect(workflow).toContain('run: ${{ matrix.prepare }}');
+    expect(workflow).toContain('OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}');
+    expect(workflow).toContain("OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}");
+    expect(workflow).toContain('test_matrix: ${{ steps.plan.outputs.test_matrix }}');
+    expect(workflow).toContain('build_matrix: ${{ steps.plan.outputs.build_matrix }}');
+    expect(workflow).toContain('--execution-inputs-json "$EXECUTION_INPUTS"');
+    expect(workflow).toContain('name: Run UI critical extras');
+    expect(workflow).toContain('name: Preserve project-runtime domain artifact');
   });
 
   it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");
+    const publish = sectionBetween(workflow, "\n  publish:", "\n  test:");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
-    expect(workflow).toContain("  test_functional_e2e:\n    needs: plan");
-    expect(workflow).toContain("fromJSON(needs.plan.outputs.run).test_functional_e2e");
+    expect(workflow).not.toContain("  test_functional_e2e:");
     const tests = sectionBetween(workflow, "\n  test:\n", "\n  cache_build_results:");
     expect(tests).toContain("needs.plan.outputs.test_count != '0'");
     expect(tests).toContain("matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}");
     expect(tests).toContain("fail-fast: false");
     expect(tests).toContain("name: ${{ matrix.name }}");
-    for (const kind of ["e2e", "daemon", "verify"]) expect(tests).toContain(`matrix.kind == '${kind}'`);
+    expect(tests).toContain("runs-on: ${{ matrix.runner }}");
     const plan = sectionBetween(workflow, "  plan:", "  build:");
     expect(plan).toContain("steps.identity.outputs.commit == github.sha");
-    expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json"');
+    expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json"');
     expect(plan).toContain("--all-workloads");
     expect(plan).toContain("contributions: ${{ steps.plan.outputs.contributions }}");
     expect(plan).toContain("steps.identity.outputs.commit != github.sha");
@@ -2518,9 +2462,9 @@ process.stdin.on("end", () => {
     expect(workflow).not.toContain("  test_results:");
     const cache = sectionBetween(workflow, "  cache_test_results:", "  smoke_mac_arm64:");
     expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
-    expect(cache).toContain("config: .github/config/convergence-beta.json");
+    expect(cache).toContain("config: .github/config/convergence/release-beta.json");
     expect(cache).toContain("products: none");
-    expect(cache).toContain("needs: [plan, test_functional_e2e, test]");
+    expect(cache).toContain("needs: [plan, test]");
     expect(cache).toContain("fromJSON(needs.plan.outputs.contributions).none");
     expect(cache).not.toContain("build_mac");
     const writer = await readFile(join(workspaceRoot, ".github/workflows/convergence.atom.yml"), "utf8");

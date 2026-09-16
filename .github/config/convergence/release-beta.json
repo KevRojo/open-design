@@ -1,0 +1,753 @@
+{
+  "schema": {
+    "version": 8
+  },
+  "resources": {
+    "repository-validation": {
+      "paths": [
+        "*"
+      ],
+      "exclude": [
+        "apps/packaged/package.json"
+      ]
+    },
+    "packaged-execution": {
+      "json": "apps/packaged/package.json",
+      "omit": [
+        "version"
+      ]
+    },
+    "source-common": {
+      "paths": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "packages/",
+        "tools/pack/",
+        "scripts/postinstall.mjs",
+        ".github/scripts/release/workspace-products.ts",
+        ".github/actions/setup-workspace/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json"
+      ]
+    },
+    "source-daemon": {
+      "paths": [
+        "apps/daemon/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json"
+      ]
+    },
+    "source-web": {
+      "paths": [
+        "apps/web/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json"
+      ]
+    },
+    "source-shell": {
+      "paths": [
+        "apps/desktop/",
+        "apps/packaged/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json",
+        "apps/packaged/package.json"
+      ]
+    },
+    "daemon-dependencies": {
+      "paths": [
+        "packages/agui-adapter/",
+        "packages/contracts/",
+        "packages/diagnostics/",
+        "packages/launcher-proto/",
+        "packages/platform/",
+        "packages/plugin-runtime/",
+        "packages/registry-protocol/",
+        "packages/release/",
+        "packages/sidecar/",
+        "packages/sidecar-proto/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json"
+      ]
+    },
+    "daemon-tests": {
+      "paths": [
+        "apps/daemon/"
+      ],
+      "exclude": []
+    },
+    "test-resources": {
+      "paths": [
+        "assets/",
+        "craft/",
+        "design-systems/",
+        "design-templates/",
+        "plugins/",
+        "prompt-templates/",
+        "skills/",
+        "mocks/"
+      ],
+      "exclude": []
+    },
+    "test-environment": {
+      "paths": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "scripts/postinstall.mjs",
+        ".github/actions/setup-workspace/"
+      ],
+      "exclude": []
+    },
+    "ui-tests": {
+      "paths": [
+        "apps/web/",
+        "apps/desktop/",
+        "packages/",
+        "tools/dev/",
+        "e2e/package.json",
+        "e2e/tsconfig.json",
+        "e2e/playwright.config.ts",
+        "e2e/lib/",
+        "e2e/ui/",
+        "e2e/resources/",
+        "e2e/scripts/",
+        ".github/actions/setup-playwright/",
+        ".github/actions/configure-ci-parallelism/"
+      ],
+      "exclude": [
+        "apps/web/tests/**",
+        "apps/desktop/tests/**",
+        "packages/**/tests/**",
+        "**/tsconfig.tests.json",
+        "**/vitest.config.ts"
+      ]
+    }
+  },
+  "suites": {
+    "repository-validation": [
+      "resource://repository-validation",
+      "resource://packaged-execution"
+    ],
+    "convergence-control": [
+      ".github/config/convergence/release-beta.json",
+      ".github/scripts/convergence.py",
+      ".github/scripts/handoff.py",
+      ".github/scripts/lib/",
+      ".github/workflows/convergence.atom.yml",
+      ".github/workflows/release-beta.yml",
+      ".github/actions/setup-workspace/"
+    ],
+    "source-packages": [
+      "resource://source-common"
+    ],
+    "source-daemon": [
+      "resource://source-common",
+      "resource://source-daemon"
+    ],
+    "source-web": [
+      "resource://source-common",
+      "resource://source-web"
+    ],
+    "source-shell": [
+      "resource://source-common",
+      "resource://source-shell",
+      "resource://packaged-execution"
+    ],
+    "daemon-tests": [
+      "resource://test-environment",
+      "resource://daemon-tests",
+      "resource://daemon-dependencies",
+      "resource://test-resources"
+    ],
+    "ui-tests": [
+      "resource://test-environment",
+      "resource://source-daemon",
+      "resource://daemon-dependencies",
+      "resource://test-resources",
+      "resource://ui-tests"
+    ]
+  },
+  "workflows": {
+    "release-beta": {
+      "policy": "beta-isolated-v1",
+      "workloads": {
+        "source_mac_arm64_packages": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-packages"
+          ],
+          "runnerClass": "source_mac_arm64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS arm64": [
+              "[build] Source packages",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_arm64_daemon": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-daemon"
+          ],
+          "runnerClass": "source_mac_arm64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS arm64": [
+              "[build] Source daemon",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_arm64_web": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-web"
+          ],
+          "runnerClass": "source_mac_arm64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS arm64": [
+              "[build] Source web",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_arm64_shell": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-shell"
+          ],
+          "runnerClass": "source_mac_arm64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS arm64": [
+              "[build] Source shell",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_x64_packages": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-packages"
+          ],
+          "runnerClass": "source_mac_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS x64": [
+              "[build] Source packages",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_x64_daemon": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-daemon"
+          ],
+          "runnerClass": "source_mac_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS x64": [
+              "[build] Source daemon",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_x64_web": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-web"
+          ],
+          "runnerClass": "source_mac_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS x64": [
+              "[build] Source web",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_mac_x64_shell": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-shell"
+          ],
+          "runnerClass": "source_mac_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] macOS x64": [
+              "[build] Source shell",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_win_x64_packages": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-packages"
+          ],
+          "runnerClass": "source_win_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] Windows x64": [
+              "[build] Source packages",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_win_x64_daemon": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-daemon"
+          ],
+          "runnerClass": "source_win_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] Windows x64": [
+              "[build] Source daemon",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_win_x64_web": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-web"
+          ],
+          "runnerClass": "source_win_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] Windows x64": [
+              "[build] Source web",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_win_x64_shell": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-shell"
+          ],
+          "runnerClass": "source_win_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] Windows x64": [
+              "[build] Source shell",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "test_e2e_vitest": {
+          "inputs": [
+            "suite://repository-validation"
+          ],
+          "runnerClass": "release_tests",
+          "products": "none",
+          "reusable": true,
+          "success": {
+            "[test] beta E2E Vitest": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ]
+          }
+        },
+        "test_daemon_unit_tests": {
+          "inputs": [
+            "suite://daemon-tests"
+          ],
+          "runnerClass": "release_tests",
+          "products": "none",
+          "reusable": true,
+          "success": {
+            "[test] beta Daemon tests (1/4)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta Daemon tests (2/4)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta Daemon tests (3/4)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta Daemon tests (4/4)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ]
+          }
+        },
+        "test_verify": {
+          "inputs": [
+            "suite://repository-validation"
+          ],
+          "runnerClass": "release_tests",
+          "products": "none",
+          "reusable": true,
+          "success": {
+            "[test] beta Verify build (typecheck + tests)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ]
+          }
+        },
+        "test_functional_e2e": {
+          "inputs": [
+            "suite://ui-tests"
+          ],
+          "runnerClass": "ui_p0",
+          "products": "none",
+          "reusable": true,
+          "success": {
+            "[test] beta UI P0 (entry-settings)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta UI P0 (project-workspace)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta UI P0 (project-workspace-editor)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta UI P0 (project-collab)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta UI P0 (project-runtime)": [
+              "Prepare test dependencies",
+              "Run test unit",
+              "Run UI critical extras"
+            ],
+            "[test] beta UI P0 (workspace-restoration)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ]
+          }
+        }
+      },
+      "batches": {
+        "source_mac_arm64": {
+          "artifact": "beta-source-mac_arm64",
+          "entries": {
+            "packages": {
+              "workload": "source_mac_arm64_packages",
+              "request": {
+                "units": [
+                  "packages"
+                ]
+              },
+              "product": "bundle"
+            },
+            "daemon": {
+              "workload": "source_mac_arm64_daemon",
+              "request": {
+                "units": [
+                  "daemon"
+                ]
+              },
+              "product": "bundle"
+            },
+            "web": {
+              "workload": "source_mac_arm64_web",
+              "request": {
+                "units": [
+                  "web"
+                ]
+              },
+              "product": "bundle"
+            },
+            "shell": {
+              "workload": "source_mac_arm64_shell",
+              "request": {
+                "units": [
+                  "shell"
+                ]
+              },
+              "product": "bundle"
+            }
+          }
+        },
+        "source_mac_x64": {
+          "artifact": "beta-source-mac_x64",
+          "entries": {
+            "packages": {
+              "workload": "source_mac_x64_packages",
+              "request": {
+                "units": [
+                  "packages"
+                ]
+              },
+              "product": "bundle"
+            },
+            "daemon": {
+              "workload": "source_mac_x64_daemon",
+              "request": {
+                "units": [
+                  "daemon"
+                ]
+              },
+              "product": "bundle"
+            },
+            "web": {
+              "workload": "source_mac_x64_web",
+              "request": {
+                "units": [
+                  "web"
+                ]
+              },
+              "product": "bundle"
+            },
+            "shell": {
+              "workload": "source_mac_x64_shell",
+              "request": {
+                "units": [
+                  "shell"
+                ]
+              },
+              "product": "bundle"
+            }
+          }
+        },
+        "source_win_x64": {
+          "artifact": "beta-source-win_x64",
+          "entries": {
+            "packages": {
+              "workload": "source_win_x64_packages",
+              "request": {
+                "units": [
+                  "packages"
+                ]
+              },
+              "product": "bundle"
+            },
+            "daemon": {
+              "workload": "source_win_x64_daemon",
+              "request": {
+                "units": [
+                  "daemon"
+                ]
+              },
+              "product": "bundle"
+            },
+            "web": {
+              "workload": "source_win_x64_web",
+              "request": {
+                "units": [
+                  "web"
+                ]
+              },
+              "product": "bundle"
+            },
+            "shell": {
+              "workload": "source_win_x64_shell",
+              "request": {
+                "units": [
+                  "shell"
+                ]
+              },
+              "product": "bundle"
+            }
+          }
+        }
+      },
+      "matrices": {
+        "build": [
+          {
+            "target": "mac_arm64",
+            "name": "[build] macOS arm64",
+            "enabledInput": "enable_mac_arm64",
+            "runner": "macos-14",
+            "shell": "bash"
+          },
+          {
+            "target": "mac_x64",
+            "name": "[build] macOS x64",
+            "enabledInput": "enable_mac_x64",
+            "runner": "macos-15-intel",
+            "shell": "bash"
+          },
+          {
+            "target": "win_x64",
+            "name": "[build] Windows x64",
+            "enabledInput": "enable_win_x64",
+            "runner": "windows-latest",
+            "shell": "pwsh"
+          },
+          {
+            "target": "linux_x64",
+            "name": "[build] Linux x64",
+            "enabledInput": "enable_linux_x64",
+            "runner": "ubuntu-latest",
+            "shell": "bash"
+          }
+        ],
+        "test": [
+          {
+            "workload": "test_e2e_vitest",
+            "kind": "e2e",
+            "name": "[test] beta E2E Vitest",
+            "timeout": 20,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm --filter @open-design/e2e test",
+            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+          },
+          {
+            "workload": "test_verify",
+            "kind": "verify",
+            "name": "[test] beta Verify build (typecheck + tests)",
+            "timeout": 360,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build",
+            "command": "pnpm -r --workspace-concurrency=4 --if-present run typecheck\npnpm guard",
+            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+          },
+          {
+            "workload": "test_daemon_unit_tests",
+            "kind": "daemon",
+            "name": "[test] beta Daemon tests (1/4)",
+            "timeout": 15,
+            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
+            "command": "pnpm --filter @open-design/daemon test --shard=1/4",
+            "postinstall": "[]",
+            "shard": 1,
+            "debug": "1"
+          },
+          {
+            "workload": "test_daemon_unit_tests",
+            "kind": "daemon",
+            "name": "[test] beta Daemon tests (2/4)",
+            "timeout": 15,
+            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
+            "command": "pnpm --filter @open-design/daemon test --shard=2/4",
+            "postinstall": "[]",
+            "shard": 2,
+            "debug": "1"
+          },
+          {
+            "workload": "test_daemon_unit_tests",
+            "kind": "daemon",
+            "name": "[test] beta Daemon tests (3/4)",
+            "timeout": 15,
+            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
+            "command": "pnpm --filter @open-design/daemon test --shard=3/4",
+            "postinstall": "[]",
+            "shard": 3,
+            "debug": "1"
+          },
+          {
+            "workload": "test_daemon_unit_tests",
+            "kind": "daemon",
+            "name": "[test] beta Daemon tests (4/4)",
+            "timeout": 15,
+            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
+            "command": "pnpm --filter @open-design/daemon test --shard=4/4",
+            "postinstall": "[]",
+            "shard": 4,
+            "debug": "1"
+          },
+          {
+            "workload": "test_functional_e2e",
+            "kind": "ui",
+            "name": "[test] beta UI P0 (entry-settings)",
+            "timeout": 45,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group entry-settings",
+            "postinstall": "[\"tools/dev\"]",
+            "group": "entry-settings",
+            "extra": ""
+          },
+          {
+            "workload": "test_functional_e2e",
+            "kind": "ui",
+            "name": "[test] beta UI P0 (project-workspace)",
+            "timeout": 45,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-workspace",
+            "postinstall": "[\"tools/dev\"]",
+            "group": "project-workspace",
+            "extra": ""
+          },
+          {
+            "workload": "test_functional_e2e",
+            "kind": "ui",
+            "name": "[test] beta UI P0 (project-workspace-editor)",
+            "timeout": 45,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-workspace-editor",
+            "postinstall": "[\"tools/dev\"]",
+            "group": "project-workspace-editor",
+            "extra": ""
+          },
+          {
+            "workload": "test_functional_e2e",
+            "kind": "ui",
+            "name": "[test] beta UI P0 (project-collab)",
+            "timeout": 45,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-collab",
+            "postinstall": "[\"tools/dev\"]",
+            "group": "project-collab",
+            "extra": ""
+          },
+          {
+            "workload": "test_functional_e2e",
+            "kind": "ui",
+            "name": "[test] beta UI P0 (project-runtime)",
+            "timeout": 45,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-runtime",
+            "postinstall": "[\"tools/dev\"]",
+            "group": "project-runtime",
+            "extra": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group critical-extras"
+          },
+          {
+            "workload": "test_functional_e2e",
+            "kind": "ui",
+            "name": "[test] beta UI P0 (workspace-restoration)",
+            "timeout": 45,
+            "prepare": "pnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
+            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group workspace-restoration",
+            "postinstall": "[\"tools/dev\"]",
+            "group": "workspace-restoration",
+            "extra": ""
+          }
+        ]
+      }
+    }
+  }
+}

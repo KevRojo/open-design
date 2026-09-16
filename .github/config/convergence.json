@@ -1,5 +1,5 @@
 {
-  "schema": { "version": 7 },
+  "schema": { "version": 8 },
   "suites": {
     "platform-source": [
       "packages/platform/src/", "packages/platform/package.json",
