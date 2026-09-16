@@ -551,34 +551,34 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
+      - name: '[validate] Source references'
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_javascript
       - name: '[prepare] JavaScript build tools'
         uses: ./.github/actions/setup-workspace
       - name: '[build] Source packages'
         env:
-          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.artifact.url || '' }}
-          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.artifact.sha256 || '' }}
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.retain && format('{0}/source-products/packages/product', runner.temp) || '' }}
         run: >-
           pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.operation == 'restore' && 'import' || 'build' }} packages
-          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --url "$SOURCE_PACKAGES_URL" --sha256 "$SOURCE_PACKAGES_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --json
       - name: '[build] Source daemon'
         env:
-          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.artifact.url || '' }}
-          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.artifact.sha256 || '' }}
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.retain && format('{0}/source-products/daemon/product', runner.temp) || '' }}
         run: >-
           pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.operation == 'restore' && 'import' || 'build' }} daemon
-          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --url "$SOURCE_DAEMON_URL" --sha256 "$SOURCE_DAEMON_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --json
       - name: '[build] Source shell'
         env:
-          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.artifact.url || '' }}
-          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.artifact.sha256 || '' }}
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.retain && format('{0}/source-products/shell/product', runner.temp) || '' }}
         run: >-
           pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.operation == 'restore' && 'import' || 'build' }} shell
-          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --url "$SOURCE_SHELL_URL" --sha256 "$SOURCE_SHELL_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --json
       - name: '[retain] Source products'
         if: ${{ !cancelled() }}
@@ -629,6 +629,14 @@ jobs:
           ref: ${{ needs.plan.outputs.commit }}
 
 
+      - name: '[validate] Source references'
+        if: ${{ matrix.target != 'linux_x64' }}
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_${{ matrix.target }} ${{ needs.plan.outputs.contribution == 'true' && '--shared packages,daemon,shell' || '' }}
       - name: '[prepare] Workspace source tools'
         if: ${{ matrix.target != 'linux_x64' }}
         uses: ./.github/actions/setup-workspace
@@ -639,8 +647,6 @@ jobs:
       - name: '[restore] Shared JavaScript'
         if: ${{ matrix.target != 'linux_x64' }}
         shell: bash
-        env:
-          WORKSPACE_SOURCES: ${{ toJSON(fromJSON(needs.cache_common_results.outputs.sources || needs.plan.outputs.sources).source_javascript) }}
         run: >-
           pnpm exec tools-pack workspace ${{ needs.plan.outputs.contribution == 'true' && 'import' || 'build' }} javascript
           --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -650,12 +656,10 @@ jobs:
         id: source_web
         shell: bash
         env:
-          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.artifact.url || '' }}
-          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.artifact.sha256 || '' }}
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.retain && format('{0}/source-products/web/product', runner.temp) || '' }}
         run: >-
           pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.operation == 'restore' && 'import' || 'build' }} web
-          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
 
       - name: '[retain] Source products'
@@ -796,7 +800,8 @@ jobs:
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
 
       - name: Write mac_arm64 release report
-        if: ${{ matrix.target == 'mac_arm64' && (always()) }}
+        id: report_mac_arm64
+        if: ${{ !cancelled() && matrix.target == 'mac_arm64' && steps.mac_arm64_tools_pack_build.outcome == 'success' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.log
@@ -819,7 +824,7 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish mac_arm64 report summary
-        if: ${{ matrix.target == 'mac_arm64' && (always()) }}
+        if: ${{ !cancelled() && steps.report_mac_arm64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_arm64/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare mac_arm64 assets
@@ -949,7 +954,8 @@ jobs:
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
 
       - name: Write mac_x64 release report
-        if: ${{ matrix.target == 'mac_x64' && (always()) }}
+        id: report_mac_x64
+        if: ${{ !cancelled() && matrix.target == 'mac_x64' && steps.mac_x64_tools_pack_build.outcome == 'success' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/mac_x64/build.log
@@ -966,7 +972,7 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish mac_x64 report summary
-        if: ${{ matrix.target == 'mac_x64' && (always()) }}
+        if: ${{ !cancelled() && steps.report_mac_x64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare mac_x64 assets
@@ -1114,7 +1120,8 @@ jobs:
         run: pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts
 
       - name: Write win_x64 release report
-        if: ${{ matrix.target == 'win_x64' && (always()) }}
+        id: report_win_x64
+        if: ${{ !cancelled() && matrix.target == 'win_x64' && steps.win_tools_pack_build.outcome == 'success' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
           RELEASE_BUILD_TARGET: ${{ inputs.win_x64_target }}
@@ -1134,7 +1141,7 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish win_x64 report summary
-        if: ${{ matrix.target == 'win_x64' && (always()) }}
+        if: ${{ !cancelled() && steps.report_win_x64.outcome == 'success' }}
         shell: pwsh
         run: Get-Content "${{ runner.temp }}\release-report\win_x64\summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
 
@@ -1487,6 +1494,13 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
+      - name: '[validate] Source references'
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        if: ${{ needs.plan.outputs.contribution == 'true' }}
+        run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
       - name: Configure CI parallelism
         if: ${{ matrix.kind == 'ui' }}
         uses: ./.github/actions/configure-ci-parallelism
@@ -1508,8 +1522,6 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Prepare test dependencies
-        env:
-          WORKSPACE_SOURCES: ${{ toJSON(fromJSON(needs.cache_common_results.outputs.sources || needs.plan.outputs.sources).source_javascript) }}
         run: ${{ needs.plan.outputs.contribution == 'true' && matrix.prepareShared || matrix.prepare }}
       - name: Clean Playwright state
         if: ${{ matrix.kind == 'ui' }}

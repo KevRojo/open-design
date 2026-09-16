@@ -58,7 +58,10 @@ New workflow-owned helpers should usually live under `.github/scripts/`. Prefer 
 The planning control plane is deliberately Linux-only and stdlib-only. Runner classes,
 scope rules, and workload convergence declarations live in `.github/config/`; their Python
 entrypoints initialize metadata before workload runners start. A Windows job
-must never invoke these scripts. Keep runner placement, changed-file relevance,
+must never invoke their planning commands. The stdlib-only `convergence.py resolve-references`
+command is a cross-platform exception: it only validates received keys and assembles
+runner-local URLs, without Git access, identity calculation or cache decisions.
+Keep runner placement, changed-file relevance,
 reusable-result convergence, and fine-grained commands inside a workload independent.
 
 `convergence.py` computes workload identities from declared Git inputs, the
@@ -88,6 +91,11 @@ Each entry binds one workload, a business execution request, and a product name.
 Python projects build/restore requests and verified artifact references; native
 executors do not parse pending Plan state or construct workload identities.
 Requests affect identity, while batch names and transport artifact names do not.
+Cross-job projections carry product keys and SHA-256, never the configured public
+origin or full URLs. Consumers resolve addresses into `GITHUB_ENV` before expensive
+setup; keep existing secret configuration unchanged. Cold consumers require the
+publisher's complete references, while hot consumers use the frozen Plan; missing
+publication output must not fall back to an incomplete cold Plan.
 One platform may retain multiple independently successful products in one artifact.
 The collector and trusted writer both check each workload's build and retention
 steps and its declared artifact subdirectory; only those selected products enter

@@ -95,6 +95,54 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("passes only keys between jobs and resolves cold, hot and mixed references locally", () => {
+    const result = spawnSync("python3", ["-c", `
+import argparse, json, os, sys, tempfile
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, '.github/scripts')
+import convergence as c
+origin='https://public.example/workloads'
+units=['packages','daemon','shell']
+hot={'source_javascript': {u: {'unit':u,'operation':'restore','retain':False,'artifact':{'url':origin+'/'+u+'.zip','sha256':'a'*64}} for u in units}}
+wire=c.key_requests(hot, origin)
+assert origin not in json.dumps(wire) and '"url"' not in json.dumps(wire)
+assert hot['source_javascript']['packages']['artifact']['url'].startswith(origin)
+with tempfile.TemporaryDirectory() as directory:
+    envfile=Path(directory)/'env'
+    base={'OD_WORKLOAD_RESULTS_BASE_URL':origin,'GITHUB_ENV':str(envfile)}
+    for source in [hot, json.loads(json.dumps(hot))]:
+        # The same projection serves newly published receipts and frozen hits.
+        wire=c.key_requests(source, origin)
+        envfile.write_text('')
+        with patch.dict(os.environ,{**base,'SHARED_SOURCES':json.dumps(c.consumer_sources(wire)['source_javascript'])},clear=True):
+            c.resolve_references(argparse.Namespace(shared=','.join(units),batch=None))
+        assert {s['unit']:s['url'] for s in json.loads(envfile.read_text().split('=',1)[1])}=={u:origin+'/'+u+'.zip' for u in units}
+    mixed=json.loads(json.dumps(hot))
+    mixed['source_javascript']['daemon']={'unit':'daemon','operation':'build','retain':True}
+    wire=c.key_requests(mixed,origin)
+    assert c.consumer_sources(wire)['source_javascript'] is None
+    envfile.write_text('')
+    with patch.dict(os.environ,{**base,'SOURCE_REQUESTS':json.dumps(wire)},clear=True):
+        c.resolve_references(argparse.Namespace(shared=None,batch='source_javascript'))
+    assert 'SOURCE_DAEMON_URL=\\n' in envfile.read_text()
+    for key in ['../x','/x','a//b','https://evil/x','a/%2e%2e/b','a?query','a\\\\b']:
+        try:c.reference_key(key)
+        except c.ConfigError:pass
+        else:raise AssertionError(key)
+    for bad in [None,[],[{'unit':'packages','key':'x','sha256':'a'*64}]]:
+        envfile.write_text('')
+        with patch.dict(os.environ,{**base,'SHARED_SOURCES':json.dumps(bad)},clear=True):
+            try:c.resolve_references(argparse.Namespace(shared=','.join(units),batch=None))
+            except c.ConfigError:pass
+            else:raise AssertionError('accepted incomplete sources')
+        assert envfile.read_text()==''
+    try:c.key_requests(hot,'https://different.example')
+    except c.ConfigError:pass
+    else:raise AssertionError('accepted foreign origin')
+`], { cwd: repoRoot, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
   test("projects configured matrices independently and rejects incomplete execution declarations", () => {
     const result = spawnSync("python3", ["-c", `
 import copy, json, sys

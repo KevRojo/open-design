@@ -2925,7 +2925,8 @@ process.stdin.on("end", () => {
       expect(reportStep, `no report step consumes ${stepId}.outcome`).toBeDefined();
       expect(reportStep).toContain("pnpm exec tools-release write-report");
       expect(reportStep).toContain('RELEASE_SMOKE_EXEMPT: "true"');
-      expect(reportStep).toContain(`if: \${{ matrix.target == '${stepId.replace(/_smoke$/, "")}' && (always()) }}`);
+      expect(reportStep).toContain("!cancelled()");
+      expect(reportStep).toContain(`steps.${stepId === "win_x64_smoke" ? "win" : stepId.replace(/_smoke$/, "")}_tools_pack_build.outcome == 'success'`);
     }
   });
 

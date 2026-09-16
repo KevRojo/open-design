@@ -906,6 +906,77 @@ def consumer_sources(requests: dict[str, Any]) -> dict[str, Any]:
             for name, entries in requests.items()}
 
 
+def reference_key(value: Any) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", value):
+        raise ConfigError("invalid product key")
+    if any(part in {"", ".", ".."} for part in value.split("/")):
+        raise ConfigError("unsafe product key")
+    return value
+
+
+def key_requests(requests: dict[str, Any], origin: str) -> dict[str, Any]:
+    """Job outputs carry keys only; public URLs stay in receipts/local inputs."""
+    result = json.loads(compact_json(requests))
+    for entries in result.values():
+        for request in entries.values():
+            if "artifact" not in request:
+                continue
+            artifact = request["artifact"]
+            prefix = public_origin(origin) + "/"
+            url = artifact.pop("url")
+            if not url.startswith(prefix):
+                raise ConfigError("product reference is outside the configured origin")
+            artifact["key"] = reference_key(url[len(prefix):])
+    return result
+
+
+def resolve_references(args: argparse.Namespace) -> int:
+    """Runner-local address assembly only: no Git, identities or cache decisions."""
+    origin = public_origin(os.environ.get("OD_WORKLOAD_RESULTS_BASE_URL", ""))
+    values = {}
+
+    def resolve(reference):
+        if not isinstance(reference, dict) or "url" in reference:
+            raise ConfigError("expected a key-only product reference")
+        digest = reference.get("sha256")
+        if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+            raise ConfigError("product reference requires SHA-256")
+        return {**{k: v for k, v in reference.items() if k != "key"},
+                "url": origin + "/" + reference_key(reference.get("key"))}
+
+    if args.shared:
+        sources = json.loads(os.environ.get("SHARED_SOURCES", "null"))
+        if not isinstance(sources, list) or not all(isinstance(s, dict) for s in sources) or sorted(s.get("unit", "") for s in sources) != sorted(args.shared.split(",")):
+            raise ConfigError("shared product references are missing or incomplete")
+        values["WORKSPACE_SOURCES"] = compact_json([resolve(source) for source in sources])
+    if args.batch:
+        requests = json.loads(os.environ.get("SOURCE_REQUESTS", "null"))
+        if not isinstance(requests, dict) or not isinstance(requests.get(args.batch), dict) or not requests[args.batch]:
+            raise ConfigError("source request batch is missing")
+        for name, request in requests[args.batch].items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+                raise ConfigError("invalid source request name")
+            operation = request.get("operation")
+            if operation not in {"build", "restore"}:
+                raise ConfigError("invalid source operation")
+            artifact = resolve(request.get("artifact")) if operation == "restore" else {}
+            values[f"SOURCE_{name.upper()}_URL"] = artifact.get("url", "")
+            values[f"SOURCE_{name.upper()}_SHA256"] = artifact.get("sha256", "")
+    if not values:
+        raise ConfigError("no references selected")
+    # Atomic validation before writing any local environment values. Never
+    # append complete URLs to GITHUB_OUTPUT (runner secret filtering drops them).
+    path = os.environ.get("GITHUB_ENV")
+    if not path:
+        raise ConfigError("GITHUB_ENV is required for runner-local references")
+    if any("\n" in value or "\r" in value for value in values.values()):
+        raise ConfigError("reference environment value contains a line break")
+    with open(path, "a", encoding="utf-8") as stream:
+        for key, value in values.items():
+            stream.write(f"{key}={value}\n")
+    return 0
+
+
 def project_matrices(workflow: WorkflowContract, run: dict[str, bool],
                      runners: dict[str, Any], inputs: dict[str, Any]) -> dict[str, str]:
     """Project independent unit decisions; no aggregate hot/cold policy."""
@@ -1046,8 +1117,9 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
     }
     write_json_atomic(args.pending, pending)
     requests = project_batches(workflow, pending, args.pending.parent / "requests")
-    append_outputs({"requests": compact_json(requests)})
-    append_outputs({"sources": compact_json(consumer_sources(requests))})
+    transport = key_requests(requests, base_url)
+    append_outputs({"requests": compact_json(transport)})
+    append_outputs({"sources": compact_json(consumer_sources(transport))})
     append_outputs(project_matrices(workflow, run, json.loads(args.runner_plan_json),
                                     object_value(json.loads(args.execution_inputs_json), "execution inputs")))
     append_outputs(
@@ -1523,6 +1595,8 @@ def stage_products_command(args: argparse.Namespace) -> int:
 
 
 def public_origin(value: str) -> str:
+    if "\n" in value or "\r" in value:
+        raise ConfigError("invalid public origin")
     parsed = urllib.parse.urlparse(value.rstrip("/"))
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise ConfigError("public origin must be HTTPS without credentials")
@@ -1856,8 +1930,9 @@ def publish_command(args: argparse.Namespace) -> int:
     )
     append_outputs({"receipts": compact_json([item["receipt"] for item in candidate["results"]])})
     if requests is not None:
-        append_outputs({"requests": compact_json(requests)})
-        append_outputs({"sources": compact_json(consumer_sources(requests))})
+        transport = key_requests(requests, origin)
+        append_outputs({"requests": compact_json(transport)})
+        append_outputs({"sources": compact_json(consumer_sources(transport))})
     return 0
 
 
@@ -1868,6 +1943,9 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("validate")
     sub.add_parser("control-paths")
+    references = sub.add_parser("resolve-references")
+    references.add_argument("--batch")
+    references.add_argument("--shared", help="Comma-separated required business units")
     plan = sub.add_parser("github-output")
     plan.add_argument("--workflow", required=True)
     scope = plan.add_mutually_exclusive_group(required=True)
@@ -1926,6 +2004,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.command == "resolve-references":
+        return resolve_references(args)
     root = args.root.resolve() if args.root else repository_root(__file__)
     if args.command == "prepare-publication":
         return prepare_publication_command(args)
