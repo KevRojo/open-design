@@ -2424,6 +2424,13 @@ process.stdin.on("end", () => {
     expect(matrices.build.map((row: { target: string }) => row.target)).toEqual(["mac_arm64", "mac_x64", "win_x64", "linux_x64"]);
     expect(matrices.test).toHaveLength(12);
     for (const row of matrices.test) expect(Object.keys(workloads[row.workload].success)).toContain(row.name);
+    // Install-time tool preparation is not the app build dependency closure.
+    for (const row of matrices.test) {
+      expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/daemon^...'");
+      expect(row.prepare.split("\n")[0]).toContain("--if-present run build");
+      if (row.kind !== "daemon") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/desktop^...'");
+      if (row.kind === "ui" || row.kind === "e2e") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/web^...'");
+    }
     expect(workflow.match(/    strategy:/g)).toHaveLength(2);
     expect(workflow).not.toContain("  build_linux_x64:");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
