@@ -95,6 +95,11 @@ introduce a composite action per cache identity. Runtime dependencies and pnpm
 store preparation continue through `setup-workspace` and its existing trust policy.
 
 Release graphs separate delivery, source validation, and reusable-result publication.
+Beta schedules selected native platforms and same-environment tests through matrices;
+matrix grouping does not merge workload identities or change success-proof job names.
+Native outputs are platform-named and emitted only by the owning matrix member.
+Unpublished beta builds may retain GitHub artifacts but have no alternate R2 upload
+or receipt protocol. CDN installation validation requires published version metadata.
 Beta prepares metadata and Plan in one root job, reusing the source checkout unless
 the workflow control SHA differs. Build and test result lanes call the existing
 convergence atom independently with a frozen Plan and product mode; collection and

@@ -296,16 +296,16 @@ on:
         value: ${{ jobs.publish.outputs.version_metadata_url }}
       mac_arm64_url:
         description: "macOS arm64 dmg download URL."
-        value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build_mac_arm64.outputs.mac_arm64_url }}
+        value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build.outputs.mac_arm64_url }}
       win_x64_url:
         description: "Windows x64 installer download URL."
-        value: ${{ jobs.publish.outputs.win_x64_url || jobs.build_win_x64.outputs.win_x64_url }}
+        value: ${{ jobs.publish.outputs.win_x64_url || jobs.build.outputs.win_x64_url }}
       mac_arm64_smoke_result:
         description: "macOS arm64 packaged smoke outcome; advisory to publication."
-        value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}
+        value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build.outputs.mac_arm64_smoke_result }}
       win_x64_smoke_result:
         description: "Windows x64 packaged smoke outcome; advisory to publication."
-        value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}
+        value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build.outputs.win_x64_smoke_result }}
       mac_x64_url:
         description: "macOS x64 dmg download URL."
         value: ${{ jobs.publish.outputs.mac_x64_url }}
@@ -364,6 +364,8 @@ jobs:
       OPEN_DESIGN_BETA_METADATA_URL: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}/beta/latest/metadata.json
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      build_matrix: ${{ steps.build_matrix.outputs.matrix }}
+      build_count: ${{ steps.build_matrix.outputs.count }}
       test_matrix: ${{ steps.test_matrix.outputs.matrix }}
       test_count: ${{ steps.test_matrix.outputs.count }}
       pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -419,7 +421,7 @@ jobs:
         run: |
           set -euo pipefail
           built_sha="$(git rev-parse HEAD)"
-          # Task-scoped authorization; arbitrary feature refs remain dogfood-only.
+          # Task-scoped authorization; arbitrary feature refs remain build-only.
           if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] &&
              [ "${GITHUB_REF:-}" = "refs/heads/feat/plan-foundation" ] &&
              [ "$built_sha" = "${GITHUB_SHA:-}" ]; then
@@ -432,7 +434,7 @@ jobs:
             exit 1
           fi
           if [ "$built_sha" != "$main_sha" ]; then
-            echo "Shared beta publication is restricted to the current main commit ($main_sha); got $built_sha. Re-run this ref with publish=false for dogfood artifacts." >&2
+            echo "Shared beta publication is restricted to the current main commit ($main_sha); got $built_sha. Re-run this ref with publish=false for build artifacts." >&2
             exit 1
           fi
 
@@ -518,6 +520,19 @@ jobs:
           python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json" github-output \
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
             --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
+      - name: '[plan] Selected platform execution matrix'
+        id: build_matrix
+        env:
+          BUILD_INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          matrix="$(jq -cn --argjson inputs "$BUILD_INPUTS" '{include: [
+            {target:"mac_arm64", name:"[build] macOS arm64", runner:"macos-14", shell:"bash"},
+            {target:"mac_x64", name:"[build] macOS x64", runner:"macos-15-intel", shell:"bash"},
+            {target:"win_x64", name:"[build] Windows x64", runner:"windows-latest", shell:"pwsh"}
+          ]} | if all(.include[]; ($inputs["enable_" + .target] | type) == "boolean") then
+            .include |= map(select($inputs["enable_" + .target])) else error("invalid platform selection") end')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq '.include | length' <<< "$matrix")" >> "$GITHUB_OUTPUT"
       - name: '[plan] Selected test execution matrix'
         id: test_matrix
         env:
@@ -542,24 +557,55 @@ jobs:
           retention-days: 7
 
 
-  build_mac_arm64:
-    name: '[build] macOS arm64'
-    needs: plan
-    if: ${{ inputs.enable_mac_arm64 }}
-    runs-on: macos-14
+  build:
+    name: ${{ matrix.name }}
     outputs:
-      dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
-      mac_arm64_url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
-      smoke_result: ${{ steps.mac_arm64_smoke.outcome }}
+      mac_arm64_url: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_platform_outputs.outputs.dmg_url || '' }}
+      win_x64_url: ${{ matrix.target == 'win_x64' && steps.win_x64_platform_outputs.outputs.installer_url || '' }}
+      mac_arm64_smoke_result: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_smoke.outcome || '' }}
+      win_x64_smoke_result: ${{ matrix.target == 'win_x64' && steps.win_x64_smoke.outcome || '' }}
+    needs: plan
+    if: ${{ needs.plan.outputs.build_count != '0' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     env:
       RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-      # Compare native compression cost without changing formats or signing.
-      ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.plan.outputs.commit }}
+
+      - name: Compute Windows tools-pack cache key
+        if: ${{ matrix.target == 'win_x64' }}
+        id: win_tools_pack_cache_key
+        shell: pwsh
+        env:
+          WIN_TOOLS_PACK_ORIGIN_KEY: ${{ hashFiles('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/daemon/**', 'apps/web/**', 'apps/desktop/**', 'apps/packaged/**', 'packages/agui-adapter/**', 'packages/contracts/**', 'packages/plugin-runtime/**', 'packages/sidecar-proto/**', 'packages/sidecar/**', 'packages/platform/**', 'tools/pack/bin/**', 'tools/pack/package.json', 'tools/pack/resources/**', 'tools/pack/src/**', 'tools/pack/tsconfig.json', 'assets/community-pets/**', 'assets/frames/**', 'craft/**', 'design-systems/**', 'design-templates/**', 'plugins/_official/**', 'plugins/registry/**', 'prompt-templates/**', 'skills/**', '.github/workflows/release-beta.yml', '.github/scripts/release/cache/win.ps1') }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_TOOLS_PACK_ORIGIN_KEY)) {
+            throw "Windows tools-pack cache origin key is empty"
+          }
+          $prefix = "tools-pack-win-v1-beta-$env:RUNNER_OS-"
+          "origin=$env:WIN_TOOLS_PACK_ORIGIN_KEY" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "key=$prefix$env:WIN_TOOLS_PACK_ORIGIN_KEY" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore Windows tools-pack cache
+        if: ${{ matrix.target == 'win_x64' }}
+        id: win_tools_pack_cache_restore
+        uses: actions/cache/restore@v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}\tools-pack-cache
+          key: ${{ steps.win_tools_pack_cache_key.outputs.key }}
+          restore-keys: |
+            ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
 
       - name: '[prepare] Workspace source tools'
         uses: ./.github/actions/setup-workspace
@@ -577,38 +623,38 @@ jobs:
         shell: bash
         run: >-
           node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/packages.json"
-          mac_arm64 "$RUNNER_TEMP/source-products/packages"
+          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/packages.json"
+          ${{ matrix.target }} "$RUNNER_TEMP/source-products/packages"
 
       - name: '[build] Source daemon'
         id: source_daemon
         shell: bash
         run: >-
           node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/daemon.json"
-          mac_arm64 "$RUNNER_TEMP/source-products/daemon"
+          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/daemon.json"
+          ${{ matrix.target }} "$RUNNER_TEMP/source-products/daemon"
 
       - name: '[build] Source web'
         id: source_web
         shell: bash
         run: >-
           node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/web.json"
-          mac_arm64 "$RUNNER_TEMP/source-products/web"
+          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/web.json"
+          ${{ matrix.target }} "$RUNNER_TEMP/source-products/web"
 
       - name: '[build] Source shell'
         id: source_shell
         shell: bash
         run: >-
           node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/shell.json"
-          mac_arm64 "$RUNNER_TEMP/source-products/shell"
+          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/shell.json"
+          ${{ matrix.target }} "$RUNNER_TEMP/source-products/shell"
 
       - name: '[retain] Source products'
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: beta-source-mac_arm64
+          name: beta-source-${{ matrix.target }}
           path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
           if-no-files-found: ignore
           compression-level: 0
@@ -618,13 +664,13 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: beta-source-report-mac_arm64
+          name: beta-source-report-${{ matrix.target }}
           path: ${{ runner.temp }}/source-products/*/report.json
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Prepare mac_arm64 signing certificate
-        if: ${{ inputs.mac_arm64_sign_mode != 'no' }}
+        if: ${{ matrix.target == 'mac_arm64' && (inputs.mac_arm64_sign_mode != 'no') }}
         env:
           APPLE_SIGNING_CERTIFICATE_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_BASE64 }}
           APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
@@ -640,9 +686,11 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build beta mac_arm64
+        if: ${{ matrix.target == 'mac_arm64' }}
         id: mac_arm64_tools_pack_build
         continue-on-error: true
         env:
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -685,8 +733,9 @@ jobs:
           fi
 
       - name: Retry beta mac_arm64 without restored cache
-        if: ${{ steps.mac_arm64_tools_pack_build.outcome == 'failure' }}
+        if: ${{ matrix.target == 'mac_arm64' && (steps.mac_arm64_tools_pack_build.outcome == 'failure') }}
         env:
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -727,7 +776,7 @@ jobs:
         # Only when NOT publishing to the release feed: this is the downloadable
         # artifact for a manual dispatch (e.g. a signed feature-test build handed
         # to teammates). The normal publish=true release pipeline is unchanged.
-        if: ${{ !cancelled() && !inputs.publish }}
+        if: ${{ matrix.target == 'mac_arm64' && (!cancelled() && !inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-arm64-dmg
@@ -735,42 +784,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload mac_arm64 dogfood build to release storage
-        id: dogfood
-        shell: bash
-        # Companion to the artifact step above, for publish=false only. A GitHub
-        # artifact needs a logged-in teammate and a zip round-trip; this puts the
-        # same DMG in R2 under dogfood/<version>/<build>/ so the link can be
-        # handed over directly. It writes no channel metadata and no latest
-        # pointer (enforced by the guard in tools/release/src/storage/dogfood.ts),
-        # so it cannot change what an installed client sees as an available
-        # update. The publish=true pipeline is untouched.
-        if: ${{ !cancelled() && !inputs.publish }}
-        continue-on-error: true
-        env:
-          EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
-          EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_TARGET: mac_arm64
-          EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
-          DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-mac_arm64.json
-          DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-          DOGFOOD_BUILD_JSON_KEYS: dmgPath
-          DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
-          DOGFOOD_LABEL: macOS arm64 beta ${{ needs.plan.outputs.beta_version }}
-          DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}
-          RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
-          RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
-          RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
-          RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
-          RELEASE_STORAGE_REGION: auto
-          RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-        run: |
-          pnpm exec tools-release publish-dogfood
-          node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
-
       - name: Build beta mac_arm64 update fixture
         id: mac_arm64_update_fixture
-        if: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' }}
+        if: ${{ matrix.target == 'mac_arm64' && (inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '') }}
+        env:
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
         run: |
           set -euo pipefail
           version="${{ needs.plan.outputs.beta_version }}"
@@ -800,7 +818,7 @@ jobs:
 
       - name: Smoke beta mac_arm64 packaged runtime
         id: mac_arm64_smoke
-        if: ${{ inputs.mac_arm64_smoke_mode == 'full' }}
+        if: ${{ matrix.target == 'mac_arm64' && (inputs.mac_arm64_smoke_mode == 'full') }}
         continue-on-error: true
         working-directory: e2e
         env:
@@ -820,7 +838,7 @@ jobs:
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
 
       - name: Write mac_arm64 release report
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'mac_arm64' && (always()) }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.log
@@ -843,11 +861,11 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish mac_arm64 report summary
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'mac_arm64' && (always()) }}
         run: cat "${{ runner.temp }}/release-report/mac_arm64/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare mac_arm64 assets
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_arm64' && (inputs.publish) }}
         env:
           RELEASE_ARTIFACT_MODE: dmg-and-payload
           RELEASE_ASSET_SUFFIX: .signed
@@ -862,7 +880,7 @@ jobs:
         run: bash tools/release/scripts/prepare-platform-assets.sh
 
       - name: Publish mac_arm64 platform
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_arm64' && (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .signed
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_arm64
@@ -886,7 +904,7 @@ jobs:
 
       - name: Read mac_arm64 platform outputs
         id: mac_arm64_platform_outputs
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_arm64' && inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -894,94 +912,16 @@ jobs:
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-platform-outputs/mac_arm64.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
 
+
       - name: Upload mac_arm64 publish manifest
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_arm64' && (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-arm64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests/mac_arm64.json
           if-no-files-found: error
-
-  build_mac_x64:
-    name: '[build] macOS x64'
-    needs: plan
-    if: ${{ inputs.enable_mac_x64 }}
-    runs-on: macos-15-intel
-    outputs:
-      dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
-    env:
-      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-      ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-
-      - name: '[prepare] Workspace source tools'
-        uses: ./.github/actions/setup-workspace
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
-
-      - name: '[restore] Source execution requests'
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.plan.outputs.pending_artifact }}
-          path: ${{ runner.temp }}/source-plan
-
-      - name: '[build] Source packages'
-        id: source_packages
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/packages.json"
-          mac_x64 "$RUNNER_TEMP/source-products/packages"
-
-      - name: '[build] Source daemon'
-        id: source_daemon
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/daemon.json"
-          mac_x64 "$RUNNER_TEMP/source-products/daemon"
-
-      - name: '[build] Source web'
-        id: source_web
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/web.json"
-          mac_x64 "$RUNNER_TEMP/source-products/web"
-
-      - name: '[build] Source shell'
-        id: source_shell
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/shell.json"
-          mac_x64 "$RUNNER_TEMP/source-products/shell"
-
-      - name: '[retain] Source products'
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-source-mac_x64
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
-
-      - name: '[report] Source execution'
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-source-report-mac_x64
-          path: ${{ runner.temp }}/source-products/*/report.json
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: Prepare mac_x64 signing certificate
-        if: ${{ inputs.mac_x64_sign_mode != 'no' }}
+        if: ${{ matrix.target == 'mac_x64' && (inputs.mac_x64_sign_mode != 'no') }}
         env:
           APPLE_SIGNING_CERTIFICATE_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_BASE64 }}
           APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
@@ -997,9 +937,11 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build beta mac_x64
+        if: ${{ matrix.target == 'mac_x64' }}
         id: mac_x64_tools_pack_build
         continue-on-error: true
         env:
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -1035,7 +977,9 @@ jobs:
           fi
 
       - name: Retry beta mac_x64 without restored cache
-        if: ${{ steps.mac_x64_tools_pack_build.outcome == 'failure' }}
+        if: ${{ matrix.target == 'mac_x64' && (steps.mac_x64_tools_pack_build.outcome == 'failure') }}
+        env:
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/tools-pack-cache"
@@ -1068,41 +1012,8 @@ jobs:
             exit "$build_status"
           fi
 
-      - name: Upload mac_x64 dogfood build to release storage
-        id: dogfood
-        shell: bash
-        # Companion to the artifact step above, for publish=false only. A GitHub
-        # artifact needs a logged-in teammate and a zip round-trip; this puts the
-        # same DMG in R2 under dogfood/<version>/<build>/ so the link can be
-        # handed over directly. It writes no channel metadata and no latest
-        # pointer (enforced by the guard in tools/release/src/storage/dogfood.ts),
-        # so it cannot change what an installed client sees as an available
-        # update. The publish=true pipeline is untouched.
-        if: ${{ !cancelled() && !inputs.publish }}
-        continue-on-error: true
-        env:
-          EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
-          EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_TARGET: mac_x64
-          EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
-          DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-mac_x64.json
-          DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-          DOGFOOD_BUILD_JSON_KEYS: dmgPath
-          DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
-          DOGFOOD_LABEL: macOS x64 beta ${{ needs.plan.outputs.beta_version }}
-          DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}
-          RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
-          RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
-          RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
-          RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
-          RELEASE_STORAGE_REGION: auto
-          RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-        run: |
-          pnpm exec tools-release publish-dogfood
-          node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
-
       - name: Smoke beta mac_x64 packaged runtime
-        if: ${{ inputs.mac_x64_smoke_mode == 'full' }}
+        if: ${{ matrix.target == 'mac_x64' && (inputs.mac_x64_smoke_mode == 'full') }}
         working-directory: e2e
         env:
           OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
@@ -1117,7 +1028,7 @@ jobs:
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
 
       - name: Write mac_x64 release report
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'mac_x64' && (always()) }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/mac_x64/build.log
@@ -1134,11 +1045,11 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish mac_x64 report summary
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'mac_x64' && (always()) }}
         run: cat "${{ runner.temp }}/release-report/mac_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare mac_x64 assets
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_x64' && (inputs.publish) }}
         env:
           RELEASE_ARTIFACT_MODE: ${{ inputs.mac_x64_target == 'all' && 'all' || 'dmg-and-payload' }}
           RELEASE_ASSET_SUFFIX: ${{ inputs.mac_x64_sign_mode != 'no' && '.signed' || '.unsigned' }}
@@ -1152,7 +1063,7 @@ jobs:
         run: bash tools/release/scripts/prepare-platform-assets.sh
 
       - name: Publish mac_x64 platform
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_x64' && (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: ${{ inputs.mac_x64_sign_mode != 'no' && '.signed' || '.unsigned' }}
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_x64
@@ -1172,117 +1083,14 @@ jobs:
         run: pnpm exec tools-release publish-platform
 
       - name: Upload mac_x64 publish manifest
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'mac_x64' && (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests/mac_x64.json
           if-no-files-found: error
-
-  build_win_x64:
-    name: '[build] Windows x64'
-    needs: plan
-    if: ${{ inputs.enable_win_x64 }}
-    runs-on: windows-latest
-    outputs:
-      dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
-      smoke_result: ${{ steps.win_x64_smoke.outcome }}
-      win_x64_url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
-    env:
-      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-
-      - name: Compute Windows tools-pack cache key
-        id: win_tools_pack_cache_key
-        shell: pwsh
-        env:
-          WIN_TOOLS_PACK_ORIGIN_KEY: ${{ hashFiles('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/daemon/**', 'apps/web/**', 'apps/desktop/**', 'apps/packaged/**', 'packages/agui-adapter/**', 'packages/contracts/**', 'packages/plugin-runtime/**', 'packages/sidecar-proto/**', 'packages/sidecar/**', 'packages/platform/**', 'tools/pack/bin/**', 'tools/pack/package.json', 'tools/pack/resources/**', 'tools/pack/src/**', 'tools/pack/tsconfig.json', 'assets/community-pets/**', 'assets/frames/**', 'craft/**', 'design-systems/**', 'design-templates/**', 'plugins/_official/**', 'plugins/registry/**', 'prompt-templates/**', 'skills/**', '.github/workflows/release-beta.yml', '.github/scripts/release/cache/win.ps1') }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_TOOLS_PACK_ORIGIN_KEY)) {
-            throw "Windows tools-pack cache origin key is empty"
-          }
-          $prefix = "tools-pack-win-v1-beta-$env:RUNNER_OS-"
-          "origin=$env:WIN_TOOLS_PACK_ORIGIN_KEY" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "key=$prefix$env:WIN_TOOLS_PACK_ORIGIN_KEY" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Restore Windows tools-pack cache
-        id: win_tools_pack_cache_restore
-        uses: actions/cache/restore@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}\tools-pack-cache
-          key: ${{ steps.win_tools_pack_cache_key.outputs.key }}
-          restore-keys: |
-            ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
-
-      - name: '[prepare] Workspace source tools'
-        uses: ./.github/actions/setup-workspace
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
-
-      - name: '[restore] Source execution requests'
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.plan.outputs.pending_artifact }}
-          path: ${{ runner.temp }}/source-plan
-
-      - name: '[build] Source packages'
-        id: source_packages
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_win_x64/packages.json"
-          win_x64 "$RUNNER_TEMP/source-products/packages"
-
-      - name: '[build] Source daemon'
-        id: source_daemon
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_win_x64/daemon.json"
-          win_x64 "$RUNNER_TEMP/source-products/daemon"
-
-      - name: '[build] Source web'
-        id: source_web
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_win_x64/web.json"
-          win_x64 "$RUNNER_TEMP/source-products/web"
-
-      - name: '[build] Source shell'
-        id: source_shell
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_win_x64/shell.json"
-          win_x64 "$RUNNER_TEMP/source-products/shell"
-
-      - name: '[retain] Source products'
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-source-win_x64
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
-
-      - name: '[report] Source execution'
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-source-report-win_x64
-          path: ${{ runner.temp }}/source-products/*/report.json
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: Setup NSIS
+        if: ${{ matrix.target == 'win_x64' }}
         shell: pwsh
         run: |
           if ((Get-Command makensis.exe -ErrorAction SilentlyContinue) -or (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
@@ -1291,11 +1099,13 @@ jobs:
           choco install nsis -y --no-progress
 
       - name: Probe Windows signing capability
+        if: ${{ matrix.target == 'win_x64' }}
         id: sign_probe
         shell: pwsh
         run: .\.github\scripts\release\probe-win-signing.ps1 -SignMode "${{ inputs.win_x64_sign_mode }}"
 
       - name: Build beta win_x64
+        if: ${{ matrix.target == 'win_x64' }}
         id: win_tools_pack_build
         continue-on-error: true
         shell: pwsh
@@ -1316,7 +1126,7 @@ jobs:
           # profile's AMR backend and enables the workspace-team transport. Empty
           # = default (prod) — the normal beta pipeline is unaffected. Mirrors the
           # mac_arm64 build step above; this was missing here, so every win_x64
-          # dogfood build silently fell back to prod and could not sign in to a
+          # unpublished build silently fell back to prod and could not sign in to a
           # feature-test AMR environment.
           OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
         run: |
@@ -1333,7 +1143,7 @@ jobs:
 
       - name: Retry beta win_x64 without restored cache
         id: win_tools_pack_build_retry
-        if: ${{ steps.win_tools_pack_build.outcome == 'failure' }}
+        if: ${{ matrix.target == 'win_x64' && (steps.win_tools_pack_build.outcome == 'failure') }}
         shell: pwsh
         env:
           OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
@@ -1353,11 +1163,11 @@ jobs:
       - name: Upload win_x64 installer for manual distribution
         # Only when NOT publishing to the release feed, mirroring the mac DMG
         # step. Before this existed a publish=false dispatch left the Windows job
-        # with nothing retrievable at all, so a QA/dogfood build could not be
+        # with nothing retrievable at all, so a QA/unpublished build could not be
         # handed to a teammate without also publishing to the public feed. The
         # glob covers every win_x64_target: nsis produces the setup exe, zip the
         # portable zip, all both. The normal publish=true pipeline is unchanged.
-        if: ${{ !cancelled() && !inputs.publish }}
+        if: ${{ matrix.target == 'win_x64' && (!cancelled() && !inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-win-x64-installer
@@ -1367,39 +1177,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload win_x64 dogfood build to release storage
-        id: dogfood
-        shell: bash
-        # publish=false only. Artifact paths come from the build's own --json
-        # output rather than a hardcoded layout, so whichever of installerPath /
-        # portableZipPath the selected win_x64_target actually produced is what
-        # gets uploaded. Writes under dogfood/<version>/<build>/ and nowhere
-        # else; see the guard in tools/release/src/storage/dogfood.ts.
-        if: ${{ !cancelled() && !inputs.publish }}
-        continue-on-error: true
-        env:
-          EXPECTED_VERSION: ${{ needs.plan.outputs.beta_version }}
-          EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_TARGET: win_x64
-          EXPECTED_COMMIT: ${{ needs.plan.outputs.commit }}
-          DOGFOOD_OUTPUTS_PATH: ${{ runner.temp }}/dogfood-win_x64.json
-          DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-          DOGFOOD_BUILD_JSON_KEYS: installerPath,portableZipPath
-          DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
-          DOGFOOD_LABEL: Windows x64 beta ${{ needs.plan.outputs.beta_version }}
-          DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}
-          RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
-          RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
-          RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
-          RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
-          RELEASE_STORAGE_REGION: auto
-          RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
-        run: |
-          pnpm exec tools-release publish-dogfood
-          node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts dogfood-output
-
       - name: Delete failed Windows tools-pack cache
-        if: ${{ steps.win_tools_pack_build.outcome == 'failure' && steps.win_tools_pack_cache_restore.outputs.cache-matched-key != '' }}
+        if: ${{ matrix.target == 'win_x64' && (steps.win_tools_pack_build.outcome == 'failure' && steps.win_tools_pack_cache_restore.outputs.cache-matched-key != '') }}
         shell: pwsh
         continue-on-error: true
         env:
@@ -1411,7 +1190,7 @@ jobs:
           "deletedFailedCacheKey=$matchedKey count=$($caches.Count)"
 
       - name: Build beta win_x64 update fixture
-        if: ${{ inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '' }}
+        if: ${{ matrix.target == 'win_x64' && (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -1428,7 +1207,7 @@ jobs:
 
       - name: Smoke beta win_x64 packaged runtime
         id: win_x64_smoke
-        if: ${{ inputs.win_x64_smoke_mode == 'full' }}
+        if: ${{ matrix.target == 'win_x64' && (inputs.win_x64_smoke_mode == 'full') }}
         continue-on-error: true
         working-directory: e2e
         env:
@@ -1446,7 +1225,7 @@ jobs:
         run: pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts
 
       - name: Write win_x64 release report
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'win_x64' && (always()) }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
           RELEASE_BUILD_TARGET: ${{ inputs.win_x64_target }}
@@ -1466,17 +1245,18 @@ jobs:
         run: pnpm exec tools-release write-report
 
       - name: Publish win_x64 report summary
-        if: ${{ always() }}
+        if: ${{ matrix.target == 'win_x64' && (always()) }}
         shell: pwsh
         run: Get-Content "${{ runner.temp }}\release-report\win_x64\summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: Prune Windows tools-pack cache
+        if: ${{ matrix.target == 'win_x64' }}
         shell: pwsh
         continue-on-error: true
         run: .\.github\scripts\release\cache\win.ps1
 
       - name: Save Windows tools-pack cache
-        if: ${{ success() && (steps.win_tools_pack_cache_restore.outputs.cache-hit != 'true' || steps.win_tools_pack_build.outcome == 'failure') }}
+        if: ${{ matrix.target == 'win_x64' && (success() && (steps.win_tools_pack_cache_restore.outputs.cache-hit != 'true' || steps.win_tools_pack_build.outcome == 'failure')) }}
         uses: actions/cache/save@v5
         continue-on-error: true
         with:
@@ -1484,7 +1264,7 @@ jobs:
           key: ${{ steps.win_tools_pack_cache_key.outputs.key }}
 
       - name: Retain recent Windows tools-pack caches
-        if: ${{ success() }}
+        if: ${{ matrix.target == 'win_x64' && (success()) }}
         shell: pwsh
         continue-on-error: true
         env:
@@ -1498,7 +1278,7 @@ jobs:
           "actionsCachePrefix=$prefix kept=$([Math]::Min($caches.Count, $keep)) deleted=$($stale.Count)"
 
       - name: Prepare win_x64 assets
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}
         shell: pwsh
         run: |
           tools\release\scripts\prepare-platform-assets.ps1 `
@@ -1513,7 +1293,7 @@ jobs:
             -IncludeZip $${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}
 
       - name: Publish win_x64 platform
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}\release-assets\win_x64
@@ -1535,7 +1315,7 @@ jobs:
 
       - name: Read win_x64 platform outputs
         id: win_x64_platform_outputs
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'win_x64' && inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -1543,8 +1323,9 @@ jobs:
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-platform-outputs/win_x64.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
 
+
       - name: Upload win_x64 publish manifest
-        if: ${{ inputs.publish }}
+        if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-win-x64-publish-manifest
@@ -1668,9 +1449,7 @@ jobs:
     name: '[publish] Beta distribution'
     needs:
       - plan
-      - build_mac_arm64
-      - build_mac_x64
-      - build_win_x64
+      - build
       - build_linux_x64
     if: >-
       ${{
@@ -1680,9 +1459,7 @@ jobs:
         needs.plan.outputs.promote == 'true' &&
         needs.plan.result == 'success' &&
         (inputs.enable_mac_arm64 || inputs.enable_win_x64 || inputs.enable_mac_x64 || inputs.enable_linux_x64) &&
-        (!inputs.enable_mac_arm64 || needs.build_mac_arm64.result == 'success') &&
-        (!inputs.enable_win_x64 || needs.build_win_x64.result == 'success') &&
-        (!inputs.enable_mac_x64 || needs.build_mac_x64.result == 'success') &&
+        (needs.plan.outputs.build_count == '0' || needs.build.result == 'success') &&
         (!inputs.enable_linux_x64 || needs.build_linux_x64.result == 'success')
       }}
     runs-on: ubuntu-latest
@@ -1703,21 +1480,21 @@ jobs:
           ref: ${{ needs.plan.outputs.commit }}
 
       - name: Download mac_arm64 publish manifest
-        if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
+        if: ${{ inputs.enable_mac_arm64 && needs.build.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-mac-arm64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
 
       - name: Download mac_x64 publish manifest
-        if: ${{ inputs.enable_mac_x64 && needs.build_mac_x64.result == 'success' }}
+        if: ${{ inputs.enable_mac_x64 && needs.build.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-mac-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
 
       - name: Download win_x64 publish manifest
-        if: ${{ inputs.enable_win_x64 && needs.build_win_x64.result == 'success' }}
+        if: ${{ inputs.enable_win_x64 && needs.build.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-win-x64-publish-manifest
@@ -1770,8 +1547,8 @@ jobs:
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
           ENABLE_WIN_X64: ${{ inputs.enable_win_x64 }}
           LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
-          MAC_ARM64_RESULT: ${{ needs.build_mac_arm64.result }}
-          MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
+          MAC_ARM64_RESULT: ${{ needs.build.result }}
+          MAC_X64_RESULT: ${{ needs.build.result }}
           RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}
           RELEASE_CHANNEL: beta
           RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
@@ -1791,7 +1568,7 @@ jobs:
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           STATE_SOURCE: ${{ needs.plan.outputs.state_source }}
-          WIN_X64_RESULT: ${{ needs.build_win_x64.result }}
+          WIN_X64_RESULT: ${{ needs.build.result }}
         run: pnpm exec tools-release publish-metadata
 
       - name: Read metadata outputs
@@ -1810,8 +1587,8 @@ jobs:
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
           ENABLE_WIN_X64: ${{ inputs.enable_win_x64 }}
           LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
-          MAC_ARM64_RESULT: ${{ needs.build_mac_arm64.result }}
-          MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
+          MAC_ARM64_RESULT: ${{ needs.build.result }}
+          MAC_X64_RESULT: ${{ needs.build.result }}
           RELEASE_CHANNEL: beta
           RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
           RELEASE_LAUNCHER_VERSION_MIN_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_STABLE }}
@@ -1820,7 +1597,7 @@ jobs:
           RELEASE_METADATA_URL: ${{ steps.outputs.outputs.version_metadata_url }}
           RELEASE_NOTE_MANIFEST_PATH: ${{ runner.temp }}/release-metadata/release-note-publication.json
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
-          WIN_X64_RESULT: ${{ needs.build_win_x64.result }}
+          WIN_X64_RESULT: ${{ needs.build.result }}
         run: pnpm exec tools-release verify-metadata
 
       - name: Write beta metadata summary
@@ -1917,7 +1694,7 @@ jobs:
 
   cache_build_results:
     name: '[cache] Build results'
-    needs: [plan, build_mac_arm64, build_mac_x64, build_win_x64]
+    needs: [plan, build]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).manifest }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
@@ -1941,13 +1718,13 @@ jobs:
 
   smoke_mac_arm64:
     name: "[validate] beta mac_arm64 downloaded artifact"
-    needs: [plan, build_mac_arm64, publish]
+    needs: [plan, build, publish]
     if: >-
       ${{
         always() && !cancelled() &&
-        needs.build_mac_arm64.result == 'success' &&
+        inputs.enable_mac_arm64 &&
         inputs.mac_arm64_smoke_mode == 'core' &&
-        (!inputs.publish || needs.publish.outputs.version_metadata_url != '')
+        inputs.publish && needs.publish.outputs.version_metadata_url != ''
       }}
     runs-on: macos-14
     timeout-minutes: 45
@@ -1979,13 +1756,6 @@ jobs:
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
           VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
         run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
-      - name: Stage dogfood artifact
-        if: ${{ !inputs.publish }}
-        env:
-          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
-          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
-          DOGFOOD_RECEIPT: ${{ needs.build_mac_arm64.outputs.dogfood_receipt }}
-        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage-dogfood
       - name: Install and inspect downloaded artifact
         id: smoke
         working-directory: e2e
@@ -2017,13 +1787,13 @@ jobs:
 
   smoke_mac_x64:
     name: "[validate] beta mac_x64 downloaded artifact"
-    needs: [plan, build_mac_x64, publish]
+    needs: [plan, build, publish]
     if: >-
       ${{
         always() && !cancelled() &&
-        needs.build_mac_x64.result == 'success' &&
+        inputs.enable_mac_x64 &&
         inputs.mac_x64_smoke_mode == 'core' &&
-        (!inputs.publish || needs.publish.outputs.version_metadata_url != '')
+        inputs.publish && needs.publish.outputs.version_metadata_url != ''
       }}
     runs-on: macos-15-intel
     timeout-minutes: 45
@@ -2055,13 +1825,6 @@ jobs:
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
           VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
         run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
-      - name: Stage dogfood artifact
-        if: ${{ !inputs.publish }}
-        env:
-          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
-          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
-          DOGFOOD_RECEIPT: ${{ needs.build_mac_x64.outputs.dogfood_receipt }}
-        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage-dogfood
       - name: Install and inspect downloaded artifact
         id: smoke
         working-directory: e2e
@@ -2093,13 +1856,13 @@ jobs:
 
   smoke_win_x64:
     name: "[validate] beta win_x64 downloaded artifact"
-    needs: [plan, build_win_x64, publish]
+    needs: [plan, build, publish]
     if: >-
       ${{
         always() && !cancelled() &&
-        needs.build_win_x64.result == 'success' &&
+        inputs.enable_win_x64 &&
         inputs.win_x64_smoke_mode == 'core' &&
-        (!inputs.publish || needs.publish.outputs.version_metadata_url != '')
+        inputs.publish && needs.publish.outputs.version_metadata_url != ''
       }}
     runs-on: windows-latest
     timeout-minutes: 45
@@ -2131,13 +1894,6 @@ jobs:
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
           VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
         run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
-      - name: Stage dogfood artifact
-        if: ${{ !inputs.publish }}
-        env:
-          BUILD_JSON_PATH: ${{ runner.temp }}/release-build/win_x64/build.json
-          TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
-          DOGFOOD_RECEIPT: ${{ needs.build_win_x64.outputs.dogfood_receipt }}
-        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage-dogfood
       - name: Install and inspect downloaded artifact
         id: smoke
         working-directory: e2e

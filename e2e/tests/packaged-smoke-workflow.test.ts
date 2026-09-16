@@ -154,6 +154,17 @@ function sectionBetween(content: string, start: string, end: string): string {
   return content.slice(startIndex, endIndex);
 }
 
+// Inspect the common setup plus the statically guarded steps for one member.
+function betaPlatformBuild(workflow: string, target: string): string {
+  const build = sectionBetween(workflow, "\n  build:\n", "\n  build_linux_x64:");
+  const split = build.indexOf("    steps:\n");
+  const steps = build.slice(split).split(/(?=      - name:)/).filter((step) => {
+    const guard = step.match(/if: \$\{\{ matrix\.target == '([^']+)'/);
+    return !guard || guard[1] === target;
+  });
+  return (build.slice(0, split) + steps.join("")).replaceAll("${{ matrix.target }}", target);
+}
+
 function extractWorkflowRunScript(workflow: string, stepName: string): string {
   const marker = `      - name: ${stepName}`;
   const start = workflow.indexOf(marker);
@@ -2338,12 +2349,8 @@ process.stdin.on("end", () => {
     const action = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
     expect(action).toContain("run: pnpm install --frozen-lockfile");
     expect(action).toContain("uses: actions/cache/restore");
-    for (const [start, end] of [
-      ["build_mac_arm64", "build_mac_x64"],
-      ["build_mac_x64", "build_win_x64"],
-      ["build_win_x64", "build_linux_x64"],
-    ]) {
-      const job = sectionBetween(workflow, `\n  ${start}:`, `\n  ${end}:`);
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
+      const job = betaPlatformBuild(workflow, target);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
       expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
       expect(job).not.toContain("run: pnpm install --frozen-lockfile");
@@ -2371,8 +2378,8 @@ process.stdin.on("end", () => {
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
-    for (const [target, next] of [["mac_arm64", "mac_x64"], ["mac_x64", "win_x64"], ["win_x64", "linux_x64"]]) {
-      const job = sectionBetween(workflow, `\n  build_${target}:`, `\n  build_${next}:`);
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
+      const job = betaPlatformBuild(workflow, target);
       expect(job).toContain("needs: plan");
       expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
@@ -2408,6 +2415,50 @@ process.stdin.on("end", () => {
     expect(collection).not.toContain("test_verify");
     expect(collection).not.toContain("needs.build_mac_arm64.result == 'success'");
 
+  });
+
+  it("[P1] selects platform matrix members without changing cache proof names or sharing outputs", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const script = extractWorkflowRunScript(workflow, "'[plan] Selected platform execution matrix'");
+    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
+    const dir = await mkdtemp(join(tmpdir(), "od-beta-platform-matrix-"));
+    const targets = ["mac_arm64", "mac_x64", "win_x64"];
+    try {
+      for (let mask = 0; mask < 8; mask++) {
+        const selected = targets.filter((_, index) => mask & (1 << index));
+        const output = join(dir, "output");
+        await writeFile(output, "");
+        await execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
+          BUILD_INPUTS: JSON.stringify(Object.fromEntries(targets.map((target) => [`enable_${target}`, selected.includes(target)]))),
+          GITHUB_OUTPUT: output,
+        }) });
+        const values = Object.fromEntries((await readFile(output, "utf8")).trim().split("\n").map((line) => {
+          const index = line.indexOf("=");
+          return [line.slice(0, index), line.slice(index + 1)];
+        }));
+        const rows = JSON.parse(values.matrix ?? "{}").include as { target: string; name: string; shell: string; runner: string }[];
+        expect(rows.map((row) => row.target)).toEqual(selected);
+        expect(Number(values.count)).toBe(selected.length);
+        for (const row of rows) {
+          expect(Object.keys(config.workflows["release-beta"].workloads[`source_${row.target}_web`].success)).toEqual([row.name]);
+          expect(row.shell).toBe(row.target === "win_x64" ? "pwsh" : "bash");
+        }
+      }
+      await expect(execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
+        BUILD_INPUTS: "{}", GITHUB_OUTPUT: join(dir, "invalid"),
+      }) })).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    const build = sectionBetween(workflow, "\n  build:\n", "\n  build_linux_x64:");
+    expect(build).toContain("fail-fast: false");
+    expect(build).toContain("needs.plan.outputs.build_count != '0'");
+    for (const target of ["mac_arm64", "win_x64"]) {
+      expect(build).toContain(`${target}_smoke_result: \${{ matrix.target == '${target}' && steps.${target}_smoke.outcome || '' }}`);
+    }
+    const publish = sectionBetween(workflow, "\n  publish:\n", "\n  test_functional_e2e:");
+    expect(publish).toContain("needs.plan.outputs.build_count == '0' || needs.build.result == 'success'");
+    expect(publish).toContain("!inputs.enable_linux_x64 || needs.build_linux_x64.result == 'success'");
   });
 
   it("[P1] projects only selected test matrix members with unchanged success-proof names", async () => {
@@ -2455,7 +2506,7 @@ process.stdin.on("end", () => {
     expect(tests).toContain("fail-fast: false");
     expect(tests).toContain("name: ${{ matrix.name }}");
     for (const kind of ["e2e", "daemon", "verify"]) expect(tests).toContain(`matrix.kind == '${kind}'`);
-    const plan = sectionBetween(workflow, "  plan:", "  build_mac_arm64:");
+    const plan = sectionBetween(workflow, "  plan:", "  build:");
     expect(plan).toContain("steps.identity.outputs.commit == github.sha");
     expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json"');
     expect(plan).toContain("--all-workloads");
@@ -2481,7 +2532,7 @@ process.stdin.on("end", () => {
       expect(job).toContain("always() && !cancelled()");
       expect(job).toContain(`inputs.${target}_smoke_mode == 'core'`);
       expect(job).toContain("ref: ${{ needs.plan.outputs.commit }}");
-      expect(job).toContain("smoke-artifacts.ts stage-dogfood");
+      expect(job).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
       expect(job).toContain("smoke-artifacts.ts stage");
       expect(job).toContain("EXPECTED_CHANNEL: beta");
       expect(job).toContain("EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
@@ -2572,7 +2623,7 @@ process.stdin.on("end", () => {
     expect(releaseBetaWorkflow).toContain("RELEASE_TARGET: mac_x64");
     expect(releaseBetaWorkflow).toContain("RELEASE_TARGET: linux_x64");
     expect(releaseBetaWorkflow).toContain("OD_PACKAGED_E2E_MAC_UPDATE_FIXTURE: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' && 'tools-serve' || '' }}");
-    const betaWinJob = sectionBetween(releaseBetaWorkflow, "  build_win_x64:", "  build_linux_x64:");
+    const betaWinJob = betaPlatformBuild(releaseBetaWorkflow, "win_x64");
     expect(betaWinJob).not.toContain("tools\\release\\scripts\\build-platform.ps1");
     expect(betaWinJob).toContain("uses: actions/cache/restore@v5");
     expect(betaWinJob).toContain("uses: actions/cache/save@v5");
@@ -2655,49 +2706,20 @@ process.stdin.on("end", () => {
     }
   });
 
-  it("[P2] makes a publish=false beta dispatch retrievable on both platforms without touching a channel", async () => {
-    // A publish=false dispatch is the standing shape for dogfood/QA builds: they
-    // must never enter the public beta feed. mac already handed back a DMG, but
-    // the Windows job produced nothing retrievable at all, so a Windows dogfood
-    // build was impossible without also publishing. Both platforms now emit a
-    // GitHub artifact plus an R2 upload under the dogfood prefix.
+  it("[P2] keeps unpublished builds as GitHub artifacts without a second distribution path", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const macJob = sectionBetween(workflow, "  build_mac_arm64:", "  build_mac_x64:");
-    const winJob = sectionBetween(workflow, "  build_win_x64:", "  build_linux_x64:");
-
-    for (const [label, job] of [["mac_arm64", macJob], ["win_x64", winJob]] as const) {
-      expect(job, label).toContain("pnpm exec tools-release publish-dogfood");
-      expect(job, label).toContain("DOGFOOD_VERSION: ${{ needs.plan.outputs.beta_version }}");
-      expect(job, label).toContain("DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
-      // Artifact paths come from the build's own --json output, so whichever
-      // targets the parameterised --to actually produced are what get uploaded.
-      expect(job, label).toContain("DOGFOOD_BUILD_JSON_PATH:");
-      expect(job, label).toContain("DOGFOOD_BUILD_JSON_KEYS:");
+    const manualSteps = workflow.split("\n      - name: ").filter((step) => step.startsWith("Upload") && step.includes("for manual distribution\n"));
+    expect(manualSteps).toHaveLength(2);
+    for (const step of manualSteps) {
+      expect(step).toContain("!cancelled() && !inputs.publish");
+      expect(step).toContain("uses: actions/upload-artifact");
+      expect(step).not.toContain("RELEASE_STORAGE");
+      expect(step).not.toContain("tools-release");
     }
-
-    // The Windows installer is retrievable as a GitHub artifact too, covering
-    // every win_x64_target (nsis -> setup exe, zip -> portable zip, all -> both).
-    expect(winJob).toContain("name: open-design-beta-win-x64-installer");
-    expect(winJob).toContain("builder\\*-setup.exe");
-    expect(winJob).toContain("builder\\*-portable.zip");
-
-    // Every publish=false distribution step is gated on !inputs.publish, so the
-    // publish=true release pipeline runs exactly as it did before.
-    const dogfoodSteps = workflow.split("\n      - name: ").filter((step) =>
-      /publish-dogfood|for manual distribution/.test(step)
-    );
-    expect(dogfoodSteps).toHaveLength(5);
-    for (const step of dogfoodSteps) {
-      expect(step, step.split("\n")[0]).toContain("if: ${{ !cancelled() && !inputs.publish }}");
-    }
-
-    // A dogfood step must never name a channel prefix, a latest pointer, or the
-    // publishing commands; those stay exclusive to the inputs.publish lane.
-    for (const step of dogfoodSteps) {
-      const head = step.split("\n")[0] ?? "";
-      for (const forbidden of ["publish-platform", "publish-metadata", "beta/latest", "prerelease/", "preview/", "stable/"]) {
-        expect(step, `${head} / ${forbidden}`).not.toContain(forbidden);
-      }
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
+      const smoke = workflow.slice(workflow.indexOf("\n  smoke_" + target + ":")).split(/\n  [a-z_0-9]+:/)[1]!;
+      expect(smoke).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
+      expect(smoke).toContain("smoke-artifacts.ts stage");
     }
   });
 
@@ -2885,7 +2907,7 @@ process.stdin.on("end", () => {
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(notifyDailyFeishuWorkflowPath, "utf8"),
     ]);
-    const metadataJob = sectionBetween(betaWorkflow, "  plan:", "  build_mac_arm64:");
+    const metadataJob = sectionBetween(betaWorkflow, "  plan:", "  build:");
     const publisherGuard = sectionBetween(
       metadataJob,
       "- name: Validate shared beta publisher",
@@ -2910,25 +2932,25 @@ process.stdin.on("end", () => {
     expect(metadataJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
     expect(metadataJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
     expect(metadataJob).toContain(`promote: \${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}`);
-    expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}");
-    expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}");
+    expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build.outputs.mac_arm64_smoke_result }}");
+    expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build.outputs.win_x64_smoke_result }}");
     expect(betaWorkflow).toContain(
-      "value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build_mac_arm64.outputs.mac_arm64_url }}",
+      "value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build.outputs.mac_arm64_url }}",
     );
     expect(betaWorkflow).toContain(
-      "value: ${{ jobs.publish.outputs.win_x64_url || jobs.build_win_x64.outputs.win_x64_url }}",
+      "value: ${{ jobs.publish.outputs.win_x64_url || jobs.build.outputs.win_x64_url }}",
     );
 
-    const macJob = sectionBetween(betaWorkflow, "  build_mac_arm64:", "  build_mac_x64:");
-    expect(macJob).toContain("smoke_result: ${{ steps.mac_arm64_smoke.outcome }}");
-    expect(macJob).toContain("mac_arm64_url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}");
+    const macJob = betaPlatformBuild(betaWorkflow, "mac_arm64");
+    expect(macJob).toContain("mac_arm64_smoke_result: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_smoke.outcome || '' }}");
+    expect(macJob).toContain("mac_arm64_url: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_platform_outputs.outputs.dmg_url || '' }}");
     expect(macJob).toContain("id: mac_arm64_smoke");
     expect(macJob).toContain("continue-on-error: true");
     expect(macJob).toContain("id: mac_arm64_platform_outputs");
 
-    const winJob = sectionBetween(betaWorkflow, "  build_win_x64:", "  build_linux_x64:");
-    expect(winJob).toContain("smoke_result: ${{ steps.win_x64_smoke.outcome }}");
-    expect(winJob).toContain("win_x64_url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}");
+    const winJob = betaPlatformBuild(betaWorkflow, "win_x64");
+    expect(winJob).toContain("win_x64_smoke_result: ${{ matrix.target == 'win_x64' && steps.win_x64_smoke.outcome || '' }}");
+    expect(winJob).toContain("win_x64_url: ${{ matrix.target == 'win_x64' && steps.win_x64_platform_outputs.outputs.installer_url || '' }}");
     expect(winJob).toContain("id: win_x64_smoke");
     expect(winJob).toContain("continue-on-error: true");
     expect(winJob).toContain("id: win_x64_platform_outputs");
@@ -2991,7 +3013,7 @@ process.stdin.on("end", () => {
       expect(reportStep, `no report step consumes ${stepId}.outcome`).toBeDefined();
       expect(reportStep).toContain("pnpm exec tools-release write-report");
       expect(reportStep).toContain('RELEASE_SMOKE_EXEMPT: "true"');
-      expect(reportStep).toContain("if: ${{ always() }}");
+      expect(reportStep).toContain(`if: \${{ matrix.target == '${stepId.replace(/_smoke$/, "")}' && (always()) }}`);
     }
   });
 
@@ -3590,7 +3612,7 @@ process.stdin.on("end", () => {
 
   it("publishes release-betas mac_x64 payloads while preserving the zip feed", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const macX64Job = sectionBetween(workflow, "  build_mac_x64:", "  build_win_x64:");
+    const macX64Job = betaPlatformBuild(workflow, "mac_x64");
     const prepareStep = sectionBetween(macX64Job, "      - name: Prepare mac_x64 assets", "      - name: Publish mac_x64 platform");
     const publishStep = sectionBetween(macX64Job, "      - name: Publish mac_x64 platform", "      - name: Upload mac_x64 publish manifest");
     const artifactMode = "RELEASE_ARTIFACT_MODE: ${{ inputs.mac_x64_target == 'all' && 'all' || 'dmg-and-payload' }}";
@@ -4137,7 +4159,7 @@ function expectWindowsUpdaterSmokeContract(workflow: string, channel: "beta" | "
     expect(workflow).toContain(`Build ${channel} win_x64 update fixture`);
     expect(workflow).toContain(`full Windows smoke requires a counted ${channel} version`);
   }
-  const updaterWorkflow = channel === "beta" ? sectionBetween(workflow, "  build_win_x64:", "  build_linux_x64:") : workflow;
+  const updaterWorkflow = channel === "beta" ? betaPlatformBuild(workflow, "win_x64") : workflow;
   expect(updaterWorkflow).not.toContain("OD_PACKAGED_E2E_WIN_SMOKE_PROFILE: core");
 }
 
