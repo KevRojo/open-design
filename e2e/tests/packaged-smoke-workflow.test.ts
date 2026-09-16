@@ -2359,6 +2359,9 @@ process.stdin.on("end", () => {
       expect(source).toContain("if-no-files-found: error");
       const cache = workflowJob(workflow, `cache_${target}`);
       expect(cache).toContain(`- source_${target}`);
+      expect(cache).toContain(`needs.source_${target}.result == 'success'`);
+      expect(cache).toContain("!cancelled()");
+      expect(cache).not.toContain("success()");
       expect(cache).not.toContain("- build_");
       expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
       expect(cache).toContain("consumer_requests: true");
@@ -2431,6 +2434,9 @@ process.stdin.on("end", () => {
       expect(tests).toContain("runs-on: ${{ matrix.runner }}");
       const cache = workflowJob(workflow, `cache_${id}`);
       expect(cache).toContain(`- ${id}`);
+      expect(cache).toContain(`needs.${id}.result == 'success'`);
+      expect(cache).toContain("!cancelled()");
+      expect(cache).not.toContain("success()");
       expect(cache).toContain("products: none");
       expect(cache).toContain(`workloads: '["${id}"]'`);
       expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");

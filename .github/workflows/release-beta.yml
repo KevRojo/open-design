@@ -646,7 +646,7 @@ jobs:
     needs:
       - plan
       - source_mac_arm64
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.source_mac_arm64.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
@@ -941,7 +941,7 @@ jobs:
     needs:
       - plan
       - source_mac_x64
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.source_mac_x64.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
@@ -1172,7 +1172,7 @@ jobs:
     needs:
       - plan
       - source_win_x64
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.source_win_x64.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
@@ -1735,7 +1735,7 @@ jobs:
     needs:
       - plan
       - test_e2e_vitest
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_e2e_vitest.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
@@ -1832,7 +1832,7 @@ jobs:
     needs:
       - plan
       - test_verify
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_verify.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
@@ -1929,7 +1929,7 @@ jobs:
     needs:
       - plan
       - test_daemon_unit_tests
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_daemon_unit_tests.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
@@ -2026,7 +2026,7 @@ jobs:
     needs:
       - plan
       - test_functional_e2e
-    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_functional_e2e.result == 'success' && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
