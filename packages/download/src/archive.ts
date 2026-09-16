@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { win32 } from "node:path";
+import { readdirSync, realpathSync, statSync } from "node:fs";
+import { join, resolve, win32 } from "node:path";
 
 export type ArchiveFormat = "tar.gz" | "zip";
 
@@ -12,8 +13,8 @@ export function archiveExecutable(platform = process.platform, env: NodeJS.Proce
   return win32.join(env.SystemRoot, "System32", "tar.exe");
 }
 
-function run(executable: string, args: string[]): string {
-  const result = spawnSync(executable, args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true });
+function run(executable: string, args: string[], input?: string): string {
+  const result = spawnSync(executable, args, { input, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, windowsHide: true });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`archive tool failed (${result.signal ?? result.status}): ${result.stderr}`);
   return result.stdout;
@@ -49,10 +50,44 @@ export function readTarEntry(archive: string, entry: string): string {
 }
 
 /** Dereference producer-owned links so consumers do not inherit pnpm symlinks. */
-export function createTarArchive(archive: string, sources: { directory: string; entries: string[] }[]): void {
+export function createTarArchive(archive: string, sources: { directory: string; entries: string[] }[], options: { reproducible?: boolean } = {}): void {
   const args = sources.flatMap(({ directory, entries }) => {
     entries.forEach(validateEntry);
     return ["-C", directory, ...entries];
   });
-  run(archiveExecutable(), ["-czhf", archive, ...args]);
+  const executable = archiveExecutable();
+  if (!options.reproducible) {
+    run(executable, ["-czhf", archive, ...args]);
+    return;
+  }
+  const version = run(executable, ["--version"]);
+  if (version.includes("GNU tar")) {
+    run(executable, ["--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-czhf", archive, ...args]);
+    return;
+  }
+  if (!version.includes("bsdtar")) throw new Error("reproducible archives require GNU tar or bsdtar");
+  // BSD tar accepts an mtree archive as input. Declare metadata instead of
+  // copying large trees or mutating producer mtimes; contents stay native I/O.
+  const escape = (value: string) => value.replace(/[\\\s#=]/g, (char) => `\\${char.charCodeAt(0).toString(8).padStart(3, "0")}`);
+  const manifest = ["#mtree", "/set uid=0 gid=0 uname=root gname=root time=0"];
+  const names = new Set<string>();
+  function visit(directory: string, entry: string, ancestors: Set<string>): void {
+    validateEntry(entry);
+    if (names.has(entry)) throw new Error(`duplicate archive entry: ${entry}`);
+    names.add(entry);
+    const path = resolve(directory, entry);
+    const stat = statSync(path);
+    const mode = (stat.mode & 0o777).toString(8);
+    if (stat.isDirectory()) {
+      const real = realpathSync(path);
+      if (ancestors.has(real)) throw new Error(`archive directory cycle: ${entry}`);
+      manifest.push(`${escape(entry)} type=dir mode=${mode}`);
+      const next = new Set([...ancestors, real]);
+      for (const child of readdirSync(path).sort()) visit(directory, join(entry, child).replaceAll("\\", "/"), next);
+    } else if (stat.isFile()) {
+      manifest.push(`${escape(entry)} type=file mode=${mode} size=${stat.size} contents=${escape(path)}`);
+    } else throw new Error(`unsupported archive entry: ${entry}`);
+  }
+  for (const source of sources) for (const entry of [...source.entries].sort()) visit(source.directory, entry, new Set());
+  run(executable, ["-czf", archive, "--format=gnutar", "@-"], manifest.join("\n") + "\n");
 }

@@ -44,7 +44,7 @@ export function exportWorkspaceOutputs(root: string, directory: string, outputs:
   mkdirSync(directory, { recursive: true });
   const archive = resolve(directory, "workspace.tar.gz");
   writeFileSync(join(directory, "outputs.json"), JSON.stringify(outputs));
-  createTarArchive(archive, [{ directory: root, entries: paths }, { directory: resolve(directory), entries: ["outputs.json"] }]);
+  createTarArchive(archive, [{ directory: root, entries: paths }, { directory: resolve(directory), entries: ["outputs.json"] }], { reproducible: true });
   return archive;
 }
 

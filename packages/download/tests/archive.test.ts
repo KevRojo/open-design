@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -23,4 +23,23 @@ it("round-trips a native tar archive without workspace or platform policy", () =
   extractArchive(archive, destination, "tar.gz");
   expect(readFileSync(join(destination, "entry.js"), "utf8")).toBe("export {};\n");
   expect(() => readTarEntry(archive, "../escape")).toThrow("unsafe archive entry");
+});
+
+it("reproduces identical archive bytes despite source mtimes and creation order", () => {
+  const root = mkdtempSync(join(tmpdir(), "archive-reproducible-")); roots.push(root);
+  const archives: Buffer[] = [];
+  for (const index of [0, 1]) {
+    const source = join(root, String(index)); mkdirSync(source);
+    mkdirSync(join(source, "nested"));
+    for (const name of index ? ["z.js", "a #=.js"] : ["a #=.js", "z.js"]) {
+      const path = join(source, "nested", name);
+      writeFileSync(path, name);
+      utimesSync(path, index + 100, index + 100);
+    }
+    const archive = join(root, `${index}.tar.gz`);
+    createTarArchive(archive, [{ directory: source, entries: ["nested"] }], { reproducible: true });
+    expect(readTarEntry(archive, "nested/a #=.js")).toBe("a #=.js");
+    archives.push(readFileSync(archive));
+  }
+  expect(archives[0]).toEqual(archives[1]);
 });
