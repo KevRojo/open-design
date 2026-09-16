@@ -650,7 +650,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-source-mac_arm64
+      handoff_id: beta-source-mac-arm64
       batches: '["source_mac_arm64"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: manifest
@@ -945,7 +945,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-source-mac_x64
+      handoff_id: beta-source-mac-x64
       batches: '["source_mac_x64"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: manifest
@@ -1176,7 +1176,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-source-win_x64
+      handoff_id: beta-source-win-x64
       batches: '["source_win_x64"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: manifest
@@ -1739,7 +1739,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test_e2e_vitest
+      handoff_id: beta-test-e2e-vitest
       workloads: '["test_e2e_vitest"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: none
@@ -1836,7 +1836,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test_verify
+      handoff_id: beta-test-verify
       workloads: '["test_verify"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: none
@@ -1933,7 +1933,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test_daemon_unit_tests
+      handoff_id: beta-test-daemon-unit-tests
       workloads: '["test_daemon_unit_tests"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: none
@@ -2030,7 +2030,7 @@ jobs:
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test_functional_e2e
+      handoff_id: beta-test-functional-e2e
       workloads: '["test_functional_e2e"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: none

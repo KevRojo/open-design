@@ -2337,6 +2337,12 @@ process.stdin.on("end", () => {
 
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const handoffIds = [...workflow.matchAll(/^\s+handoff_id: (\S+)$/gm)].map((match) => match[1]!);
+    expect(handoffIds).toHaveLength(8);
+    expect(new Set(handoffIds).size).toBe(handoffIds.length);
+    await Promise.all(handoffIds.map((id) => execFileAsync("python3", [
+      join(workspaceRoot, ".github/scripts/handoff.py"), "artifact-name", "convergence", id,
+    ])));
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
