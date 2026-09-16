@@ -2,7 +2,7 @@
   "schema": { "version": 5 },
   "resources": {
     "workspace-source": {
-      "paths": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "apps/daemon/", "apps/web/", "apps/desktop/", "apps/packaged/", "packages/", "tools/", "scripts/postinstall.mjs", ".github/scripts/release/workspace-products.ts", ".github/actions/workspace-products/", ".github/workflows/release-beta.yml"],
+      "paths": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "apps/daemon/", "apps/web/", "apps/desktop/", "apps/packaged/", "packages/", "tools/", "scripts/postinstall.mjs", ".github/scripts/release/workspace-products.ts", ".github/actions/workspace-products/"],
       "exclude": ["apps/packaged/package.json", "**/tests/**", "**/*.test.ts", "**/vitest.config.ts", "**/tsconfig.tests.json"]
     },
     "repository-validation": {

@@ -95,6 +95,37 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("beta source identity follows its execution action, not release transport", () => {
+    const result = spawnSync("python3", ["-c", `
+import os, subprocess, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+contract = c.ConvergenceContract(root / ".github/config/convergence-beta.json")
+with tempfile.TemporaryDirectory(prefix="beta-source-identity-") as scratch:
+    index = Path(scratch) / "index"
+    env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    def git(*args, content=None):
+        return subprocess.check_output(["git", *args], cwd=root, env=env, input=content, text=True).strip()
+    def identity():
+        return c.calculate(contract, root, "release-beta", {"source_mac_arm64": ["macos-14"]},
+                           index=index, identities={"source_mac_arm64"})["source_mac_arm64"]["digest"]
+    def change(path):
+        original = git("show", "HEAD:" + path)
+        oid = git("hash-object", "-w", "--stdin", content=original + "\\n# witness change\\n")
+        git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
+    git("read-tree", "HEAD")
+    baseline = identity()
+    change(".github/workflows/release-beta.yml")
+    assert identity() == baseline, "release transport invalidated source products"
+    git("read-tree", "HEAD")
+    change(".github/actions/workspace-products/action.yml")
+    assert identity() != baseline, "source execution change reused stale products"
+`, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("projects declared JSON fields from Git without coupling product code to Plan", () => {
     const fixture = createRepository();
     const resourcePath = path.join(fixture.root, "release.json");

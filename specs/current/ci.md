@@ -273,6 +273,15 @@ There is no cross-platform source product reuse, and changing one application
 source currently rebuilds the aggregate group. Finer application groups remain
 an optimization to validate, not an already-delivered skip claim.
 
+The source action owns its Node/pnpm setup, dependency cache and scoped tool
+installation as well as source execution. Its declaration is a source identity
+input; the release workflow's packaging/publication transport is not. Changes
+to source setup must stay in that action, not be injected by a caller before
+it. The workflow remains part of trusted-writer admission and validation inputs.
+Downloaded-installation jobs also scope postinstall to the packaging/release/
+dev/serve tools and their workspace dependencies; they exercise the downloaded
+application rather than rebuilding a local application for validation.
+
 The native executor consumes the frozen decision without recomputing identities.
 It verifies the product checksum, restores generated leaf directories from a
 fresh staging tree, and calls ordinary `tools-pack workspace result` validation.

@@ -2335,14 +2335,19 @@ process.stdin.on("end", () => {
   it("[P2] limits beta native install compilation to tools and their dependency closure", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const targets = '["tools/pack","tools/release","tools/dev","tools/serve"]';
+    const action = await readFile(join(workspaceRoot, ".github/actions/workspace-products/action.yml"), "utf8");
+    expect(action).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
+    expect(action).toContain("run: pnpm install --frozen-lockfile");
+    expect(action).toContain("cache: pnpm");
     for (const [start, end] of [
       ["build_mac_arm64", "build_mac_x64"],
       ["build_mac_x64", "build_win_x64"],
       ["build_win_x64", "build_linux_x64"],
     ]) {
       const job = sectionBetween(workflow, `\n  ${start}:`, `\n  ${end}:`);
-      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
-      expect(job).toContain("run: pnpm install --frozen-lockfile");
+      expect(job).toContain("uses: ./.github/actions/workspace-products");
+      expect(job).not.toContain("run: pnpm install --frozen-lockfile");
+      expect(job).not.toContain("uses: actions/setup-node");
       expect(job).not.toContain("--ignore-scripts");
     }
     const linux = sectionBetween(workflow, "\n  build_linux_x64:", "\n  publish:");
@@ -2414,6 +2419,7 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("RELEASE_STORAGE_SECRET");
       expect(job).not.toContain("publish-platform");
       expect(job).toContain("Install and inspect downloaded artifact");
+      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'`);
     }
     expect(workflow).not.toMatch(/release-beta-(tests|smoke)\.yml/);
   });

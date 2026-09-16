@@ -493,21 +493,6 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10.33.2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
-        run: pnpm install --frozen-lockfile
-
       - name: '[build] Workspace source products'
         uses: ./.github/actions/workspace-products
         with:
@@ -808,21 +793,6 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10.33.2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
-        run: pnpm install --frozen-lockfile
-
       - name: '[build] Workspace source products'
         uses: ./.github/actions/workspace-products
         with:
@@ -1045,18 +1015,6 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10.33.2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
       - name: Compute Windows tools-pack cache key
         id: win_tools_pack_cache_key
         shell: pwsh
@@ -1080,11 +1038,6 @@ jobs:
           key: ${{ steps.win_tools_pack_cache_key.outputs.key }}
           restore-keys: |
             ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
-
-      - name: Install dependencies
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
-        run: pnpm install --frozen-lockfile
 
       - name: '[build] Workspace source products'
         uses: ./.github/actions/workspace-products
@@ -1912,6 +1865,8 @@ jobs:
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1986,6 +1941,8 @@ jobs:
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -2060,6 +2017,8 @@ jobs:
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
