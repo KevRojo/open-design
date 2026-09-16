@@ -2335,17 +2335,17 @@ process.stdin.on("end", () => {
   it("[P2] limits beta native install compilation to tools and their dependency closure", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const targets = '["tools/pack","tools/release","tools/dev","tools/serve"]';
-    const action = await readFile(join(workspaceRoot, ".github/actions/workspace-products/action.yml"), "utf8");
-    expect(action).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
+    const action = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
     expect(action).toContain("run: pnpm install --frozen-lockfile");
-    expect(action).toContain("cache: pnpm");
+    expect(action).toContain("uses: actions/cache/restore");
     for (const [start, end] of [
       ["build_mac_arm64", "build_mac_x64"],
       ["build_mac_x64", "build_win_x64"],
       ["build_win_x64", "build_linux_x64"],
     ]) {
       const job = sectionBetween(workflow, `\n  ${start}:`, `\n  ${end}:`);
-      expect(job).toContain("uses: ./.github/actions/workspace-products");
+      expect(job).toContain("uses: ./.github/actions/setup-workspace");
+      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
       expect(job).not.toContain("run: pnpm install --frozen-lockfile");
       expect(job).not.toContain("uses: actions/setup-node");
       expect(job).not.toContain("--ignore-scripts");
@@ -2361,9 +2361,9 @@ process.stdin.on("end", () => {
       const job = sectionBetween(workflow, `\n  build_${target}:`, `\n  build_${next}:`);
       expect(job).toContain("needs: [metadata, plan_tests]");
       expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
-      expect(job).toContain("uses: ./.github/actions/workspace-products");
-      expect(job).toContain(`target: ${target}`);
-      expect(job.indexOf("[build] Workspace source products")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
+      expect(job).toContain("uses: ./.github/actions/setup-workspace");
+      expect(job).not.toContain("uses: ./.github/actions/workspace-product");
+      expect(job.indexOf("[build] Source shell")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
       expect(job).toContain(target === "win_x64" ? '"tools-pack", "win", "package"' : "exec tools-pack mac package");
       if (target === "mac_arm64" || target === "mac_x64") {
         expect(job).not.toContain("uses: actions/cache/");
@@ -2373,15 +2373,25 @@ process.stdin.on("end", () => {
       } else {
         expect(job).toContain("uses: actions/cache/restore@v5"); // Windows still reuses native products.
       }
-      expect(config.workflows["release-beta"].workloads[`source_${target}`]).toMatchObject({
-        inputs: ["suite://workspace-source"], products: "manifest", runnerClass: `source_${target}`,
-        success: { [`Build beta ${target}`]: ["[build] Workspace source products"] },
-        successBoundary: "steps",
-      });
+      expect(job.match(/uses: \.\/\.github\/actions\/setup-workspace\n/g)).toHaveLength(1);
+      expect(job.match(/name: '\[retain\] Source products'/g)).toHaveLength(1);
+      expect(job).toContain("source-products/*/product/workspace.tar.gz");
+      expect(job).toContain("if-no-files-found: ignore");
+      for (const unit of ["packages", "daemon", "web", "shell"]) {
+        expect(job).toContain(`[build] Source ${unit}`);
+        expect(job).toContain(`requests/source_${target}/${unit}.json`);
+        expect(config.workflows["release-beta"].workloads[`source_${target}_${unit}`]).toMatchObject({
+          inputs: [`suite://source-${unit}`], products: "manifest", runnerClass: `source_${target}`,
+          success: { [`Build beta ${target}`]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
+        });
+        expect(config.workflows["release-beta"].batches[`source_${target}`].entries[unit]).toEqual({
+          workload: `source_${target}_${unit}`, request: { units: [unit] }, product: "bundle",
+        });
+      }
     }
     const collection = sectionBetween(workflow, "\n  test_results:", "\n  cache_test_results:");
-    expect(collection).toContain("--workload \"source_$target\"");
-    expect(collection).toContain(".run and (.resultHit | not)");
+    expect(collection).toContain("contribute-batches");
+    expect(collection).not.toContain("for unit in");
     expect(collection).not.toContain("SOURCE_JOBS");
     expect(collection).not.toContain("needs.build_mac_arm64.result == 'success'");
     expect(collection).not.toContain("download-artifact.*beta-source");

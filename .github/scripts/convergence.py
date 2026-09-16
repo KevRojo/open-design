@@ -40,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -128,14 +128,43 @@ class Workload:
 class WorkflowContract:
     def __init__(self, name: str, raw: Any):
         value = object_value(raw, f"convergence.workflows.{name}")
-        if set(value) != {"policy", "workloads"}:
-            raise ConfigError(f"convergence.workflows.{name} keys must be policy and workloads")
+        if not {"policy", "workloads"}.issubset(value) or set(value) - {"policy", "workloads", "batches"}:
+            raise ConfigError(f"convergence.workflows.{name} requires policy, workloads and optional batches")
         self.name = require_identity(name, "convergence workflow")
         self.policy = require_identity(value["policy"], f"convergence.workflows.{name}.policy")
         workloads = object_value(value["workloads"], f"convergence.workflows.{name}.workloads")
         if not workloads:
             raise ConfigError(f"convergence.workflows.{name}.workloads must not be empty")
         self.workloads = {identity: Workload(name, identity, raw_workload) for identity, raw_workload in workloads.items()}
+        self.batches = object_value(value.get("batches", {}), "execution batches")
+        self.requests: dict[str, Any] = {}
+        self.contributions: dict[str, Any] = {}
+        for batch_name, batch in self.batches.items():
+            require_identity(batch_name, "batch name")
+            batch = object_value(batch, "batch")
+            if set(batch) != {"artifact", "entries"}:
+                raise ConfigError("batch requires artifact and entries")
+            require_identity(batch["artifact"], "batch artifact")
+            entries = object_value(batch["entries"], "batch entries")
+            if not entries:
+                raise ConfigError("batch must contain entries")
+            for entry_name, entry in entries.items():
+                require_identity(entry_name, "batch entry")
+                entry = object_value(entry, "batch entry")
+                if set(entry) != {"workload", "request", "product"}:
+                    raise ConfigError("batch entry requires workload, request and product")
+                identity = require_identity(entry["workload"], "batch workload")
+                if identity not in self.workloads or identity in self.requests:
+                    raise ConfigError("batch workload must be declared exactly once")
+                if self.workloads[identity].products != "manifest":
+                    raise ConfigError("batch workload must declare manifest products")
+                require_identity(entry["product"], "batch product")
+                request = object_value(entry["request"], "execution request")
+                if set(request) & {"operation", "retain", "artifact"}:
+                    raise ConfigError("request shadows control projection")
+                self.requests[identity] = request
+                self.contributions[identity] = {entry["product"]: {
+                    "type": "job", "source": batch["artifact"], "path": f"{entry_name}/product"}}
 
 
 class ConvergenceContract:
@@ -395,6 +424,7 @@ def calculate(
             "products": workload.products, "reusable": workload.reusable,
             "success": workload.success,
             "successBoundary": workload.success_boundary,
+            "request": workflow.requests.get(identity),
         }).encode())
         results[identity] = {
             "digest": digest.hexdigest(),
@@ -448,6 +478,8 @@ def validate_candidate_plan(
                 raise ConfigError(f"candidate {identity} {field} differs from trusted plan")
         if bool(receipt["products"]) != (value["products"] == "manifest"):
             raise ConfigError(f"candidate {identity} products differ from trusted plan")
+        if identity in workflow.contributions and receipt["products"] != workflow.contributions[identity]:
+            raise ConfigError(f"candidate {identity} batch source differs from declaration")
 
 
 def successful_workload_jobs(
@@ -525,7 +557,7 @@ def validate_products(value: Any, label: str, require_urls: bool) -> dict[str, A
     for name, raw in sorted(products.items()):
         require_identity(name, f"{label} product")
         entry = object_value(raw, f"{label}.{name}")
-        if not {"type", "source"}.issubset(entry) or set(entry) - {"type", "source", "data"}:
+        if not {"type", "source"}.issubset(entry) or set(entry) - {"type", "source", "data", "path"}:
             raise ConfigError(f"{label}.{name} keys must be type, source, and optional data")
         product_type = require_string(entry["type"], f"{label}.{name}.type")
         if product_type not in PRODUCT_TYPES:
@@ -540,6 +572,11 @@ def validate_products(value: Any, label: str, require_urls: bool) -> dict[str, A
         elif not IDENTITY_RE.fullmatch(source):
             raise ConfigError(f"{label}.{name}.source must name a current-run job source")
         normalized_entry: dict[str, Any] = {"type": product_type, "source": source}
+        if "path" in entry:
+            path = require_string(entry["path"], "product artifact path")
+            if product_type != "job" or any(not IDENTITY_RE.fullmatch(part) for part in path.split("/")):
+                raise ConfigError("product path requires a safe current-job directory")
+            normalized_entry["path"] = path
         if "data" in entry:
             data = object_value(entry["data"], f"{label}.{name}.data")
             canonical_json(data)
@@ -648,7 +685,9 @@ def sha256_url(url: str, timeout: float) -> str:
     return digest.hexdigest()
 
 
-def normalize_product_archive(source: Path, destination: Path) -> None:
+def normalize_product_archive(source: Path, destination: Path, prefix: str | None = None) -> None:
+    if prefix is not None and any(not IDENTITY_RE.fullmatch(part) for part in prefix.split("/")):
+        raise ConfigError("unsafe product artifact selection")
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(source, "r") as input_archive:
         entries = sorted(input_archive.infolist(), key=lambda entry: entry.filename)
@@ -657,6 +696,7 @@ def normalize_product_archive(source: Path, destination: Path) -> None:
         if sum(entry.file_size for entry in entries) > 2 * 1024 * 1024 * 1024:
             raise ConfigError("product artifact expands beyond 2 GiB")
         seen: set[str] = set()
+        selected = 0
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output_archive:
             for entry in entries:
                 name = entry.filename
@@ -670,6 +710,13 @@ def normalize_product_archive(source: Path, destination: Path) -> None:
                 ):
                     raise ConfigError(f"product artifact has an unsafe or duplicate entry: {name!r}")
                 seen.add(name)
+                if prefix is not None:
+                    if not name.startswith(prefix + "/"):
+                        continue
+                    name = name[len(prefix) + 1:]
+                    if not name:
+                        continue
+                selected += 1
                 directory = name.endswith("/")
                 normalized = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
                 normalized.compress_type = zipfile.ZIP_DEFLATED
@@ -679,6 +726,8 @@ def normalize_product_archive(source: Path, destination: Path) -> None:
                     continue
                 with input_archive.open(entry, "r") as input_file, output_archive.open(normalized, "w") as output_file:
                     shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+        if not selected:
+            raise ConfigError("product artifact selection is empty")
 
 
 def result_sources(workflow: WorkflowContract, identity: str, expected: dict[str, Any]) -> list[dict[str, str]]:
@@ -761,6 +810,44 @@ def execution_decisions(
     would_run = {identity: bool(enabled[identity]) and not hit for identity, hit in hits.items()}
     run = dict(would_run) if mode == "enforce" else {identity: bool(enabled[identity]) for identity in hits}
     return run, would_run
+
+
+def project_batches(workflow: WorkflowContract, pending: dict[str, Any], output: Path) -> None:
+    """Independent identities, grouped transport; executors never receive Plan state."""
+    for batch_name, batch in workflow.batches.items():
+        for name, entry in batch["entries"].items():
+            decision = pending["workloads"][entry["workload"]]
+            if not decision["scopeEnabled"]:
+                continue
+            request = dict(entry["request"])
+            request.update(operation="build", retain=bool(pending["mode"] == "enforce"
+                           and decision["reusable"] and decision["run"] and not decision["resultHit"]))
+            if not decision["run"]:
+                if not decision["resultHit"] or not decision["reusable"]:
+                    raise ConfigError("execution projection requires a reusable hit")
+                products = validate_products(decision["result"]["products"], "batch inputs", require_urls=True)
+                if set(products) != {entry["product"]}:
+                    raise ConfigError("batch product set differs")
+                product = products[entry["product"]]
+                digest = product.get("data", {}).get("sha256")
+                if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+                    raise ConfigError("execution input requires a verified product digest")
+                request.update(operation="restore", artifact={"url": product["source"], "sha256": digest})
+            write_json_atomic(output / batch_name / f"{name}.json", request)
+
+
+def contribute_batches_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
+    pending = load_json(args.pending)
+    workflow = contract.workflow(pending["workflow"])
+    for batch in workflow.batches.values():
+        for name, entry in batch["entries"].items():
+            decision = pending["workloads"][entry["workload"]]
+            if not (decision["scopeEnabled"] and decision["reusable"] and decision["run"] and not decision["resultHit"]):
+                continue
+            products = {entry["product"]: {"type": "job", "source": batch["artifact"], "path": f"{name}/product"}}
+            contribute_command(argparse.Namespace(pending=args.pending, workload=entry["workload"],
+                               products_json=json.dumps(products), output_dir=args.output_dir), contract)
+    return 0
 
 
 def restore_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
@@ -861,6 +948,7 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
         },
     }
     write_json_atomic(args.pending, pending)
+    project_batches(workflow, pending, args.pending.parent / "requests")
     append_outputs(
         {
             "run": compact_json(run),
@@ -945,6 +1033,8 @@ def finalize_candidate(
                 f"product manifest {identity}.products",
                 require_urls=False,
             )
+            if identity in workflow.contributions and products != workflow.contributions[identity]:
+                raise ConfigError(f"product manifest batch source differs: {identity}")
             if manifest.get("workload") != identity or manifest.get("digest") != value.get("digest"):
                 raise ConfigError(f"product manifest identity or digest mismatch: {identity}")
             if manifest.get("executionClass") != value.get("executionClass"):
@@ -1575,7 +1665,7 @@ def publish_command(args: argparse.Namespace) -> int:
             if not source_archive.is_file():
                 raise ConfigError(f"current-run product artifact is missing: {source}")
             archive = args.output_dir / "products" / f"{identity}-{name}.zip"
-            normalize_product_archive(source_archive, archive)
+            normalize_product_archive(source_archive, archive, product.get("path"))
             key = product_key(repository_id, workflow, policy, identity, digest, name)
             content_digest = sha256_file(archive)
             data = dict(product.get("data", {}))
@@ -1672,6 +1762,9 @@ def parse_args() -> argparse.Namespace:
     contribute.add_argument("--workload", required=True)
     contribute.add_argument("--products-json", required=True)
     contribute.add_argument("--output-dir", type=Path, required=True)
+    batches = sub.add_parser("contribute-batches")
+    batches.add_argument("--pending", type=Path, required=True)
+    batches.add_argument("--output-dir", type=Path, required=True)
     admit = sub.add_parser("admit")
     admit.add_argument("--handoff-root", type=Path, required=True)
     admit.add_argument("--isolated", action="store_true")
@@ -1728,6 +1821,8 @@ def main() -> int:
         return restore_command(args, contract)
     if args.command == "contribute":
         return contribute_command(args, contract)
+    if args.command == "contribute-batches":
+        return contribute_batches_command(args, contract)
     return admit_command(args, contract)
 
 

@@ -82,6 +82,18 @@ manual callable path in `convergence.atom.yml` are task-scoped to the explicitly
 authorized `feat/plan-foundation` branch. They do not relax production
 `workflow_run`/default-branch admission and must be revisited before landing.
 
+Product workloads may declare `batches` in their existing workflow configuration.
+Each entry binds one workload, a business execution request, and a product name.
+Python projects build/restore requests and verified artifact references; native
+executors do not parse pending Plan state or construct workload identities.
+Requests affect identity, while batch names and transport artifact names do not.
+One platform may retain multiple independently successful products in one artifact.
+The collector and trusted writer both check each workload's build and retention
+steps and its declared artifact subdirectory; only those selected products enter
+the immutable cache. Do not equate batch success with every member's success or
+introduce a composite action per cache identity. Runtime dependencies and pnpm
+store preparation continue through `setup-workspace` and its existing trust policy.
+
 ## Handoff contract
 
 Use `.github/scripts/handoff.py` for all CI follow-on artifact names and paths. The canonical layout is:

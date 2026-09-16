@@ -493,11 +493,67 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
 
-      - name: '[build] Workspace source products'
-        uses: ./.github/actions/workspace-products
+      - name: '[prepare] Workspace source tools'
+        uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+
+      - name: '[restore] Source execution requests'
+        uses: actions/download-artifact@v8
         with:
-          pending-artifact: ${{ needs.plan_tests.outputs.pending_artifact }}
-          target: mac_arm64
+          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          path: ${{ runner.temp }}/source-plan
+
+      - name: '[build] Source packages'
+        id: source_packages
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/packages.json"
+          mac_arm64 "$RUNNER_TEMP/source-products/packages"
+
+      - name: '[build] Source daemon'
+        id: source_daemon
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/daemon.json"
+          mac_arm64 "$RUNNER_TEMP/source-products/daemon"
+
+      - name: '[build] Source web'
+        id: source_web
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/web.json"
+          mac_arm64 "$RUNNER_TEMP/source-products/web"
+
+      - name: '[build] Source shell'
+        id: source_shell
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_arm64/shell.json"
+          mac_arm64 "$RUNNER_TEMP/source-products/shell"
+
+      - name: '[retain] Source products'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-mac_arm64
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
+
+      - name: '[report] Source execution'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-report-mac_arm64
+          path: ${{ runner.temp }}/source-products/*/report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Prepare mac_arm64 signing certificate
         if: ${{ inputs.mac_arm64_sign_mode != 'no' }}
@@ -793,11 +849,67 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
 
-      - name: '[build] Workspace source products'
-        uses: ./.github/actions/workspace-products
+      - name: '[prepare] Workspace source tools'
+        uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+
+      - name: '[restore] Source execution requests'
+        uses: actions/download-artifact@v8
         with:
-          pending-artifact: ${{ needs.plan_tests.outputs.pending_artifact }}
-          target: mac_x64
+          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          path: ${{ runner.temp }}/source-plan
+
+      - name: '[build] Source packages'
+        id: source_packages
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/packages.json"
+          mac_x64 "$RUNNER_TEMP/source-products/packages"
+
+      - name: '[build] Source daemon'
+        id: source_daemon
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/daemon.json"
+          mac_x64 "$RUNNER_TEMP/source-products/daemon"
+
+      - name: '[build] Source web'
+        id: source_web
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/web.json"
+          mac_x64 "$RUNNER_TEMP/source-products/web"
+
+      - name: '[build] Source shell'
+        id: source_shell
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_mac_x64/shell.json"
+          mac_x64 "$RUNNER_TEMP/source-products/shell"
+
+      - name: '[retain] Source products'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-mac_x64
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
+
+      - name: '[report] Source execution'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-report-mac_x64
+          path: ${{ runner.temp }}/source-products/*/report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Prepare mac_x64 signing certificate
         if: ${{ inputs.mac_x64_sign_mode != 'no' }}
@@ -1039,11 +1151,67 @@ jobs:
           restore-keys: |
             ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
 
-      - name: '[build] Workspace source products'
-        uses: ./.github/actions/workspace-products
+      - name: '[prepare] Workspace source tools'
+        uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+
+      - name: '[restore] Source execution requests'
+        uses: actions/download-artifact@v8
         with:
-          pending-artifact: ${{ needs.plan_tests.outputs.pending_artifact }}
-          target: win_x64
+          name: ${{ needs.plan_tests.outputs.pending_artifact }}
+          path: ${{ runner.temp }}/source-plan
+
+      - name: '[build] Source packages'
+        id: source_packages
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_win_x64/packages.json"
+          win_x64 "$RUNNER_TEMP/source-products/packages"
+
+      - name: '[build] Source daemon'
+        id: source_daemon
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_win_x64/daemon.json"
+          win_x64 "$RUNNER_TEMP/source-products/daemon"
+
+      - name: '[build] Source web'
+        id: source_web
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_win_x64/web.json"
+          win_x64 "$RUNNER_TEMP/source-products/web"
+
+      - name: '[build] Source shell'
+        id: source_shell
+        shell: bash
+        run: >-
+          node .github/scripts/release/workspace-products.ts
+          "$RUNNER_TEMP/source-plan/requests/source_win_x64/shell.json"
+          win_x64 "$RUNNER_TEMP/source-products/shell"
+
+      - name: '[retain] Source products'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-win_x64
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
+
+      - name: '[report] Source execution'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-report-win_x64
+          path: ${{ runner.temp }}/source-products/*/report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Setup NSIS
         shell: pwsh
@@ -1659,7 +1827,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/pending-convergence.json
+          path: |
+            ${{ runner.temp }}/pending-convergence.json
+            ${{ runner.temp }}/requests
           if-no-files-found: error
           retention-days: 7
 
@@ -1795,16 +1965,9 @@ jobs:
           name: ${{ needs.plan_tests.outputs.pending_artifact }}
           path: ${{ runner.temp }}
       - name: '[collect] Source product references'
-        run: |
-          for target in mac_arm64 mac_x64 win_x64; do
-            if ! jq -e --arg id "source_$target" '.workloads[$id] | .run and (.resultHit | not)' "$RUNNER_TEMP/pending-convergence.json" >/dev/null; then
-              continue
-            fi
-            python3 .github/scripts/convergence.py --config .github/config/convergence-beta.json contribute \
-              --pending "$RUNNER_TEMP/pending-convergence.json" --workload "source_$target" \
-              --products-json "{\"bundle\":{\"type\":\"job\",\"source\":\"beta-source-$target\"}}" \
-              --output-dir "$RUNNER_TEMP/products"
-          done
+        run: >-
+          python3 .github/scripts/convergence.py --config .github/config/convergence-beta.json contribute-batches
+          --pending "$RUNNER_TEMP/pending-convergence.json" --output-dir "$RUNNER_TEMP/products"
       - name: '[validate] Per-workload execution evidence'
         id: handoff
         env:

@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 6 },
+    schema: { version: 7 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -95,6 +95,87 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("projects execution batches and independently admits products from one transport", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import argparse, copy, json, subprocess, sys, zipfile
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+config_path = root / "convergence.json"
+config = json.loads(config_path.read_text())
+w = config["workflows"]["ci"]
+w["batches"] = {"source": {"artifact": "source-products", "entries": {
+    name: {"workload": name, "request": {"units": [name]}, "product": "bundle"} for name in ("a", "b")}}}
+for name, unit in w["workloads"].items():
+    unit.update(products="manifest", successBoundary="steps", success={"Native": ["Build " + name, "Retain"]})
+config_path.write_text(json.dumps(config))
+contract = c.ConvergenceContract(config_path)
+workflow = contract.workflow("ci")
+calculated = c.calculate(contract, root, "ci", {"worker": ["ubuntu-24.04"]})
+pending = {"schemaVersion": 1, "protocol": c.PROTOCOL, "repositoryId": 42, "repository": "example/repo",
+           "workflow": "ci", "policy": "test-v1", "mode": "enforce", "workloads": {
+    name: {**value, "scopeEnabled": True, "run": True, "resultHit": False} for name, value in calculated.items()}}
+c.project_batches(workflow, pending, root / "requests")
+assert json.loads((root / "requests/source/a.json").read_text()) == {"units": ["a"], "operation": "build", "retain": True}
+hot = copy.deepcopy(pending)
+hot["workloads"]["a"].update(run=False, resultHit=True, result={"products": {"bundle": {
+    "type": "url", "source": "https://cache.example/a.zip", "data": {"sha256": "a" * 64}}}})
+c.project_batches(workflow, hot, root / "requests")
+assert json.loads((root / "requests/source/a.json").read_text()) == {
+    "units": ["a"], "operation": "restore", "retain": False,
+    "artifact": {"url": "https://cache.example/a.zip", "sha256": "a" * 64}}
+shadow = copy.deepcopy(pending)
+shadow["mode"] = "shadow"
+c.project_batches(workflow, shadow, root / "requests")
+assert not json.loads((root / "requests/source/a.json").read_text())["retain"]
+# Transport grouping does not change identity; execution request changes do.
+w["batches"]["source"]["artifact"] = "renamed-transport"
+config_path.write_text(json.dumps(config))
+assert c.calculate(c.ConvergenceContract(config_path), root, "ci", {"worker": ["ubuntu-24.04"]}) == calculated
+w["batches"]["source"]["entries"]["a"]["request"]["units"] = ["changed"]
+config_path.write_text(json.dumps(config))
+changed = c.calculate(c.ConvergenceContract(config_path), root, "ci", {"worker": ["ubuntu-24.04"]})
+assert changed["a"]["digest"] != calculated["a"]["digest"] and changed["b"] == calculated["b"]
+c.write_json_atomic(root / "pending.json", pending)
+c.contribute_batches_command(argparse.Namespace(pending=root / "pending.json", output_dir=root / "products"), contract)
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
+provenance = {"event": "workflow_dispatch", "runId": 12, "runAttempt": 1, "headSha": head,
+              "baseSha": head, "treeSha": tree, "validatedAt": "2026-09-16T00:00:00Z"}
+jobs = [{"id": 1, "name": "Native", "run_id": 12, "run_attempt": 1, "head_sha": head,
+         "status": "completed", "conclusion": "failure", "labels": ["ubuntu-24.04"], "steps": [
+         {"name": name, "status": "completed", "conclusion": result} for name, result in
+         (("Build a", "success"), ("Build b", "failure"), ("Retain", "success"))]}]
+candidate = c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs)
+assert [entry["receipt"]["workload"] for entry in candidate["results"]] == ["a"]
+with patch("convergence.run_jobs", return_value=jobs):
+    c.validate_admitted_plan(candidate, contract, root, tree)
+    bad = copy.deepcopy(candidate)
+    bad["results"][0]["receipt"]["products"]["bundle"]["path"] = "b/product"
+    try: c.validate_admitted_plan(bad, contract, root, tree)
+    except c.ConfigError: pass
+    else: raise AssertionError("writer admitted swapped batch member")
+archive = root / "batch.zip"
+with zipfile.ZipFile(archive, "w") as z:
+    z.writestr("a/product/workspace.tar.gz", "a")
+    z.writestr("b/product/workspace.tar.gz", "b")
+c.normalize_product_archive(archive, root / "a.zip", "a/product")
+with zipfile.ZipFile(root / "a.zip") as z:
+    assert z.namelist() == ["workspace.tar.gz"] and z.read("workspace.tar.gz") == b"a"
+try: c.normalize_product_archive(archive, root / "missing.zip", "missing/product")
+except c.ConfigError: pass
+else: raise AssertionError("accepted absent batch member")
+with zipfile.ZipFile(archive, "a") as z: z.writestr("../escape", "unsafe")
+try: c.normalize_product_archive(archive, root / "unsafe.zip", "a/product")
+except c.ConfigError: pass
+else: raise AssertionError("ignored unsafe sibling")
+`, path.dirname(convergenceScript), fixture.root], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("beta source identity follows its execution action, not release transport", () => {
     const result = spawnSync("python3", ["-c", `
 import os, subprocess, sys, tempfile
@@ -110,7 +191,7 @@ with tempfile.TemporaryDirectory(prefix="beta-source-identity-") as scratch:
         return subprocess.check_output(["git", *args], cwd=root, env=env, input=content, text=True).strip()
     def identity():
         return c.calculate(contract, root, "release-beta", {"source_mac_arm64": ["macos-14"]},
-                           index=index, identities={"source_mac_arm64"})["source_mac_arm64"]["digest"]
+                           index=index, identities={"source_mac_arm64_web"})["source_mac_arm64_web"]["digest"]
     def change(path):
         original = git("show", "HEAD:" + path)
         oid = git("hash-object", "-w", "--stdin", content=original + "\\n# witness change\\n")
@@ -120,8 +201,45 @@ with tempfile.TemporaryDirectory(prefix="beta-source-identity-") as scratch:
     change(".github/workflows/release-beta.yml")
     assert identity() == baseline, "release transport invalidated source products"
     git("read-tree", "HEAD")
-    change(".github/actions/workspace-products/action.yml")
+    change(".github/actions/setup-workspace/action.yml")
     assert identity() != baseline, "source execution change reused stale products"
+`, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  test("isolates beta source units while retaining shared inputs and version materialization", () => {
+    const result = spawnSync("python3", ["-c", `
+import json, os, subprocess, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+contract = c.ConvergenceContract(root / ".github/config/convergence-beta.json")
+ids = {"source_mac_arm64_" + unit for unit in ("packages", "daemon", "web", "shell")}
+with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
+    index = Path(scratch) / "index"
+    env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    def git(*args, content=None):
+        return subprocess.check_output(["git", *args], cwd=root, env=env, input=content, text=True).strip()
+    def identities():
+        return {key: value["digest"] for key, value in c.calculate(contract, root, "release-beta", {"source_mac_arm64": ["macos-14"]}, index=index, identities=ids).items()}
+    git("read-tree", "HEAD")
+    baseline = identities()
+    for path, expected in (("apps/web/src/plan-witness.ts", {"web"}), ("apps/daemon/src/plan-witness.ts", {"daemon"}),
+                           ("apps/desktop/src/plan-witness.ts", {"shell"}), ("packages/platform/src/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
+                           ("apps/web/tests/plan-witness.test.ts", set()), ("design-systems/plan-witness.md", set())):
+        git("read-tree", "HEAD")
+        oid = git("hash-object", "-w", "--stdin", content="// identity witness")
+        git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
+        changed = {key.removeprefix("source_mac_arm64_") for key, digest in identities().items() if digest != baseline[key]}
+        assert changed == expected, (path, changed, expected)
+    git("read-tree", "HEAD")
+    path = "apps/packaged/package.json"
+    manifest = json.loads(git("show", "HEAD:" + path))
+    manifest["version"] = "0.22.3-beta.999"
+    oid = git("hash-object", "-w", "--stdin", content=json.dumps(manifest))
+    git("update-index", "--cacheinfo", "100644," + oid + "," + path)
+    assert identities() == baseline
 `, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
   });
@@ -579,7 +697,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 6");
+    expect(stale.stderr).toContain("requires schema.version 7");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();

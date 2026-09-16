@@ -35,9 +35,8 @@ function fixture() {
     }
     return output;
   });
-  const pending: Options["pending"] = { schemaVersion: 1, protocol: "nexu-workload-result-v1", mode: "enforce",
-    workloads: { source: { scopeEnabled: true, reusable: true, run: true, resultHit: false } } };
-  return { root, scratch, runUnit, pending, workload: "source" };
+  const request: Options["request"] = { units: outputs.map(({ unit }) => unit), operation: "build", retain: true };
+  return { root, scratch, runUnit, request };
 }
 
 function product(archive: string, directory: string) {
@@ -50,8 +49,7 @@ function product(archive: string, directory: string) {
 
 function hitFixture() {
   const f = fixture();
-  f.pending.workloads.source = { scopeEnabled: true, reusable: true, resultHit: true, run: false,
-    result: { products: { bundle: { type: "url", source: "https://cache.example/source.zip", data: { sha256: "a".repeat(64) } } } } };
+  Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: "https://cache.example/source.zip", sha256: "a".repeat(64) } });
   return f;
 }
 
@@ -63,6 +61,34 @@ afterEach(() => {
 });
 
 describe("native source result consumption", () => {
+  it.each(["packages", "daemon", "web", "shell"] as const)("builds and restores only the selected %s unit", async (unit) => {
+    const f = fixture();
+    f.request.units = [unit];
+    const selected = f;
+    expect(await executeSource(selected)).toMatchObject({ produced: true, restored: false });
+    expect(f.runUnit.mock.calls).toEqual([["build", unit]]);
+    const bundle = product(join(f.scratch, "product/workspace.tar.gz"), f.scratch);
+    Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: bundle.source, sha256: bundle.data.sha256 } });
+    f.runUnit.mockClear();
+    expect(await executeSource(selected)).toMatchObject({ produced: false, restored: true });
+    expect(f.runUnit.mock.calls).toEqual([["result", unit]]);
+    for (const output of outputs.filter((entry) => entry.unit !== unit)) {
+      for (const path of output.outputPaths) expect(existsSync(join(f.root, path))).toBe(false);
+    }
+  });
+
+  it("rejects another unit's bundle without building or replacing outputs", async () => {
+    const f = fixture();
+    await executeSource({ ...f, request: { ...f.request, units: ["daemon"] } });
+    const bundle = product(join(f.scratch, "product/workspace.tar.gz"), f.scratch);
+    Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: bundle.source, sha256: bundle.data.sha256 } });
+    f.runUnit.mockClear();
+    await expect(executeSource({ ...f, request: { ...f.request, units: ["web"] } })).rejects.toThrow("incompatible source output set");
+    expect(f.runUnit).not.toHaveBeenCalled();
+    expect(readFileSync(join(f.root, "apps/daemon/dist/index.js"), "utf8")).toBe("daemon");
+    expect(existsSync(join(f.root, "apps/web/dist"))).toBe(false);
+  });
+
   it("selects Windows system bsdtar independently of Git Bash PATH", () => {
     expect(archiveExecutable("win32", "C:\\Windows")).toBe("C:\\Windows\\System32\\tar.exe");
     expect(archiveExecutable("darwin")).toBe("tar");
@@ -77,7 +103,7 @@ describe("native source result consumption", () => {
     const bundle = product(join(f.scratch, "product/workspace.tar.gz"), f.scratch);
     const web = join(f.root, "apps/web/.next/static");
     writeFileSync(join(web, "stale.js"), "must disappear");
-    f.pending.workloads.source = { scopeEnabled: true, reusable: true, run: false, resultHit: true, result: { products: { bundle } } };
+    Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: bundle.source, sha256: bundle.data.sha256 } });
     f.runUnit.mockClear();
     expect(await executeSource(f)).toMatchObject({ restored: true, produced: false });
     expect(f.runUnit.mock.calls.every(([action]) => action === "result")).toBe(true);
@@ -103,8 +129,7 @@ describe("native source result consumption", () => {
   it("falls back after a checksum failure without publishing over an immutable hit", async () => {
     const f = fixture();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("corrupt")));
-    f.pending.workloads.source = { scopeEnabled: true, reusable: true, resultHit: true, run: false,
-      result: { products: { bundle: { type: "url", source: "https://cache.example/source.zip", data: { sha256: "a".repeat(64) } } } } };
+    Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: "https://cache.example/source.zip", sha256: "a".repeat(64) } });
     expect(await executeSource(f)).toMatchObject({ restored: false, produced: false, fallback: { reason: "checksum-mismatch", attempts: 1 } });
     expect(f.runUnit.mock.calls).toHaveLength(4);
     expect(existsSync(join(f.scratch, "product"))).toBe(false);
@@ -169,7 +194,7 @@ describe("native source result consumption", () => {
 
   it("does not rebuild when the frozen product reference is absent", async () => {
     const f = hitFixture();
-    delete f.pending.workloads.source!.result;
+    delete f.request.artifact;
     await expect(executeSource(f)).rejects.toThrow("missing source product");
     expect(f.runUnit).not.toHaveBeenCalled();
   });
@@ -178,7 +203,7 @@ describe("native source result consumption", () => {
     const f = fixture();
     await executeSource(f);
     const bundle = product(join(f.scratch, "product/workspace.tar.gz"), f.scratch);
-    f.pending.workloads.source = { scopeEnabled: true, reusable: true, run: false, resultHit: true, result: { products: { bundle } } };
+    Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: bundle.source, sha256: bundle.data.sha256 } });
     f.runUnit.mockClear().mockImplementation(() => { throw new Error("result contract mismatch"); });
     await expect(executeSource(f)).rejects.toThrow("result contract mismatch");
     expect(f.runUnit.mock.calls).toEqual([["result", "packages"]]);
@@ -186,8 +211,7 @@ describe("native source result consumption", () => {
 
   it("keeps shadow execution independent of observed hits and emits no reusable product", async () => {
     const f = fixture();
-    f.pending.mode = "shadow";
-    f.pending.workloads.source!.resultHit = true;
+    f.request.retain = false;
     expect(await executeSource(f)).toMatchObject({ restored: false, produced: false });
     expect(f.runUnit.mock.calls.every(([action]) => action === "build")).toBe(true);
   });
@@ -234,7 +258,7 @@ describe("native source result consumption", () => {
       }
       originalRename(from, to);
     });
-    f.pending.workloads.source = { scopeEnabled: true, reusable: true, run: false, resultHit: true, result: { products: { bundle } } };
+    Object.assign(f.request, { operation: "restore", retain: false, artifact: { url: bundle.source, sha256: bundle.data.sha256 } });
     f.runUnit.mockClear();
     await expect(executeSource(f)).rejects.toThrow("source rollback failed; recovery retained");
     expect(f.runUnit).not.toHaveBeenCalled();
