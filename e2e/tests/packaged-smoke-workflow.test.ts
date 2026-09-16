@@ -2388,6 +2388,7 @@ process.stdin.on("end", () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
+    expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
     for (const id of ["functional_e2e", "e2e_vitest", "daemon_unit_tests", "verify"]) {
       expect(workflow.includes(`  test_${id}:\n    needs: [metadata, plan_tests]`)).toBe(true);
       expect(workflow.includes(`if: \${{ fromJSON(needs.plan_tests.outputs.run).test_${id} }}`)).toBe(true);
@@ -2419,7 +2420,8 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("RELEASE_STORAGE_SECRET");
       expect(job).not.toContain("publish-platform");
       expect(job).toContain("Install and inspect downloaded artifact");
-      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'`);
+      // fake-agents imports contracts at runtime, independently of the tool dependency graph.
+      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'`);
     }
     expect(workflow).not.toMatch(/release-beta-(tests|smoke)\.yml/);
   });

@@ -279,7 +279,8 @@ input; the release workflow's packaging/publication transport is not. Changes
 to source setup must stay in that action, not be injected by a caller before
 it. The workflow remains part of trusted-writer admission and validation inputs.
 Downloaded-installation jobs also scope postinstall to the packaging/release/
-dev/serve tools and their workspace dependencies; they exercise the downloaded
+dev/serve tools, the harness's direct `contracts` dependency, and their workspace
+dependencies. Metadata publication only prepares `tools/release`. They exercise the downloaded
 application rather than rebuilding a local application for validation.
 
 The native executor consumes the frozen decision without recomputing identities.

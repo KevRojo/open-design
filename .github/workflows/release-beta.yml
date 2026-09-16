@@ -1504,6 +1504,8 @@ jobs:
           node-version: 24
 
       - name: Install dependencies
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare and publish beta release notes
@@ -1866,7 +1868,7 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1942,7 +1944,7 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -2018,7 +2020,7 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
