@@ -364,6 +364,8 @@ jobs:
       OPEN_DESIGN_BETA_METADATA_URL: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}/beta/latest/metadata.json
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      test_matrix: ${{ steps.test_matrix.outputs.matrix }}
+      test_count: ${{ steps.test_matrix.outputs.count }}
       pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
       contribution: ${{ steps.mode.outputs.contribution }}
       contributions: ${{ steps.plan.outputs.contributions }}
@@ -516,6 +518,19 @@ jobs:
           python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json" github-output \
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
             --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
+      - name: '[plan] Selected test execution matrix'
+        id: test_matrix
+        env:
+          PLAN_RUN: ${{ steps.plan.outputs.run }}
+        run: |
+          matrix="$(jq -cn --argjson run "$PLAN_RUN" '{include: [
+            {workload:"test_e2e_vitest", kind:"e2e", name:"[test] beta E2E Vitest", shard:0, timeout:20},
+            {workload:"test_verify", kind:"verify", name:"[test] beta Verify build (typecheck + tests)", shard:0, timeout:360},
+            (range(1;5) | {workload:"test_daemon_unit_tests", kind:"daemon", name:("[test] beta Daemon tests (" + tostring + "/4)"), shard:., timeout:15})
+          ]} | if all(.include[]; ($run[.workload] | type) == "boolean") then
+            .include |= map(select($run[.workload])) else error("missing or invalid Plan test decision") end')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq '.include | length' <<< "$matrix")" >> "$GITHUB_OUTPUT"
       - name: '[retain] Frozen Plan witness'
         uses: actions/upload-artifact@v4
         with:
@@ -1834,12 +1849,15 @@ jobs:
     with:
       ref: ${{ needs.plan.outputs.commit }}
       suite: p0
-  test_e2e_vitest:
+  test:
     needs: plan
-    if: ${{ fromJSON(needs.plan.outputs.run).test_e2e_vitest }}
-    name: "[test] beta E2E Vitest"
+    if: ${{ needs.plan.outputs.test_count != '0' }}
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -1857,12 +1875,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Setup Playwright
+        if: ${{ matrix.kind == 'e2e' }}
         run: pnpm -C e2e exec playwright install --with-deps chromium
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
       # The daemon launches the installed Chromium directly instead of through
       # Playwright. Restore user namespaces on this ephemeral runner so the real
       # Chromium sandbox remains enabled rather than disabling that protection.
       - name: Allow Chromium user namespaces on GitHub Ubuntu
+        if: ${{ matrix.kind == 'e2e' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1870,72 +1890,29 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Prebuild workspace type declarations
+        if: ${{ matrix.kind == 'e2e' }}
         run: |
           pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
           pnpm --filter @open-design/web build:sidecar
       - name: Run E2E Vitest
+        if: ${{ matrix.kind == 'e2e' }}
         run: pnpm --filter @open-design/e2e test
-  test_daemon_unit_tests:
-    needs: plan
-    if: ${{ fromJSON(needs.plan.outputs.run).test_daemon_unit_tests }}
-    name: "[test] beta Daemon tests (${{ matrix.shard }}/4)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10.33.2
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Run daemon test shard
+        if: ${{ matrix.kind == 'daemon' }}
         env:
           OD_WATCHER_TEST_DEBUG: "1"
         run: pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4
-  test_verify:
-    needs: plan
-    if: ${{ fromJSON(needs.plan.outputs.run).test_verify }}
-    name: "[test] beta Verify build (typecheck + tests)"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-          # Shallow: nothing here reads git history. `pnpm guard` uses
-          # `git ls-files` (the index, not history), and a full clone of this
-          # repository is a 2.2 GiB pack.
-          fetch-depth: 1
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10.33.2
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Build daemon and desktop (typecheck dependencies)
+        if: ${{ matrix.kind == 'verify' }}
         run: |
           pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
       - name: Typecheck workspaces
+        if: ${{ matrix.kind == 'verify' }}
         run: pnpm -r --workspace-concurrency=4 --if-present run typecheck
       - name: Check repository layout policies
+        if: ${{ matrix.kind == 'verify' }}
         run: pnpm guard
 
   cache_build_results:
@@ -1952,7 +1929,7 @@ jobs:
 
   cache_test_results:
     name: '[cache] Test results'
-    needs: [plan, test_functional_e2e, test_e2e_vitest, test_daemon_unit_tests, test_verify]
+    needs: [plan, test_functional_e2e, test]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).none }}
     uses: ./.github/workflows/convergence.atom.yml
     with:

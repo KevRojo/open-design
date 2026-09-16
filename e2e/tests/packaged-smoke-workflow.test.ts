@@ -2410,15 +2410,51 @@ process.stdin.on("end", () => {
 
   });
 
+  it("[P1] projects only selected test matrix members with unchanged success-proof names", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const script = extractWorkflowRunScript(workflow, "'[plan] Selected test execution matrix'");
+    const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));
+    const workloads = config.workflows["release-beta"].workloads;
+    const dir = await mkdtemp(join(tmpdir(), "od-beta-test-matrix-"));
+    try {
+      for (const selected of [[], ["test_e2e_vitest"], ["test_daemon_unit_tests"], ["test_verify"],
+        ["test_e2e_vitest", "test_daemon_unit_tests", "test_verify"]]) {
+        const output = join(dir, "output");
+        await writeFile(output, "");
+        await execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
+          PLAN_RUN: JSON.stringify(Object.fromEntries(Object.keys(workloads).map((id) => [id, selected.includes(id)]))),
+          GITHUB_OUTPUT: output,
+        }) });
+        const values = Object.fromEntries((await readFile(output, "utf8")).trim().split("\n").map((line) => {
+          const index = line.indexOf("=");
+          return [line.slice(0, index), line.slice(index + 1)];
+        }));
+        const rows = JSON.parse(values.matrix ?? "{}").include as { workload: string; name: string }[];
+        expect(Number(values.count)).toBe(rows.length);
+        expect(rows.map((row) => row.name).sort()).toEqual(selected.flatMap((id) => Object.keys(workloads[id].success)).sort());
+        expect(rows.every((row) => selected.includes(row.workload))).toBe(true);
+      }
+      await expect(execFileAsync("bash", ["-e", "-c", script], { env: workflowFixtureEnv({
+        PLAN_RUN: "{}", GITHUB_OUTPUT: join(dir, "invalid-output"),
+      }) })).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publish = sectionBetween(workflow, "\n  publish:", "\n  test_functional_e2e:");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
-    for (const id of ["functional_e2e", "e2e_vitest", "daemon_unit_tests", "verify"]) {
-      expect(workflow.includes(`  test_${id}:\n    needs: plan`)).toBe(true);
-      expect(workflow.includes(`if: \${{ fromJSON(needs.plan.outputs.run).test_${id} }}`)).toBe(true);
-    }
+    expect(workflow).toContain("  test_functional_e2e:\n    needs: plan");
+    expect(workflow).toContain("fromJSON(needs.plan.outputs.run).test_functional_e2e");
+    const tests = sectionBetween(workflow, "\n  test:\n", "\n  cache_build_results:");
+    expect(tests).toContain("needs.plan.outputs.test_count != '0'");
+    expect(tests).toContain("matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}");
+    expect(tests).toContain("fail-fast: false");
+    expect(tests).toContain("name: ${{ matrix.name }}");
+    for (const kind of ["e2e", "daemon", "verify"]) expect(tests).toContain(`matrix.kind == '${kind}'`);
     const plan = sectionBetween(workflow, "  plan:", "  build_mac_arm64:");
     expect(plan).toContain("steps.identity.outputs.commit == github.sha");
     expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence-beta.json"');
@@ -2433,6 +2469,7 @@ process.stdin.on("end", () => {
     expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
     expect(cache).toContain("config: .github/config/convergence-beta.json");
     expect(cache).toContain("products: none");
+    expect(cache).toContain("needs: [plan, test_functional_e2e, test]");
     expect(cache).toContain("fromJSON(needs.plan.outputs.contributions).none");
     expect(cache).not.toContain("build_mac");
     const writer = await readFile(join(workspaceRoot, ".github/workflows/convergence.atom.yml"), "utf8");
