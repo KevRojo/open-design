@@ -538,6 +538,8 @@ jobs:
       smoke_result: ${{ steps.mac_arm64_smoke.outcome }}
     env:
       RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      # Compare native compression cost without changing formats or signing.
+      ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -894,6 +896,7 @@ jobs:
       dogfood_receipt: ${{ steps.dogfood.outputs.dogfood_receipt }}
     env:
       RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
