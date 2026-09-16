@@ -18,7 +18,7 @@ function createRepository() {
   }
   const configPath = path.join(root, "convergence.json");
   writeFileSync(configPath, JSON.stringify({
-    schema: { version: 8 },
+    schema: { version: 9 },
     suites: { "convergence-control": ["control.txt"], web: ["a.txt"] },
     workflows: {
       ci: {
@@ -108,7 +108,8 @@ targets = [row["target"] for row in w.matrices["build"]]
 runners = {x.runner_class: ["test-runner"] for x in w.workloads.values()}
 for mask in range(16):
     inputs = {"enable_" + target: bool(mask & (1 << i)) for i, target in enumerate(targets)}
-    run = {key: bool(mask & (1 << i)) for i, key in enumerate(ids)}
+    run = {key: False for key in w.workloads}
+    run.update({key: bool(mask & (1 << i)) for i, key in enumerate(ids)})
     projected = c.project_matrices(w, run, runners, inputs)
     builds = json.loads(projected["build_matrix"])["include"]
     tests = json.loads(projected["test_matrix"])["include"]
@@ -117,6 +118,10 @@ for mask in range(16):
     assert len(tests) == int(projected["test_count"])
     assert sorted(r["name"] for r in tests) == sorted(name for key in ids if run[key] for name in w.workloads[key].success)
     assert all(r["runner"] == ["test-runner"] for r in tests)
+    assert projected["common_count"] == "0"
+    for key in w.matrices["common"][0]["workloads"]:
+        partial = c.project_matrices(w, {**run, key: True}, runners, inputs)
+        assert partial["common_count"] == "1"
 for bad in ({}, {"enable_" + t: "true" for t in targets}):
     try: c.project_matrices(w, {key: True for key in ids}, runners, bad)
     except c.ConfigError: pass
@@ -144,8 +149,8 @@ sys.path.insert(0, sys.argv[1])
 import convergence as c
 root = Path(sys.argv[2])
 contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
-ids = {"test_daemon_unit_tests", "test_functional_e2e", "source_mac_arm64_daemon"}
-runners = {"release_tests": ["ubuntu-latest"], "ui_p0": ["ui-runner"], "source_mac_arm64": ["macos-14"]}
+ids = {"test_daemon_unit_tests", "test_functional_e2e", "source_js_daemon"}
+runners = {"release_tests": ["ubuntu-latest"], "ui_p0": ["ui-runner"], "source_javascript": ["ubuntu-latest"]}
 with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     index = Path(scratch) / "index"
     env = {**os.environ, "GIT_INDEX_FILE": str(index)}
@@ -235,6 +240,21 @@ jobs = [{"id": 1, "name": "Native", "run_id": 12, "run_attempt": 1, "head_sha": 
          (("Build a", "success"), ("Build b", "failure"), ("Retain", "success"))]}]
 candidate = c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs)
 assert [entry["receipt"]["workload"] for entry in candidate["results"]] == ["a"]
+# A newly admitted receipt can complete a mixed hot/cold consumer batch without
+# asking tools-pack to refresh or compute an identity.
+promoted = copy.deepcopy(candidate["results"][0]["receipt"])
+promoted["products"] = {"bundle": {"type": "url", "source": "https://cache.example/a.zip", "data": {"sha256": "a" * 64}}}
+requests = c.published_requests(workflow, pending, [promoted])
+assert requests["source"]["a"]["operation"] == "restore" and c.consumer_sources(requests)["source"] is None
+mixed = copy.deepcopy(pending)
+mixed["workloads"]["b"].update(run=False, resultHit=True, result={"products": {"bundle": {
+    "type": "url", "source": "https://cache.example/b.zip", "data": {"sha256": "b" * 64}}}})
+sources = c.consumer_sources(c.published_requests(workflow, mixed, [promoted]))["source"]
+assert sources == [{"units": [name], "url": "https://cache.example/" + name + ".zip", "sha256": name * 64} for name in ("a", "b")]
+for receipts in ([promoted, promoted], [{**promoted, "digest": "0" * 64}]):
+    try: c.published_requests(workflow, pending, receipts)
+    except c.ConfigError: pass
+    else: raise AssertionError("accepted duplicated or foreign identity receipt")
 assert c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs,
                             products_mode="manifest") == candidate
 assert c.finalize_candidate(root / "pending.json", provenance, root / "absent", contract, jobs,
@@ -307,14 +327,15 @@ sys.path.insert(0, sys.argv[1])
 import convergence as c
 root = Path(sys.argv[2])
 contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
-ids = {"source_mac_arm64_" + unit for unit in ("packages", "daemon", "web", "shell")}
+units = {"source_" + ("mac_arm64_" if unit == "web" else "js_") + unit: unit for unit in ("packages", "daemon", "web", "shell")}
+ids = set(units)
 with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
     index = Path(scratch) / "index"
     env = {**os.environ, "GIT_INDEX_FILE": str(index)}
     def git(*args, content=None):
         return subprocess.check_output(["git", *args], cwd=root, env=env, input=content, text=True).strip()
     def identities():
-        return {key: value["digest"] for key, value in c.calculate(contract, root, "release-beta", {"source_mac_arm64": ["macos-14"]}, index=index, identities=ids).items()}
+        return {key: value["digest"] for key, value in c.calculate(contract, root, "release-beta", {"source_mac_arm64": ["macos-14"], "source_javascript": ["ubuntu-latest"]}, index=index, identities=ids).items()}
     git("read-tree", "HEAD")
     baseline = identities()
     for path, expected in (("apps/web/src/plan-witness.ts", {"web"}), ("apps/daemon/src/plan-witness.ts", {"daemon"}),
@@ -323,11 +344,12 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
                            ("tools/release/src/plan-witness.ts", set()), ("tools/dev/src/plan-witness.ts", set()),
                            ("tools/serve/src/plan-witness.ts", set()),
                            ("tools/pack/src/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
-                           (".github/scripts/release/workspace-products.ts", {"packages", "daemon", "web", "shell"})):
+                           ("packages/download/src/archive.ts", {"packages", "daemon", "web", "shell"}),
+                           (".github/scripts/release/workspace-products.ts", set())):
         git("read-tree", "HEAD")
         oid = git("hash-object", "-w", "--stdin", content="// identity witness")
         git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
-        changed = {key.removeprefix("source_mac_arm64_") for key, digest in identities().items() if digest != baseline[key]}
+        changed = {units[key] for key, digest in identities().items() if digest != baseline[key]}
         assert changed == expected, (path, changed, expected)
     git("read-tree", "HEAD")
     path = "apps/packaged/package.json"
@@ -793,7 +815,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 8");
+    expect(stale.stderr).toContain("requires schema.version 9");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();

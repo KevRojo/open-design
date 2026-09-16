@@ -65,18 +65,19 @@ jobs:
       - name: Checkout workflow helper
         uses: actions/checkout@v6.0.2
         with:
-          path: workflow-source
+          fetch-depth: 1
 
       - name: Checkout build ref for recovery check
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ steps.pick.outputs.ref }}
           path: build-source
+          fetch-depth: 1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
+      - name: Prepare release tool
+        uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
 
       - name: Resolve foreign beta recovery
         id: recovery
@@ -84,7 +85,7 @@ jobs:
           BUILD_REF: ${{ steps.pick.outputs.ref }}
           OPEN_DESIGN_BETA_METADATA_URL: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}/beta/latest/metadata.json
           PACKAGED_PACKAGE_JSON_PATH: build-source/apps/packaged/package.json
-        run: node --experimental-strip-types workflow-source/.github/scripts/release/resolve-daily-beta-recovery.ts
+        run: pnpm exec tools-release recover-beta
 
   build:
     name: Build beta from main

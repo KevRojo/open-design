@@ -21,6 +21,19 @@ on:
         description: Result lane to collect (manifest or none)
         type: string
         default: none
+      batches:
+        description: JSON array of declared product batches to collect (empty selects all)
+        type: string
+        default: ''
+      consumer_requests:
+        description: Project frozen requests after successful publication
+        type: boolean
+        default: false
+    outputs:
+      requests:
+        value: ${{ jobs.isolated.outputs.requests }}
+      sources:
+        value: ${{ jobs.isolated.outputs.sources }}
   workflow_run:
     workflows: [ci]
     types: [completed]
@@ -36,6 +49,9 @@ concurrency:
 jobs:
   isolated:
     name: '[cache] Authorized manual workload results'
+    outputs:
+      requests: ${{ steps.publish.outputs.requests }}
+      sources: ${{ steps.publish.outputs.sources }}
     if: >-
       ${{ !cancelled() && github.event_name == 'workflow_dispatch'
         && github.repository == 'nexu-io/open-design'
@@ -75,10 +91,11 @@ jobs:
           CONVERGENCE_CONFIG: ${{ inputs.config }}
           HANDOFF_ID: ${{ inputs.handoff_id }}
           PRODUCT_MODE: ${{ inputs.products }}
+          PRODUCT_BATCHES: ${{ inputs.batches || '[]' }}
         run: >-
           python3 .github/scripts/convergence.py --config "$CONVERGENCE_CONFIG" handoff
           --pending "$RUNNER_TEMP/plan/pending-convergence.json" --products-root "$RUNNER_TEMP/references"
-          --products "$PRODUCT_MODE" --handoff-root "$RUNNER_TEMP/handoff-convergence" --id "$HANDOFF_ID"
+          --products "$PRODUCT_MODE" --batches "$PRODUCT_BATCHES" --handoff-root "$RUNNER_TEMP/handoff-convergence" --id "$HANDOFF_ID"
       - name: '[validate] Branch, run and isolated storage identity'
         id: trust
         env:
@@ -95,19 +112,24 @@ jobs:
           --candidate "${{ steps.trust.outputs.candidate }}"
           --run-id "${{ github.run_id }}" --output-dir "$RUNNER_TEMP/products"
       - name: '[cache] Publish isolated results'
+        id: publish
         env:
+          CONVERGENCE_CONFIG: ${{ inputs.config }}
+          CONSUMER_REQUESTS: ${{ inputs.consumer_requests }}
           CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
           CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
           CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
           CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
-        run: >-
-          python3 .github/scripts/convergence.py publish --isolated
-          --candidate "${{ steps.trust.outputs.candidate }}"
-          --products-root "$RUNNER_TEMP/products" --output-dir "$RUNNER_TEMP/publication"
+        run: |
+          args=()
+          if [ "$CONSUMER_REQUESTS" = true ]; then args+=(--pending "$RUNNER_TEMP/plan/pending-convergence.json"); fi
+          python3 .github/scripts/convergence.py --config "$CONVERGENCE_CONFIG" publish --isolated \
+            --candidate "${{ steps.trust.outputs.candidate }}" \
+            --products-root "$RUNNER_TEMP/products" --output-dir "$RUNNER_TEMP/publication" "${args[@]}"
 
   publish:
-    name: Publish reusable workload results
+    name: '[cache] CI event workload results'
     if: >-
       ${{
         github.repository == 'nexu-io/open-design'

@@ -2,6 +2,22 @@ import { cac } from "cac";
 
 const cli = cac("tools-release");
 
+cli.command("patch-cut <action>", "Resolve a patch cut or check its predecessor publication")
+  .action(async (action: string) => {
+    const { patchCutCommand } = await import("./metadata/patch-cut.ts");
+    patchCutCommand(action);
+  });
+
+cli.command("recover-beta", "Resolve recovery from a foreign branch's ahead beta publication")
+  .action(async () => { await import("./metadata/recover-beta.ts"); });
+
+cli.command("artifact <action>", "Plan published targets or resolve a checksum-verified installer reference")
+  .option("--output <path>", "Installer reference JSON destination")
+  .action(async (action: string, options: { output?: string }) => {
+    const { artifactCommand } = await import("./metadata/artifact.ts");
+    await artifactCommand(action, options);
+  });
+
 cli
   .command("prepare <channel>", "Prepare release metadata outputs for a lane")
   .action(async (channel: string) => {

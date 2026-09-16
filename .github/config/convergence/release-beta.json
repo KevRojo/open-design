@@ -1,6 +1,6 @@
 {
   "schema": {
-    "version": 8
+    "version": 9
   },
   "resources": {
     "repository-validation": {
@@ -25,7 +25,6 @@
         "packages/",
         "tools/pack/",
         "scripts/postinstall.mjs",
-        ".github/scripts/release/workspace-products.ts",
         ".github/actions/setup-workspace/"
       ],
       "exclude": [
@@ -191,32 +190,47 @@
     "release-beta": {
       "policy": "beta-isolated-v1",
       "workloads": {
-        "source_mac_arm64_packages": {
+        "source_js_packages": {
           "successBoundary": "steps",
           "inputs": [
             "suite://source-packages"
           ],
-          "runnerClass": "source_mac_arm64",
+          "runnerClass": "source_javascript",
           "products": "manifest",
           "reusable": true,
           "success": {
-            "[build] macOS arm64": [
+            "[build] Shared JavaScript": [
               "[build] Source packages",
               "[retain] Source products"
             ]
           }
         },
-        "source_mac_arm64_daemon": {
+        "source_js_daemon": {
           "successBoundary": "steps",
           "inputs": [
             "suite://source-daemon"
           ],
-          "runnerClass": "source_mac_arm64",
+          "runnerClass": "source_javascript",
           "products": "manifest",
           "reusable": true,
           "success": {
-            "[build] macOS arm64": [
+            "[build] Shared JavaScript": [
               "[build] Source daemon",
+              "[retain] Source products"
+            ]
+          }
+        },
+        "source_js_shell": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-shell"
+          ],
+          "runnerClass": "source_javascript",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] Shared JavaScript": [
+              "[build] Source shell",
               "[retain] Source products"
             ]
           }
@@ -236,51 +250,6 @@
             ]
           }
         },
-        "source_mac_arm64_shell": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-shell"
-          ],
-          "runnerClass": "source_mac_arm64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] macOS arm64": [
-              "[build] Source shell",
-              "[retain] Source products"
-            ]
-          }
-        },
-        "source_mac_x64_packages": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-packages"
-          ],
-          "runnerClass": "source_mac_x64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] macOS x64": [
-              "[build] Source packages",
-              "[retain] Source products"
-            ]
-          }
-        },
-        "source_mac_x64_daemon": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-daemon"
-          ],
-          "runnerClass": "source_mac_x64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] macOS x64": [
-              "[build] Source daemon",
-              "[retain] Source products"
-            ]
-          }
-        },
         "source_mac_x64_web": {
           "successBoundary": "steps",
           "inputs": [
@@ -296,51 +265,6 @@
             ]
           }
         },
-        "source_mac_x64_shell": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-shell"
-          ],
-          "runnerClass": "source_mac_x64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] macOS x64": [
-              "[build] Source shell",
-              "[retain] Source products"
-            ]
-          }
-        },
-        "source_win_x64_packages": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-packages"
-          ],
-          "runnerClass": "source_win_x64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] Windows x64": [
-              "[build] Source packages",
-              "[retain] Source products"
-            ]
-          }
-        },
-        "source_win_x64_daemon": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-daemon"
-          ],
-          "runnerClass": "source_win_x64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] Windows x64": [
-              "[build] Source daemon",
-              "[retain] Source products"
-            ]
-          }
-        },
         "source_win_x64_web": {
           "successBoundary": "steps",
           "inputs": [
@@ -352,21 +276,6 @@
           "success": {
             "[build] Windows x64": [
               "[build] Source web",
-              "[retain] Source products"
-            ]
-          }
-        },
-        "source_win_x64_shell": {
-          "successBoundary": "steps",
-          "inputs": [
-            "suite://source-shell"
-          ],
-          "runnerClass": "source_win_x64",
-          "products": "manifest",
-          "reusable": true,
-          "success": {
-            "[build] Windows x64": [
-              "[build] Source shell",
               "[retain] Source products"
             ]
           }
@@ -465,39 +374,10 @@
         "source_mac_arm64": {
           "artifact": "beta-source-mac_arm64",
           "entries": {
-            "packages": {
-              "workload": "source_mac_arm64_packages",
-              "request": {
-                "units": [
-                  "packages"
-                ]
-              },
-              "product": "bundle"
-            },
-            "daemon": {
-              "workload": "source_mac_arm64_daemon",
-              "request": {
-                "units": [
-                  "daemon"
-                ]
-              },
-              "product": "bundle"
-            },
             "web": {
               "workload": "source_mac_arm64_web",
               "request": {
-                "units": [
-                  "web"
-                ]
-              },
-              "product": "bundle"
-            },
-            "shell": {
-              "workload": "source_mac_arm64_shell",
-              "request": {
-                "units": [
-                  "shell"
-                ]
+                "unit": "web"
               },
               "product": "bundle"
             }
@@ -506,39 +386,10 @@
         "source_mac_x64": {
           "artifact": "beta-source-mac_x64",
           "entries": {
-            "packages": {
-              "workload": "source_mac_x64_packages",
-              "request": {
-                "units": [
-                  "packages"
-                ]
-              },
-              "product": "bundle"
-            },
-            "daemon": {
-              "workload": "source_mac_x64_daemon",
-              "request": {
-                "units": [
-                  "daemon"
-                ]
-              },
-              "product": "bundle"
-            },
             "web": {
               "workload": "source_mac_x64_web",
               "request": {
-                "units": [
-                  "web"
-                ]
-              },
-              "product": "bundle"
-            },
-            "shell": {
-              "workload": "source_mac_x64_shell",
-              "request": {
-                "units": [
-                  "shell"
-                ]
+                "unit": "web"
               },
               "product": "bundle"
             }
@@ -547,39 +398,36 @@
         "source_win_x64": {
           "artifact": "beta-source-win_x64",
           "entries": {
-            "packages": {
-              "workload": "source_win_x64_packages",
+            "web": {
+              "workload": "source_win_x64_web",
               "request": {
-                "units": [
-                  "packages"
-                ]
+                "unit": "web"
+              },
+              "product": "bundle"
+            }
+          }
+        },
+        "source_javascript": {
+          "artifact": "beta-source-javascript",
+          "entries": {
+            "packages": {
+              "workload": "source_js_packages",
+              "request": {
+                "unit": "packages"
               },
               "product": "bundle"
             },
             "daemon": {
-              "workload": "source_win_x64_daemon",
+              "workload": "source_js_daemon",
               "request": {
-                "units": [
-                  "daemon"
-                ]
-              },
-              "product": "bundle"
-            },
-            "web": {
-              "workload": "source_win_x64_web",
-              "request": {
-                "units": [
-                  "web"
-                ]
+                "unit": "daemon"
               },
               "product": "bundle"
             },
             "shell": {
-              "workload": "source_win_x64_shell",
+              "workload": "source_js_shell",
               "request": {
-                "units": [
-                  "shell"
-                ]
+                "unit": "shell"
               },
               "product": "bundle"
             }
@@ -625,7 +473,8 @@
             "timeout": 20,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm --filter @open-design/e2e test",
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
           },
           {
             "workload": "test_verify",
@@ -634,7 +483,8 @@
             "timeout": 360,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build",
             "command": "pnpm -r --workspace-concurrency=4 --if-present run typecheck\npnpm guard",
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
           },
           {
             "workload": "test_daemon_unit_tests",
@@ -642,10 +492,11 @@
             "name": "[test] beta Daemon tests (1/4)",
             "timeout": 15,
             "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon test --shard=1/4",
-            "postinstall": "[]",
+            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=1/4",
+            "postinstall": "[\"tools/pack\"]",
             "shard": 1,
-            "debug": "1"
+            "debug": "1",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
           },
           {
             "workload": "test_daemon_unit_tests",
@@ -653,10 +504,11 @@
             "name": "[test] beta Daemon tests (2/4)",
             "timeout": 15,
             "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon test --shard=2/4",
-            "postinstall": "[]",
+            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=2/4",
+            "postinstall": "[\"tools/pack\"]",
             "shard": 2,
-            "debug": "1"
+            "debug": "1",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
           },
           {
             "workload": "test_daemon_unit_tests",
@@ -664,10 +516,11 @@
             "name": "[test] beta Daemon tests (3/4)",
             "timeout": 15,
             "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon test --shard=3/4",
-            "postinstall": "[]",
+            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=3/4",
+            "postinstall": "[\"tools/pack\"]",
             "shard": 3,
-            "debug": "1"
+            "debug": "1",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
           },
           {
             "workload": "test_daemon_unit_tests",
@@ -675,10 +528,11 @@
             "name": "[test] beta Daemon tests (4/4)",
             "timeout": 15,
             "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon test --shard=4/4",
-            "postinstall": "[]",
+            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=4/4",
+            "postinstall": "[\"tools/pack\"]",
             "shard": 4,
-            "debug": "1"
+            "debug": "1",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
           },
           {
             "workload": "test_functional_e2e",
@@ -687,9 +541,10 @@
             "timeout": 45,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group entry-settings",
-            "postinstall": "[\"tools/dev\"]",
+            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "entry-settings",
-            "extra": ""
+            "extra": "",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
           },
           {
             "workload": "test_functional_e2e",
@@ -698,9 +553,10 @@
             "timeout": 45,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-workspace",
-            "postinstall": "[\"tools/dev\"]",
+            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-workspace",
-            "extra": ""
+            "extra": "",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
           },
           {
             "workload": "test_functional_e2e",
@@ -709,9 +565,10 @@
             "timeout": 45,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-workspace-editor",
-            "postinstall": "[\"tools/dev\"]",
+            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-workspace-editor",
-            "extra": ""
+            "extra": "",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
           },
           {
             "workload": "test_functional_e2e",
@@ -720,9 +577,10 @@
             "timeout": 45,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-collab",
-            "postinstall": "[\"tools/dev\"]",
+            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-collab",
-            "extra": ""
+            "extra": "",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
           },
           {
             "workload": "test_functional_e2e",
@@ -731,9 +589,10 @@
             "timeout": 45,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-runtime",
-            "postinstall": "[\"tools/dev\"]",
+            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-runtime",
-            "extra": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group critical-extras"
+            "extra": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group critical-extras",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
           },
           {
             "workload": "test_functional_e2e",
@@ -742,9 +601,21 @@
             "timeout": 45,
             "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
             "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group workspace-restoration",
-            "postinstall": "[\"tools/dev\"]",
+            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "workspace-restoration",
-            "extra": ""
+            "extra": "",
+            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+          }
+        ],
+        "common": [
+          {
+            "name": "[build] Shared JavaScript",
+            "workloads": [
+              "source_js_packages",
+              "source_js_daemon",
+              "source_js_shell"
+            ],
+            "batch": "source_javascript"
           }
         ]
       }

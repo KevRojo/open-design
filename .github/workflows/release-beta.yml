@@ -368,6 +368,10 @@ jobs:
       build_count: ${{ steps.plan.outputs.build_count }}
       test_matrix: ${{ steps.plan.outputs.test_matrix }}
       test_count: ${{ steps.plan.outputs.test_count }}
+      common_matrix: ${{ steps.plan.outputs.common_matrix }}
+      common_count: ${{ steps.plan.outputs.common_count }}
+      requests: ${{ steps.plan.outputs.requests }}
+      sources: ${{ steps.plan.outputs.sources }}
       pending_artifact: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
       contribution: ${{ steps.mode.outputs.contribution }}
       contributions: ${{ steps.plan.outputs.contributions }}
@@ -517,7 +521,7 @@ jobs:
           PLAN_MODE: ${{ steps.mode.outputs.mode }}
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
         run: |
-          runners="$(jq -c '. + {release_tests:["ubuntu-latest"],source_mac_arm64:["macos-14"],source_mac_x64:["macos-15-intel"],source_win_x64:["windows-latest"]}' <<< "$RUNNER_PLAN")"
+          runners="$(jq -c '. + {source_javascript:["ubuntu-latest"],release_tests:["ubuntu-latest"],source_mac_arm64:["macos-14"],source_mac_x64:["macos-15-intel"],source_win_x64:["windows-latest"]}' <<< "$RUNNER_PLAN")"
           python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json" github-output \
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
             --execution-inputs-json "$EXECUTION_INPUTS" --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
@@ -531,6 +535,74 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  common:
+    name: ${{ matrix.name }}
+    needs: plan
+    if: ${{ needs.plan.outputs.contribution == 'true' && needs.plan.outputs.common_count != '0' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.common_matrix) }}
+    env:
+      OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: '[prepare] JavaScript build tools'
+        uses: ./.github/actions/setup-workspace
+      - name: '[build] Source packages'
+        env:
+          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.artifact.url || '' }}
+          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.artifact.sha256 || '' }}
+          SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.retain && format('{0}/source-products/packages/product', runner.temp) || '' }}
+        run: >-
+          pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.operation == 'restore' && 'import' || 'build' }} packages
+          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --scratch "$RUNNER_TEMP/source-import" --json
+      - name: '[build] Source daemon'
+        env:
+          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.artifact.url || '' }}
+          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.artifact.sha256 || '' }}
+          SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.retain && format('{0}/source-products/daemon/product', runner.temp) || '' }}
+        run: >-
+          pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.operation == 'restore' && 'import' || 'build' }} daemon
+          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --scratch "$RUNNER_TEMP/source-import" --json
+      - name: '[build] Source shell'
+        env:
+          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.artifact.url || '' }}
+          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.artifact.sha256 || '' }}
+          SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.retain && format('{0}/source-products/shell/product', runner.temp) || '' }}
+        run: >-
+          pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.operation == 'restore' && 'import' || 'build' }} shell
+          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --scratch "$RUNNER_TEMP/source-import" --json
+      - name: '[retain] Source products'
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-javascript
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
+
+  cache_common_results:
+    name: '[cache] Shared JavaScript results'
+    needs: [plan, common]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && needs.plan.outputs.common_count != '0' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence/release-beta.json
+      handoff_id: beta-common-results
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: manifest
+      batches: '["source_javascript"]'
+      consumer_requests: true
+    secrets: inherit
 
   build:
     name: ${{ matrix.name }}
@@ -539,8 +611,8 @@ jobs:
       win_x64_url: ${{ matrix.target == 'win_x64' && steps.win_x64_platform_outputs.outputs.installer_url || '' }}
       mac_arm64_smoke_result: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_smoke.outcome || '' }}
       win_x64_smoke_result: ${{ matrix.target == 'win_x64' && steps.win_x64_smoke.outcome || '' }}
-    needs: plan
-    if: ${{ needs.plan.outputs.build_count != '0' }}
+    needs: [plan, common, cache_common_results]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && needs.plan.outputs.build_count != '0' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -588,48 +660,28 @@ jobs:
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
 
-      - name: '[restore] Source execution requests'
-        if: ${{ matrix.target != 'linux_x64' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.plan.outputs.pending_artifact }}
-          path: ${{ runner.temp }}/source-plan
 
-      - name: '[build] Source packages'
+      - name: '[restore] Shared JavaScript'
         if: ${{ matrix.target != 'linux_x64' }}
-        id: source_packages
         shell: bash
+        env:
+          WORKSPACE_SOURCES: ${{ toJSON(fromJSON(needs.cache_common_results.outputs.sources || needs.plan.outputs.sources).source_javascript) }}
         run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/packages.json"
-          ${{ matrix.target }} "$RUNNER_TEMP/source-products/packages"
-
-      - name: '[build] Source daemon'
-        if: ${{ matrix.target != 'linux_x64' }}
-        id: source_daemon
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/daemon.json"
-          ${{ matrix.target }} "$RUNNER_TEMP/source-products/daemon"
+          pnpm exec tools-pack workspace ${{ needs.plan.outputs.contribution == 'true' && 'import' || 'build' }} javascript
+          --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
 
       - name: '[build] Source web'
         if: ${{ matrix.target != 'linux_x64' }}
         id: source_web
         shell: bash
+        env:
+          SOURCE_URL: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.artifact.url || '' }}
+          SOURCE_SHA256: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.artifact.sha256 || '' }}
+          SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.retain && format('{0}/source-products/web/product', runner.temp) || '' }}
         run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/web.json"
-          ${{ matrix.target }} "$RUNNER_TEMP/source-products/web"
-
-      - name: '[build] Source shell'
-        if: ${{ matrix.target != 'linux_x64' }}
-        id: source_shell
-        shell: bash
-        run: >-
-          node .github/scripts/release/workspace-products.ts
-          "$RUNNER_TEMP/source-plan/requests/source_${{ matrix.target }}/shell.json"
-          ${{ matrix.target }} "$RUNNER_TEMP/source-products/shell"
+          pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.operation == 'restore' && 'import' || 'build' }} web
+          --url "$SOURCE_URL" --sha256 "$SOURCE_SHA256" --output "$SOURCE_OUTPUT"
+          --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
 
       - name: '[retain] Source products'
         if: ${{ matrix.target != 'linux_x64' && (!cancelled()) }}
@@ -639,15 +691,6 @@ jobs:
           path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
           if-no-files-found: ignore
           compression-level: 0
-          retention-days: 7
-
-      - name: '[report] Source execution'
-        if: ${{ matrix.target != 'linux_x64' && (!cancelled()) }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-source-report-${{ matrix.target }}
-          path: ${{ runner.temp }}/source-products/*/report.json
-          if-no-files-found: ignore
           retention-days: 7
 
       - name: Prepare mac_arm64 signing certificate
@@ -669,7 +712,6 @@ jobs:
       - name: Build beta mac_arm64
         if: ${{ matrix.target == 'mac_arm64' }}
         id: mac_arm64_tools_pack_build
-        continue-on-error: true
         env:
           ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -689,46 +731,6 @@ jobs:
           : > "$RUNNER_TEMP/release-build/mac_arm64/build.log"
           build_args=(
             exec tools-pack mac package
-            --dir "$RUNNER_TEMP/tools-pack"
-            --cache-dir "$RUNNER_TEMP/tools-pack-cache"
-            --namespace release-beta
-            --portable
-            --app-version "${{ needs.plan.outputs.beta_version }}"
-            --mac-compression normal
-            --to "${{ inputs.mac_arm64_target }}"
-            --json
-            --require-vela-cli
-          )
-          case "${{ inputs.mac_arm64_sign_mode }}" in
-            no) ;;
-            sign-only) build_args+=(--signed) ;;
-            notarize) build_args+=(--signed --notarize) ;;
-            *) echo "unsupported mac_arm64_sign_mode: ${{ inputs.mac_arm64_sign_mode }}" >&2; exit 1 ;;
-          esac
-          if build_output="$(pnpm "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_arm64/build.log" >&2))"; then
-            printf '%s\n' "$build_output" | tee "$RUNNER_TEMP/release-build/mac_arm64/build.json"
-          else
-            build_status=$?
-            printf '%s\n' "$build_output"
-            exit "$build_status"
-          fi
-
-      - name: Retry beta mac_arm64 without restored cache
-        if: ${{ matrix.target == 'mac_arm64' && (steps.mac_arm64_tools_pack_build.outcome == 'failure') }}
-        env:
-          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/tools-pack-cache"
-          mkdir -p "$RUNNER_TEMP/release-build/mac_arm64"
-          pnpm exec tools-pack mac cleanup --dir "$RUNNER_TEMP/tools-pack" --namespace release-beta --json
-          : > "$RUNNER_TEMP/release-build/mac_arm64/build.log"
-          build_args=(
-            exec tools-pack mac build
             --dir "$RUNNER_TEMP/tools-pack"
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta
@@ -920,7 +922,6 @@ jobs:
       - name: Build beta mac_x64
         if: ${{ matrix.target == 'mac_x64' }}
         id: mac_x64_tools_pack_build
-        continue-on-error: true
         env:
           ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -933,42 +934,6 @@ jobs:
           : > "$RUNNER_TEMP/release-build/mac_x64/build.log"
           build_args=(
             exec tools-pack mac package
-            --dir "$RUNNER_TEMP/tools-pack"
-            --cache-dir "$RUNNER_TEMP/tools-pack-cache"
-            --namespace release-beta-x64
-            --portable
-            --app-version "${{ needs.plan.outputs.beta_version }}"
-            --mac-compression normal
-            --to "${{ inputs.mac_x64_target }}"
-            --json
-            --require-vela-cli
-          )
-          case "${{ inputs.mac_x64_sign_mode }}" in
-            no) ;;
-            sign-only) build_args+=(--signed) ;;
-            notarize) build_args+=(--signed --notarize) ;;
-            *) echo "unsupported mac_x64_sign_mode: ${{ inputs.mac_x64_sign_mode }}" >&2; exit 1 ;;
-          esac
-          if build_output="$(pnpm "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2))"; then
-            printf '%s\n' "$build_output" | tee "$RUNNER_TEMP/release-build/mac_x64/build.json"
-          else
-            build_status=$?
-            printf '%s\n' "$build_output"
-            exit "$build_status"
-          fi
-
-      - name: Retry beta mac_x64 without restored cache
-        if: ${{ matrix.target == 'mac_x64' && (steps.mac_x64_tools_pack_build.outcome == 'failure') }}
-        env:
-          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/tools-pack-cache"
-          mkdir -p "$RUNNER_TEMP/release-build/mac_x64"
-          pnpm exec tools-pack mac cleanup --dir "$RUNNER_TEMP/tools-pack" --namespace release-beta-x64 --json
-          : > "$RUNNER_TEMP/release-build/mac_x64/build.log"
-          build_args=(
-            exec tools-pack mac build
             --dir "$RUNNER_TEMP/tools-pack"
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta-x64
@@ -1088,7 +1053,6 @@ jobs:
       - name: Build beta win_x64
         if: ${{ matrix.target == 'win_x64' }}
         id: win_tools_pack_build
-        continue-on-error: true
         shell: pwsh
         env:
           OD_BETA_WINDOWS_SIGNING_CERTIFICATE_FOUND: ${{ steps.sign_probe.outputs.certificate_found }}
@@ -1122,25 +1086,6 @@ jobs:
           $build = $buildOutput | ConvertFrom-Json
           pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.plan.outputs.beta_version }}" --json
 
-      - name: Retry beta win_x64 without restored cache
-        id: win_tools_pack_build_retry
-        if: ${{ matrix.target == 'win_x64' && (steps.win_tools_pack_build.outcome == 'failure') }}
-        shell: pwsh
-        env:
-          OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "${{ runner.temp }}\tools-pack-cache"
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
-          pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
-          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.plan.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
-          if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
-          $buildOutput = pnpm.cmd @buildArgs
-          if ($LASTEXITCODE -ne 0) { throw "tools-pack win fallback build failed with exit code $LASTEXITCODE" }
-          $buildOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\build.json" -Encoding utf8
-          $build = $buildOutput | ConvertFrom-Json
-          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.plan.outputs.beta_version }}" --json
-
       - name: Upload win_x64 installer for manual distribution
         # Only when NOT publishing to the release feed, mirroring the mac DMG
         # step. Before this existed a publish=false dispatch left the Windows job
@@ -1157,18 +1102,6 @@ jobs:
             ${{ runner.temp }}\tools-pack\out\win\namespaces\release-beta-win\builder\*-portable.zip
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Delete failed Windows tools-pack cache
-        if: ${{ matrix.target == 'win_x64' && (steps.win_tools_pack_build.outcome == 'failure' && steps.win_tools_pack_cache_restore.outputs.cache-matched-key != '') }}
-        shell: pwsh
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $matchedKey = "${{ steps.win_tools_pack_cache_restore.outputs.cache-matched-key }}"
-          $caches = @(gh cache list --key $matchedKey --limit 100 --json id,key,ref | ConvertFrom-Json | Where-Object { $_.key -eq $matchedKey })
-          foreach ($cache in $caches) { gh cache delete $cache.id }
-          "deletedFailedCacheKey=$matchedKey count=$($caches.Count)"
 
       - name: Build beta win_x64 update fixture
         if: ${{ matrix.target == 'win_x64' && (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
@@ -1237,7 +1170,7 @@ jobs:
         run: .\.github\scripts\release\cache\win.ps1
 
       - name: Save Windows tools-pack cache
-        if: ${{ matrix.target == 'win_x64' && (success() && (steps.win_tools_pack_cache_restore.outputs.cache-hit != 'true' || steps.win_tools_pack_build.outcome == 'failure')) }}
+        if: ${{ matrix.target == 'win_x64' && success() && steps.win_tools_pack_cache_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         continue-on-error: true
         with:
@@ -1589,8 +1522,8 @@ jobs:
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
 
   test:
-    needs: plan
-    if: ${{ needs.plan.outputs.test_count != '0' }}
+    needs: [plan, common, cache_common_results]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && needs.plan.outputs.test_count != '0' }}
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
@@ -1627,7 +1560,9 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Prepare test dependencies
-        run: ${{ matrix.prepare }}
+        env:
+          WORKSPACE_SOURCES: ${{ toJSON(fromJSON(needs.cache_common_results.outputs.sources || needs.plan.outputs.sources).source_javascript) }}
+        run: ${{ needs.plan.outputs.contribution == 'true' && matrix.prepareShared || matrix.prepare }}
       - name: Clean Playwright state
         if: ${{ matrix.kind == 'ui' }}
         run: pnpm -C e2e exec tsx scripts/playwright.ts clean
@@ -1669,6 +1604,7 @@ jobs:
     with:
       config: .github/config/convergence/release-beta.json
       handoff_id: beta-build-results
+      batches: '["source_mac_arm64","source_mac_x64","source_win_x64"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: manifest
     secrets: inherit
@@ -1724,7 +1660,10 @@ jobs:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
           VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
-        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
+        shell: bash
+        run: |
+          pnpm exec tools-release artifact resolve --output "$RUNNER_TEMP/installer.json"
+          pnpm exec tools-pack stage-artifact "$RUNNER_TEMP/installer.json"
       - name: Install and inspect downloaded artifact
         id: smoke
         working-directory: e2e
@@ -1793,7 +1732,10 @@ jobs:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
           VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
-        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
+        shell: bash
+        run: |
+          pnpm exec tools-release artifact resolve --output "$RUNNER_TEMP/installer.json"
+          pnpm exec tools-pack stage-artifact "$RUNNER_TEMP/installer.json"
       - name: Install and inspect downloaded artifact
         id: smoke
         working-directory: e2e
@@ -1862,7 +1804,10 @@ jobs:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/win_x64/build.json
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
           VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
-        run: node --experimental-strip-types .github/scripts/release/smoke-artifacts.ts stage
+        shell: bash
+        run: |
+          pnpm exec tools-release artifact resolve --output "$RUNNER_TEMP/installer.json"
+          pnpm exec tools-pack stage-artifact "$RUNNER_TEMP/installer.json"
       - name: Install and inspect downloaded artifact
         id: smoke
         working-directory: e2e

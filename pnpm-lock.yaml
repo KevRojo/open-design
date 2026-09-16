@@ -870,6 +870,9 @@ importers:
       '@electron/rebuild':
         specifier: 4.0.4
         version: 4.0.4
+      '@open-design/download':
+        specifier: workspace:*
+        version: link:../../packages/download
       '@open-design/launcher-proto':
         specifier: workspace:*
         version: link:../../packages/launcher-proto

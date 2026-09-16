@@ -40,7 +40,7 @@ from lib.workload_products import materialize_products
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -149,17 +149,22 @@ class WorkflowContract:
                 if name in names:
                     raise ConfigError("duplicate matrix row name")
                 names.add(name)
-                if ("workload" in row) == ("enabledInput" in row):
-                    raise ConfigError("matrix row requires exactly one workload or enabledInput")
-                if "workload" in row:
-                    identity = row["workload"]
-                    if not isinstance(identity, str) or identity not in self.workloads:
-                        raise ConfigError("matrix row references unknown workload")
-                    if name not in self.workloads[identity].success:
-                        raise ConfigError("matrix row lacks a matching success proof")
+                if sum(key in row for key in ("workload", "workloads", "enabledInput")) != 1:
+                    raise ConfigError("matrix row requires one workload, workloads or enabledInput selector")
+                if "enabledInput" not in row:
+                    identities = row.get("workloads", [row.get("workload")])
+                    if not isinstance(identities, list) or not identities or any(
+                        not isinstance(identity, str) or identity not in self.workloads for identity in identities
+                    ) or len(set(identities)) != len(identities):
+                        raise ConfigError("matrix row references invalid workloads")
+                    if len({self.workloads[identity].runner_class for identity in identities}) != 1:
+                        raise ConfigError("grouped workloads must share an execution class")
                     if "runner" in row:
                         raise ConfigError("workload matrix runner comes from its execution class")
-                    self.executions.setdefault(identity, []).append(row)
+                    for identity in identities:
+                        if name not in self.workloads[identity].success:
+                            raise ConfigError("matrix row lacks a matching success proof")
+                        self.executions.setdefault(identity, []).append(row)
                 else:
                     require_identity(row["enabledInput"], "matrix enabled input")
                     require_string(row.get("runner"), "matrix runner")
@@ -843,9 +848,11 @@ def execution_decisions(
     return run, would_run
 
 
-def project_batches(workflow: WorkflowContract, pending: dict[str, Any], output: Path) -> None:
+def project_batches(workflow: WorkflowContract, pending: dict[str, Any], output: Path | None = None) -> dict[str, Any]:
     """Independent identities, grouped transport; executors never receive Plan state."""
+    requests: dict[str, Any] = {}
     for batch_name, batch in workflow.batches.items():
+        requests[batch_name] = {}
         for name, entry in batch["entries"].items():
             decision = pending["workloads"][entry["workload"]]
             if not decision["scopeEnabled"]:
@@ -864,7 +871,39 @@ def project_batches(workflow: WorkflowContract, pending: dict[str, Any], output:
                 if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
                     raise ConfigError("execution input requires a verified product digest")
                 request.update(operation="restore", artifact={"url": product["source"], "sha256": digest})
-            write_json_atomic(output / batch_name / f"{name}.json", request)
+            requests[batch_name][name] = request
+            if output is not None:
+                write_json_atomic(output / batch_name / f"{name}.json", request)
+    return requests
+
+
+def published_requests(workflow: WorkflowContract, pending: dict[str, Any], receipts: list[Any]) -> dict[str, Any]:
+    """Resolve consumer requests from admitted receipts, never recalculate identity.
+
+    Called only after the trusted writer published the supplied receipts. An
+    unfinished workload remains a build request; consumers must refuse it.
+    """
+    decisions = dict(pending["workloads"])
+    seen: set[str] = set()
+    for receipt in receipts:
+        identity = require_identity(receipt.get("workload"), "published workload")
+        if identity not in decisions or identity in seen:
+            raise ConfigError("unexpected or duplicate published workload")
+        seen.add(identity)
+        expected = decisions[identity]
+        result = validate_result(receipt, repository_id=pending["repositoryId"],
+                                 workflow=workflow, identity=identity, expected=expected)
+        decisions[identity] = {**expected, "resultHit": True, "run": False, "result": result}
+    return project_batches(workflow, {**pending, "workloads": decisions})
+
+
+def consumer_sources(requests: dict[str, Any]) -> dict[str, Any]:
+    """Business descriptors plus verified bytes; no Plan state reaches consumers."""
+    return {name: [
+        {**{key: value for key, value in request.items() if key not in {"operation", "retain", "artifact"}},
+         **request["artifact"]} for request in entries.values()
+    ] if entries and all(request["operation"] == "restore" for request in entries.values()) else None
+            for name, entries in requests.items()}
 
 
 def project_matrices(workflow: WorkflowContract, run: dict[str, bool],
@@ -875,13 +914,13 @@ def project_matrices(workflow: WorkflowContract, run: dict[str, bool],
         selected = []
         for row in rows:
             member = dict(row)
-            if "workload" in row:
-                identity = row["workload"]
-                if identity not in run:
+            if "enabledInput" not in row:
+                identities = row.get("workloads", [row.get("workload")])
+                if any(identity not in run for identity in identities):
                     raise ConfigError("matrix workload lacks a Plan decision")
-                if not run[identity]:
+                if not any(run[identity] for identity in identities):
                     continue
-                member["runner"] = runners[workflow.workloads[identity].runner_class]
+                member["runner"] = runners[workflow.workloads[identities[0]].runner_class]
             else:
                 enabled = inputs.get(row["enabledInput"])
                 if type(enabled) is not bool:
@@ -1006,7 +1045,9 @@ def plan_command(args: argparse.Namespace, contract: ConvergenceContract, root: 
         },
     }
     write_json_atomic(args.pending, pending)
-    project_batches(workflow, pending, args.pending.parent / "requests")
+    requests = project_batches(workflow, pending, args.pending.parent / "requests")
+    append_outputs({"requests": compact_json(requests)})
+    append_outputs({"sources": compact_json(consumer_sources(requests))})
     append_outputs(project_matrices(workflow, run, json.loads(args.runner_plan_json),
                                     object_value(json.loads(args.execution_inputs_json), "execution inputs")))
     append_outputs(
@@ -1190,6 +1231,16 @@ def handoff_command(args: argparse.Namespace, contract: ConvergenceContract) -> 
         contribute_batches_command(argparse.Namespace(pending=args.pending, output_dir=args.products_root), contract)
     candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract, jobs,
                                    products_mode=products_mode)
+    batch_names = getattr(args, "batches", [])
+    if not isinstance(batch_names, list) or any(not isinstance(name, str) for name in batch_names) or len(set(batch_names)) != len(batch_names):
+        raise ConfigError("contribution batches must be a unique string array")
+    if batch_names:
+        pending = load_json(args.pending)
+        workflow = contract.workflow(pending["workflow"])
+        if any(name not in workflow.batches for name in batch_names):
+            raise ConfigError("unknown contribution batch")
+        selected = {entry["workload"] for name in batch_names for entry in workflow.batches[name]["entries"].values()}
+        candidate["results"] = [item for item in candidate["results"] if item["receipt"]["workload"] in selected]
     if candidate.get("repositoryId") != context["repositoryId"] or candidate.get("repository") != context["repository"]:
         raise ConfigError("pending convergence repository differs from the producing run")
     handoff_contract.write_convergence(args.handoff_root, args.id, candidate)
@@ -1754,6 +1805,14 @@ def publish_command(args: argparse.Namespace) -> int:
     promoted_candidate = args.output_dir / "promoted-candidate.json"
     write_json_atomic(promoted_candidate, candidate)
     manifest = prepare_publication(promoted_candidate, args.output_dir)
+    requests = None
+    if getattr(args, "pending", None):
+        pending = load_json(args.pending)
+        if args.config is None:
+            raise ConfigError("consumer projection requires explicit config")
+        contract = ConvergenceContract(args.config)
+        requests = published_requests(contract.workflow(pending["workflow"]), pending,
+                                      [item["receipt"] for item in candidate["results"]])
     published = 0
     unchanged = 0
     uploaded_products = 0
@@ -1796,6 +1855,9 @@ def publish_command(args: argparse.Namespace) -> int:
         )
     )
     append_outputs({"receipts": compact_json([item["receipt"] for item in candidate["results"]])})
+    if requests is not None:
+        append_outputs({"requests": compact_json(requests)})
+        append_outputs({"sources": compact_json(consumer_sources(requests))})
     return 0
 
 
@@ -1825,6 +1887,7 @@ def parse_args() -> argparse.Namespace:
     handoff.add_argument("--handoff-root", type=Path, required=True)
     handoff.add_argument("--id", default="ci-results")
     handoff.add_argument("--products", choices=["none", "manifest"], help="collect one independent result lane")
+    handoff.add_argument("--batches", type=json.loads, default=[], help="JSON array of declared product batches to collect")
     restore = sub.add_parser("restore")
     restore.add_argument("--pending", type=Path, required=True)
     restore.add_argument("--workload", required=True)
@@ -1857,6 +1920,7 @@ def parse_args() -> argparse.Namespace:
     publish.add_argument("--products-root", type=Path, required=True)
     publish.add_argument("--timeout", type=float, default=15.0)
     publish.add_argument("--isolated", action="store_true")
+    publish.add_argument("--pending", type=Path, help="project consumer requests after trusted publication")
     return parser.parse_args()
 
 

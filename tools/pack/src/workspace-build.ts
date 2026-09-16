@@ -379,6 +379,12 @@ export async function workspaceBuildUnitResult(config: WorkspaceBuildConfig, uni
       throw new Error(`workspace ${unit} completed but output is missing: ${output}`);
     }
   }
+  // These units emit JavaScript and declarations only. Native runtime
+  // dependencies are installed/materialized by the consumer, never archived
+  // with dist. Next standalone is intentionally NOT part of this contract.
+  if (unit !== "web") {
+    return { schemaVersion: 2, unit, kind: "javascript" as const, outputPaths };
+  }
   return {
     schemaVersion: 1,
     unit,

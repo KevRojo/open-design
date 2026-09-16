@@ -63,12 +63,23 @@ The build-graph cache is almost entirely Windows-specific.
 The source executor is partitioned into `packages`, `daemon`, `web`, and `shell`
 units under `src/workspace/units.ts`. `tools-pack workspace build <unit>` executes
 only that unit; dependencies must already be built or restored by its caller.
-`workspace result <unit>` verifies required outputs and emits platform/arch,
-Node version, output mode, and output paths, without computing a workflow identity
-or making a skip decision. The ordinary local aggregate runs the same units in
+`workspace result <unit>` verifies required outputs, including declarations.
+Packages, daemon and shell emit a portable JavaScript output contract; Web
+emits a platform/arch and output-mode contract because standalone includes
+platform runtime dependencies. Neither computes a workflow identity or makes
+a skip decision. The ordinary local aggregate runs the same units in
 order and retains its existing whole-workspace cache (schema 12). Changing unit
 commands therefore changes the aggregate cache key; this is not yet per-unit
 workflow cache integration. Plan owns that external decision.
+
+`workspace export <unit> --output <directory>` exports generated leaves only;
+`workspace import <unit> --url <url> --sha256 <digest> --scratch <directory>`
+validates bytes and the complete output contract in staging before replacing
+those leaves. Replacement failures roll back. Import failures are errors, not
+permission to rebuild. The `javascript` group imports packages, daemon and
+shell from one JSON list of references, shared by native build and test jobs.
+The references contain business units and verified bytes only, never Plan
+keys, hit/miss decisions, receipts or retention policy.
 
 The Web source unit normalizes standalone peer links before returning. This
 belongs to producing a usable public build result, not to writing a local cache.

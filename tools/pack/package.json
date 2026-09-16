@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit"
   },
   "dependencies": {
+    "@open-design/download": "workspace:*",
     "@electron/notarize": "3.1.1",
     "@electron/rebuild": "4.0.4",
     "@open-design/launcher-proto": "workspace:*",

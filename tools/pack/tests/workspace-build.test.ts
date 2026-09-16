@@ -432,7 +432,7 @@ describe("runWorkspaceBuild", () => {
       await writeOutputs(root, "built");
       const result = await workspaceBuildUnitResult(config, "daemon");
       expect(result.outputPaths).toEqual(["apps/daemon/dist"]);
-      expect(result).toMatchObject({ platform: process.platform, arch: process.arch, unit: "daemon" });
+      expect(result).toEqual({ schemaVersion: 2, kind: "javascript", unit: "daemon", outputPaths: ["apps/daemon/dist"] });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

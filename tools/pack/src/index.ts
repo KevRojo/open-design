@@ -116,10 +116,15 @@ function addWinLifecycleOptions(command: CacCommand) {
 
 const cli = cac("tools-pack");
 
-cli.command("workspace <action> <unit>", "Source build units: build|result packages|daemon|web|shell")
+cli.command("workspace <action> <unit>", "Build, verify, export or import workspace outputs (packages|daemon|web|shell|javascript)")
   .option("--web-output-mode <mode>", "web output: standalone|server", { default: "standalone" })
+  .option("--output <path>", "export built outputs to an archive directory")
+  .option("--scratch <path>", "isolated workspace import staging directory")
+  .option("--url <url>", "verified source archive URL")
+  .option("--sha256 <digest>", "expected source archive SHA-256")
+  .option("--sources <json>", "JavaScript source descriptors: unit, url and sha256")
   .option("--json", "print JSON result metadata")
-  .action(async (action: string, unit: string, options: { webOutputMode?: string }) => {
+  .action(async (action: string, unit: string, options: import("./workspace/command.js").WorkspaceCommandOptions) => {
     const { workspaceCommand } = await import("./workspace/command.js");
     printJson(await workspaceCommand(action, unit, options));
   });
@@ -289,4 +294,13 @@ addBuildOptions(addSharedOptions(cli.command("linux <action>", "Linux packaging 
   });
 
 cli.help();
+cli.command("stage-artifact <reference>", "Stage a published installer into the normal tools-pack layout")
+  .option("--dir <path>", "tools-pack output/runtime root directory")
+  .option("--namespace <name>", "runtime namespace")
+  .option("--build-json <path>", "Staged installer build record")
+  .action(async (reference: string, options: { dir?: string; namespace?: string; buildJson?: string }) => {
+    const { stagePublishedArtifact } = await import("./artifacts/stage.js");
+    await stagePublishedArtifact(reference, options);
+  });
+
 cli.parse();

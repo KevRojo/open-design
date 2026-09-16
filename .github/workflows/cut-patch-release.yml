@@ -65,16 +65,17 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
+      - name: Prepare release tool
+        uses: ./.github/actions/setup-workspace
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
 
       - name: Compute next patch version
         id: ver
         env:
           # Never interpolate the raw input into the script; pass via env and validate.
           INPUT_VERSION: ${{ inputs.version }}
-        run: node --experimental-strip-types .github/scripts/release/resolve-patch-cut.ts resolve
+        run: pnpm exec tools-release patch-cut resolve
 
       # Guard: the release this patch stacks on must already be a PUBLISHED stable
       # GitHub Release. release-stable publishes with
@@ -86,7 +87,7 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           GATE_TAG: ${{ steps.ver.outputs.gate_tag }}
           FORCE: ${{ inputs.force }}
-        run: node --experimental-strip-types .github/scripts/release/resolve-patch-cut.ts gate
+        run: pnpm exec tools-release patch-cut gate
 
       # ---- Skip path: previous release not published yet -> no branch/release build; notify and stop ----
       # feishu-notice.ts imports only node:crypto (no workspace deps), so the

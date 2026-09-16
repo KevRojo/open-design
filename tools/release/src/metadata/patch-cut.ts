@@ -183,11 +183,8 @@ function gate(): void {
   setOutput("published", published);
 }
 
-const mode = process.argv[2];
-if (mode === "resolve") {
-  resolve();
-} else if (mode === "gate") {
-  gate();
-} else {
-  fail("usage: resolve-patch-cut.ts <resolve|gate>");
+export function patchCutCommand(mode: string): void {
+  if (mode === "resolve") resolve();
+  else if (mode === "gate") gate();
+  else fail("patch-cut action must be resolve or gate");
 }

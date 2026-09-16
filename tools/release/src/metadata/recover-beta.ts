@@ -1,3 +1,4 @@
+// Recovery policy belongs to the release control plane, not workflow scripts.
 import { appendFileSync, readFileSync } from "node:fs";
 
 type ReleaseBaseVersion = {

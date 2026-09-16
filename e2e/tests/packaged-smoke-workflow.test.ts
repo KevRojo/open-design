@@ -73,10 +73,7 @@ const r2PythonLibPath = join(workspaceRoot, ".github", "scripts", "lib", "r2.py"
 const releaseBetaWorkflowPath = join(workspaceRoot, ".github", "workflows", "release-beta.yml");
 const dailyBetaRecoveryScriptPath = join(
   workspaceRoot,
-  ".github",
-  "scripts",
-  "release",
-  "resolve-daily-beta-recovery.ts",
+  "tools/release/src/metadata/recover-beta.ts",
 );
 const releasePrereleaseWorkflowPath = join(workspaceRoot, ".github", "workflows", "release-prerelease.yml");
 const releasePrereleaseTestsWorkflowPath = join(workspaceRoot, ".github", "workflows", "release-prerelease-tests.yml");
@@ -108,7 +105,7 @@ const notifyDailyFeishuWorkflowPath = join(workspaceRoot, ".github", "workflows"
 const notifyReleaseFeishuWorkflowPath = join(workspaceRoot, ".github", "workflows", "notify-release-feishu.yml");
 const cutReleaseWorkflowPath = join(workspaceRoot, ".github", "workflows", "cut-release.yml");
 const cutPatchReleaseWorkflowPath = join(workspaceRoot, ".github", "workflows", "cut-patch-release.yml");
-const patchCutPreflightScriptPath = join(workspaceRoot, ".github", "scripts", "release", "resolve-patch-cut.ts");
+const patchCutPreflightScriptPath = join(workspaceRoot, "tools/release/src/metadata/patch-cut.ts");
 const feishuCardScriptPath = join(workspaceRoot, "tools", "release", "src", "notifications", "feishu.ts");
 const feishuNoticeScriptPath = join(workspaceRoot, "tools", "release", "src", "notifications", "feishu-notice.ts");
 const dshBootstrapPublishWorkflowPath = join(workspaceRoot, ".github", "workflows", "dsh-bootstrap-publish.yml");
@@ -2380,17 +2377,17 @@ process.stdin.on("end", () => {
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
-      expect(job).toContain("needs: plan");
+      expect(job).toContain("needs: [plan, common, cache_common_results]");
       expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
       expect(job).not.toContain("uses: ./.github/actions/workspace-product");
-      expect(job.indexOf("[build] Source shell")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
+      expect(job.indexOf("[restore] Shared JavaScript")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
       expect(job).toContain(target === "win_x64" ? '"tools-pack", "win", "package"' : "exec tools-pack mac package");
       if (target === "mac_arm64" || target === "mac_x64") {
         expect(job).not.toContain("uses: actions/cache/");
         expect(job).not.toContain("tools_pack_cache_key");
         expect(job).not.toContain("gh cache delete");
-        expect(job).toContain("exec tools-pack mac build"); // Local fallback stays independent.
+        expect(job).not.toContain("Retry beta");
       } else {
         expect(job).toContain("uses: actions/cache/restore@v5"); // Windows still reuses native products.
       }
@@ -2398,26 +2395,35 @@ process.stdin.on("end", () => {
       expect(job.match(/name: '\[retain\] Source products'/g)).toHaveLength(1);
       expect(job).toContain("source-products/*/product/workspace.tar.gz");
       expect(job).toContain("if-no-files-found: ignore");
-      for (const unit of ["packages", "daemon", "web", "shell"]) {
+      for (const unit of ["web"]) {
         expect(job).toContain(`[build] Source ${unit}`);
-        expect(job).toContain(`requests/source_${target}/${unit}.json`);
+        expect(job).toContain("needs.plan.outputs.requests");
         expect(config.workflows["release-beta"].workloads[`source_${target}_${unit}`]).toMatchObject({
           inputs: [`suite://source-${unit}`], products: "manifest", runnerClass: `source_${target}`,
           success: { [target === "mac_arm64" ? "[build] macOS arm64" : target === "mac_x64" ? "[build] macOS x64" : "[build] Windows x64"]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
         });
         expect(config.workflows["release-beta"].batches[`source_${target}`].entries[unit]).toEqual({
-          workload: `source_${target}_${unit}`, request: { units: [unit] }, product: "bundle",
+          workload: `source_${target}_${unit}`, request: { unit }, product: "bundle",
         });
       }
+      for (const unit of ["packages", "daemon", "shell"]) expect(job).not.toContain(`[build] Source ${unit}`);
+    }
+    const common = sectionBetween(workflow, "\n  common:", "\n  cache_common_results:");
+    for (const unit of ["packages", "daemon", "shell"]) {
+      expect(common).toContain(`[build] Source ${unit}`);
+      expect(config.workflows["release-beta"].workloads[`source_js_${unit}`]).toMatchObject({
+        runnerClass: "source_javascript", inputs: [`suite://source-${unit}`],
+      });
     }
     const collection = sectionBetween(workflow, "\n  cache_build_results:", "\n  cache_test_results:");
     expect(collection).toContain("products: manifest");
+    expect(collection).toContain('batches: \'["source_mac_arm64","source_mac_x64","source_win_x64"]\'');
     expect(collection).not.toContain("test_verify");
     expect(collection).not.toContain("needs.build_mac_arm64.result == 'success'");
 
   });
 
-  it("[P1] consumes one configured build matrix and one configured test matrix", async () => {
+  it("[P1] consumes shared JavaScript, native build and test matrices from configuration", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     const { workloads, matrices } = config.workflows["release-beta"];
@@ -2426,16 +2432,19 @@ process.stdin.on("end", () => {
     for (const row of matrices.test) expect(Object.keys(workloads[row.workload].success)).toContain(row.name);
     // Install-time tool preparation is not the app build dependency closure.
     for (const row of matrices.test) {
+      expect(row.prepareShared).toContain('tools-pack workspace import javascript --sources "$WORKSPACE_SOURCES"');
       expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/daemon^...'");
       expect(row.prepare.split("\n")[0]).toContain("--if-present run build");
       if (row.kind !== "daemon") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/desktop^...'");
       if (row.kind === "ui" || row.kind === "e2e") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/web^...'");
     }
-    expect(workflow.match(/    strategy:/g)).toHaveLength(2);
+    expect(matrices.common).toHaveLength(1);
+    expect(matrices.common[0].workloads).toEqual(["source_js_packages", "source_js_daemon", "source_js_shell"]);
+    expect(workflow.match(/    strategy:/g)).toHaveLength(3);
     expect(workflow).not.toContain("  build_linux_x64:");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
     expect(workflow).toContain('run: ${{ matrix.command }}');
-    expect(workflow).toContain('run: ${{ matrix.prepare }}');
+    expect(workflow).toContain("run: ${{ needs.plan.outputs.contribution == 'true' && matrix.prepareShared || matrix.prepare }}");
     expect(workflow).toContain('OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}');
     expect(workflow).toContain("OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}");
     expect(workflow).toContain('test_matrix: ${{ steps.plan.outputs.test_matrix }}');
@@ -2484,7 +2493,8 @@ process.stdin.on("end", () => {
       expect(job).toContain(`inputs.${target}_smoke_mode == 'core'`);
       expect(job).toContain("ref: ${{ needs.plan.outputs.commit }}");
       expect(job).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
-      expect(job).toContain("smoke-artifacts.ts stage");
+      expect(job).toContain("tools-release artifact resolve");
+      expect(job).toContain("tools-pack stage-artifact");
       expect(job).toContain("EXPECTED_CHANNEL: beta");
       expect(job).toContain("EXPECTED_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
       expect(job).not.toContain("RELEASE_STORAGE_SECRET");
@@ -2670,7 +2680,7 @@ process.stdin.on("end", () => {
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const smoke = workflow.slice(workflow.indexOf("\n  smoke_" + target + ":")).split(/\n  [a-z_0-9]+:/)[1]!;
       expect(smoke).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
-      expect(smoke).toContain("smoke-artifacts.ts stage");
+      expect(smoke).toContain("tools-pack stage-artifact");
     }
   });
 
@@ -2909,7 +2919,7 @@ process.stdin.on("end", () => {
     const publishJob = betaWorkflow.slice(betaWorkflow.indexOf("  publish:"));
     expect(publishJob).toContain("needs.plan.outputs.promote == 'true'");
     expect(publishJob).toContain("ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'");
-    expect(dailyWorkflow).toContain("resolve-daily-beta-recovery.ts");
+    expect(dailyWorkflow).toContain("tools-release recover-beta");
     expect(dailyWorkflow).toContain("force: ${{ needs.resolve.outputs.force == 'true' }}");
     expect(dailyWorkflow).toContain("promote: ${{ needs.resolve.outputs.promote == 'true' }}");
     expect(dailyWorkflow).toContain("release_version: ${{ needs.resolve.outputs.release_version }}");
@@ -3080,10 +3090,11 @@ process.stdin.on("end", () => {
   });
 
   it("[P1] smokes the published prerelease artifact, not the build directory", async () => {
-    const [prerelease, smoke, stage] = await Promise.all([
+    const [prerelease, smoke, stage, resolver] = await Promise.all([
       readFile(releasePrereleaseWorkflowPath, "utf8"),
       readFile(releasePrereleaseSmokeWorkflowPath, "utf8"),
-      readFile(join(workspaceRoot, ".github", "scripts", "release", "smoke-artifacts.ts"), "utf8"),
+      readFile(join(workspaceRoot, "tools/pack/src/artifacts/stage.ts"), "utf8"),
+      readFile(join(workspaceRoot, "tools/release/src/metadata/artifact.ts"), "utf8"),
     ]);
 
     // The packaged mac/Windows smoke is gone from the build jobs. It used to
@@ -3115,8 +3126,9 @@ process.stdin.on("end", () => {
 
     // The smoke lane starts from the R2 object a user downloads, not from
     // electron-builder's output directory.
-    expect(smoke).toContain("smoke-artifacts.ts plan");
-    expect(smoke).toContain("smoke-artifacts.ts stage");
+    expect(smoke).toContain("tools-release artifact plan");
+    expect(smoke).toContain("tools-release artifact resolve");
+    expect(smoke).toContain("tools-pack stage-artifact");
     expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
     expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
     expect(smoke).toContain("VERSION_METADATA_URL: ${{ inputs.version_metadata_url }}");
@@ -3129,15 +3141,16 @@ process.stdin.on("end", () => {
     // The staged path must stay in lockstep with resolveMacPaths().dmgPath and
     // resolveWinPaths().setupPath, which is the only file `tools-pack install`
     // reads. A drift here fails as "no mac dmg found at ...".
-    expect(stage).toContain('join(toolsPackDir, "out", "mac", "namespaces", namespace, "dmg", `Open Design-${token}.dmg`)');
-    expect(stage).toContain('join(toolsPackDir, "out", "win", "namespaces", namespace, "builder", `Open Design-${token}-setup.exe`)');
+    expect(stage).toContain('resolveMacPaths(config).dmgPath');
+    expect(stage).toContain('resolveWinPaths(config).setupPath');
     // A target that did not build carries no `artifacts` key at all, so status
     // is the only safe thing to branch on.
-    expect(stage).toContain('entry?.status === "published"');
-    expect(stage).toContain("verifyChecksum");
+    expect(resolver).toContain('entry?.status === "published"');
+    expect(stage).toContain("downloadCopyAndClear");
+    expect(stage).not.toContain("arrayBuffer()");
     // release-smoke.ts refuses to start without a readable build json, and
     // write-report throws on a zero-byte one.
-    expect(stage).toContain("writeBuildJson");
+    expect(stage).toContain("writeFileSync(buildJson");
   });
 
   it("[P1] keeps one writer on the progressive prerelease card", async () => {
@@ -3350,7 +3363,7 @@ process.stdin.on("end", () => {
     // cut on top of unshipped releases, which is how release/v0.22.3 got cut on
     // 2026-09-10 while release/v0.22.2 was still unshipped.
     const resolveStep = sectionBetween(workflow, "- name: Compute next patch version", "# Guard:");
-    expect(resolveStep).toContain("resolve-patch-cut.ts resolve");
+    expect(resolveStep).toContain("tools-release patch-cut resolve");
     expect(preflight).toContain("const gate = previousRelease(branches, version).text;");
     expect(preflight).toContain("branches.filter((branch) => compareVersions(branch, version) < 0).at(-1)");
     expect(preflight).not.toContain("`${version.major}.${version.minor}.0`");
@@ -3359,7 +3372,7 @@ process.stdin.on("end", () => {
     // prerelease); a missing release falls back to not published.
     const guard = sectionBetween(workflow, "- name: Check the previous release is published", "# ---- Skip path");
     expect(guard).toContain("GATE_TAG: ${{ steps.ver.outputs.gate_tag }}");
-    expect(guard).toContain("resolve-patch-cut.ts gate");
+    expect(guard).toContain("tools-release patch-cut gate");
     expect(preflight).toContain('"(.isDraft or .isPrerelease) | not"');
     expect(preflight).toContain('const published = answer === "true" ? "true" : "false";');
     expect(preflight).toContain('setOutput("gate_tag", `${TAG_PREFIX}${gate}`)');
