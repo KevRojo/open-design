@@ -2354,6 +2354,20 @@ process.stdin.on("end", () => {
     expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
   });
 
+  it("[P1] seeds macOS dependencies through the existing main-only cache boundary", async () => {
+    const workflow = await readFile(join(workspaceRoot, ".github/workflows/cache-maintenance.yml"), "utf8");
+    const mac = sectionBetween(workflow, "\n  seed-pnpm-macos:", "\n  seed-pnpm-windows:");
+    expect(mac).toContain("runs-on: macos-14");
+    expect(mac).toContain("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'");
+    expect(workflow).toContain("branches: [main]");
+    expect(mac).toContain("uses: ./.github/actions/setup-workspace");
+    expect(mac).toContain("save-pnpm-cache: 'true'");
+    expect(mac).not.toContain("actions/cache/save");
+    const setup = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
+    expect(setup).toContain("github.ref == 'refs/heads/main'");
+    expect(setup).toContain("default: 'false'");
+  });
+
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence-beta.json"), "utf8"));

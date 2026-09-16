@@ -235,7 +235,11 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
     baseline = identities()
     for path, expected in (("apps/web/src/plan-witness.ts", {"web"}), ("apps/daemon/src/plan-witness.ts", {"daemon"}),
                            ("apps/desktop/src/plan-witness.ts", {"shell"}), ("packages/platform/src/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
-                           ("apps/web/tests/plan-witness.test.ts", set()), ("design-systems/plan-witness.md", set())):
+                           ("apps/web/tests/plan-witness.test.ts", set()), ("design-systems/plan-witness.md", set()),
+                           ("tools/release/src/plan-witness.ts", set()), ("tools/dev/src/plan-witness.ts", set()),
+                           ("tools/serve/src/plan-witness.ts", set()),
+                           ("tools/pack/src/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
+                           (".github/scripts/release/workspace-products.ts", {"packages", "daemon", "web", "shell"})):
         git("read-tree", "HEAD")
         oid = git("hash-object", "-w", "--stdin", content="// identity witness")
         git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)

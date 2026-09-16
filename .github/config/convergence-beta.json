@@ -9,8 +9,9 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "packages/",
-        "tools/",
+        "tools/pack/",
         "scripts/postinstall.mjs",
+        ".github/scripts/release/workspace-products.ts",
         ".github/actions/setup-workspace/"
       ],
       "exclude": ["**/tests/**", "**/*.test.ts", "**/vitest.config.ts", "**/tsconfig.tests.json"]
