@@ -345,6 +345,23 @@ signed R2 transport. Write credentials never enter the low-privilege CI run.
 
 ### Install-time execution scope
 
+The beta native source executor permits one fallback build only for enumerated
+cache-read failures: download timeout, HTTP 404/410, or SHA-256 mismatch. It
+cleans its download scratch before rebuilding from the frozen checkout; these
+failures occur before output replacement. Authorization, cancellation, unsafe
+paths, incompatible output contracts, local I/O and unknown errors fail closed.
+Restored-result consumer checks are outside the fallback catch. There is no
+download retry loop or immutable-product repair. A fallback is not a successful
+reuse: its reason, transferred bytes and restore/build duration are retained,
+including an incomplete report if the fallback build fails. Normal hot reuse
+must still perform zero source builds; degraded costs remain in the benefit
+accounting rather than being discarded.
+The consumer is invoked only after all restored leaves are installed. Previous
+leaves are retained during replacement and rolled back on an installation
+failure; if rollback fails, preserve the reported recovery directory and stop.
+This is a consumer gate and rollback contract, not a filesystem-wide atomic
+rename or a promise to recover automatically after a process kill.
+
 `OPEN_DESIGN_POSTINSTALL_TARGETS` is an optional JSON array of build target
 directories from `scripts/postinstall.mjs`. The installer builds their transitive
 workspace dependency closure in its normal dependency order. Unset or blank

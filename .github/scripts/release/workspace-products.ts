@@ -14,6 +14,28 @@ type Product = { type: string; source: string; data: { sha256: string } };
 type Decision = { scopeEnabled: boolean; reusable: boolean; resultHit: boolean; run: boolean;
   result?: { products: Record<string, Product> } };
 type Pending = { schemaVersion: number; protocol: string; mode: string; workloads: Record<string, Decision> };
+type FallbackReason = "download-timeout" | "object-missing" | "checksum-mismatch";
+type RestoreAttempt = { bytes: number };
+type Fallback = { reason: FallbackReason; attempts: 1; restoreDurationMs: number; buildDurationMs?: number };
+type SourceResult = { restored: boolean; produced: boolean; bytes: number; fallback?: Fallback };
+
+// Only these cache-read failures permit one clean build. Contract, filesystem,
+// authorization, cancellation and unknown errors are deliberately not classified.
+class CacheReadFailure extends Error {
+  readonly reason: FallbackReason;
+  constructor(reason: FallbackReason) {
+    super(`source cache read failed: ${reason}`);
+    this.reason = reason;
+  }
+}
+
+async function readCache<T>(read: () => Promise<T>): Promise<T> {
+  try { return await read(); }
+  catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new CacheReadFailure("download-timeout");
+    throw error;
+  }
+}
 
 export function archiveExecutable(platform: string = process.platform, systemRoot = process.env.SystemRoot): string {
   if (platform !== "win32") return "tar";
@@ -70,11 +92,15 @@ export function archiveOutputs(root: string, directory: string, outputs: Output[
   return archive;
 }
 
-async function download(product: Product, path: string): Promise<number> {
+async function download(product: Product, path: string, attempt: RestoreAttempt): Promise<number> {
   const url = new URL(product.source);
   if (product.type !== "url" || url.protocol !== "https:" || url.username || url.password
     || url.search || url.hash || !/^[a-f0-9]{64}$/.test(product.data?.sha256 ?? "")) throw new Error("invalid source product reference");
-  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  const response = await readCache(() => fetch(url, { signal: AbortSignal.timeout(120_000) }));
+  if (response.status === 404 || response.status === 410) {
+    await response.body?.cancel();
+    throw new CacheReadFailure("object-missing");
+  }
   if (!response.ok || !response.body) throw new Error(`source product HTTP ${response.status}`);
   const hash = createHash("sha256");
   const output = await open(path, "wx");
@@ -82,26 +108,28 @@ async function download(product: Product, path: string): Promise<number> {
   let bytes = 0;
   try {
     for (;;) {
-      const chunk = await reader.read();
+      const chunk = await readCache(() => reader.read());
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
+      attempt.bytes = bytes;
       if (bytes > 2 * 1024 ** 3) throw new Error("source product exceeds 2 GiB");
       hash.update(chunk.value);
       await output.writeFile(chunk.value);
     }
   } finally {
-    await reader.cancel();
-    await output.close();
+    try { await readCache(() => reader.cancel()); }
+    finally { await output.close(); }
   }
-  if (hash.digest("hex") !== product.data.sha256) throw new Error("source product checksum mismatch");
+  if (hash.digest("hex") !== product.data.sha256) throw new CacheReadFailure("checksum-mismatch");
   return bytes;
 }
 
-export async function restoreOutputs(root: string, scratch: string, product: Product): Promise<number> {
+export async function restoreOutputs(root: string, scratch: string, product: Product, attempt: RestoreAttempt = { bytes: 0 }): Promise<number> {
   const directory = mkdtempSync(join(scratch, "restore-"));
+  let retainRecovery = false;
   try {
     const zip = join(directory, "product.zip");
-    const bytes = await download(product, zip);
+    const bytes = await download(product, zip, attempt);
     // Target systems ship bsdtar with ZIP support; Linux contract tests use
     // unzip. This is byte transport only, never the Python planning control.
     const members = (process.platform === "linux" ? command("unzip", ["-Z1", zip], root)
@@ -127,43 +155,84 @@ export async function restoreOutputs(root: string, scratch: string, product: Pro
     for (const path of paths) {
       if (!lstatSync(join(stage, path)).isDirectory()) throw new Error("source output is not a directory");
     }
-    for (const path of paths) {
-      const destination = join(root, path);
-      mkdirSync(dirname(destination), { recursive: true });
-      rmSync(destination, { recursive: true, force: true });
-      renameSync(join(stage, path), destination);
+    // The consumer runs only after the complete set is committed. Retain old
+    // leaves until then so a local replacement failure cannot leave mixed output.
+    const moved: { destination: string; backup: string; hadPrevious: boolean; installed: boolean }[] = [];
+    const backups = join(directory, "previous");
+    mkdirSync(backups);
+    try {
+      for (const [index, path] of paths.entries()) {
+        const destination = join(root, path);
+        mkdirSync(dirname(destination), { recursive: true });
+        const entry = { destination, backup: join(backups, String(index)), hadPrevious: false, installed: false };
+        moved.push(entry);
+        try { renameSync(destination, entry.backup); entry.hadPrevious = true; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        renameSync(join(stage, path), destination);
+        entry.installed = true;
+      }
+    } catch (error) {
+      const failures: unknown[] = [];
+      for (const entry of moved.reverse()) {
+        try {
+          if (entry.installed) rmSync(entry.destination, { recursive: true, force: true });
+          if (entry.hadPrevious) renameSync(entry.backup, entry.destination);
+        } catch (rollbackError) { failures.push(rollbackError); }
+      }
+      if (failures.length) {
+        retainRecovery = true;
+        throw new AggregateError([error, ...failures], `source rollback failed; recovery retained at ${directory}`);
+      }
+      throw error;
     }
     return bytes;
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    if (!retainRecovery) rmSync(directory, { recursive: true, force: true });
   }
 }
 
 export async function executeSource(options: {
   root: string; scratch: string; pending: Pending; workload: string;
   runUnit: (action: "build" | "result", unit: Unit) => Output;
-}): Promise<{ restored: boolean; produced: boolean; bytes: number }> {
+  report?: (result: SourceResult) => void;
+}): Promise<SourceResult> {
   const { root, scratch, pending, workload, runUnit } = options;
   if (pending.protocol !== "nexu-workload-result-v1" || pending.schemaVersion !== 1) throw new Error("unsupported frozen Plan");
   const decision = pending.workloads[workload];
   if (!decision?.scopeEnabled) throw new Error("source workload is not selected");
   mkdirSync(scratch, { recursive: true });
+  const attempt = { bytes: 0 };
+  let fallback: Fallback | undefined;
   if (pending.mode === "enforce" && decision.reusable && decision.resultHit && !decision.run) {
+    const products = decision.result?.products;
+    if (!products || Object.keys(products).join() !== "bundle" || !products.bundle) throw new Error("missing source product");
+    const started = performance.now();
     try {
-      const products = decision.result?.products;
-      if (!products || Object.keys(products).join() !== "bundle" || !products.bundle) throw new Error("missing source product");
-      const bytes = await restoreOutputs(root, scratch, products.bundle);
-      units.forEach((unit) => runUnit("result", unit));
-      return { restored: true, produced: false, bytes };
+      await restoreOutputs(root, scratch, products.bundle, attempt);
     } catch (error) {
-      console.warn(`::warning::Source restore failed; executing source build: ${String(error)}`);
+      if (!(error instanceof CacheReadFailure)) throw error;
+      fallback = { reason: error.reason, attempts: 1, restoreDurationMs: Math.round(performance.now() - started) };
+      console.warn(`::warning::reuse-failed -> rebuild: ${JSON.stringify({ ...fallback, bytes: attempt.bytes })}`);
+      options.report?.({ restored: false, produced: false, bytes: attempt.bytes, fallback });
+    }
+    if (!fallback) {
+      units.forEach((unit) => runUnit("result", unit));
+      return { restored: true, produced: false, bytes: attempt.bytes };
     }
   } else if (!decision.run) throw new Error("inconsistent frozen source decision");
-  const outputs = units.map((unit) => runUnit("build", unit));
+  const buildStarted = performance.now();
+  let outputs: Output[];
+  try { outputs = units.map((unit) => runUnit("build", unit)); }
+  finally {
+    if (fallback) {
+      fallback.buildDurationMs = Math.round(performance.now() - buildStarted);
+      options.report?.({ restored: false, produced: false, bytes: attempt.bytes, fallback });
+    }
+  }
   // A failed hit may execute, but must not overwrite its immutable receipt.
   const produced = pending.mode === "enforce" && decision.reusable && decision.run && !decision.resultHit;
   if (produced) archiveOutputs(root, join(scratch, "product"), outputs);
-  return { restored: false, produced, bytes: 0 };
+  return { restored: false, produced, bytes: attempt.bytes, ...(fallback ? { fallback } : {}) };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -174,13 +243,18 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const root = process.cwd();
   console.log(`archive tool: ${command("tar", ["--version"], root).trim()}`);
   const started = performance.now();
+  // Persist degradation before the build so a failed fallback still has an
+  // accounting witness for the action's always-upload report step.
+  const report = (result: SourceResult, status: "incomplete" | "success") => {
+    writeFileSync(join(scratch, "report.json"), JSON.stringify({ ...result, status, durationMs: Math.round(performance.now() - started) }, null, 2));
+  };
   const result = await executeSource({ root, scratch: resolve(scratch),
+    report: (result) => report(result, "incomplete"),
     pending: JSON.parse(readFileSync(pendingPath, "utf8")), workload: `source_${target}`,
     runUnit: (action, unit) => JSON.parse(command(process.execPath,
       [join(root, "tools/pack/bin/tools-pack.mjs"), "workspace", action, unit, "--web-output-mode", "standalone", "--json"], root)),
   });
-  const report = { ...result, durationMs: Math.round(performance.now() - started) };
-  console.log(JSON.stringify(report));
-  writeFileSync(join(scratch, "report.json"), JSON.stringify(report, null, 2));
+  report(result, "success");
+  console.log(JSON.stringify(result));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `produced=${result.produced}\nrestored=${result.restored}\n`);
 }
