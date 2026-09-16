@@ -276,12 +276,17 @@ describe("release workflows", () => {
     expect(buildWin).toContain('$updateArgs += "--require-vela-cli"');
     expect(win).toContain("tools-pack win validate-payload");
     expect(win).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
-    for (const metadata of [betaMetadata, prereleaseMetadata, stableMetadata]) {
+    for (const section of [betaMetadata, betaPublish]) {
+      expect(section).toContain("uses: ./.github/actions/setup-workspace");
+      expect(section).toContain("save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}");
+      expect(section.indexOf("uses: ./.github/actions/setup-workspace")).toBeLessThan(section.indexOf("run: pnpm exec tools-release"));
+    }
+    for (const metadata of [prereleaseMetadata, stableMetadata]) {
       expect(metadata).toContain("uses: pnpm/action-setup@v5");
       expect(metadata).toContain("run: pnpm install --frozen-lockfile");
       expect(metadata.indexOf("run: pnpm install --frozen-lockfile")).toBeLessThan(metadata.indexOf("tools-release prepare"));
     }
-    for (const publish of [betaPublish, prereleasePublish, stablePublish]) {
+    for (const publish of [prereleasePublish, stablePublish]) {
       expect(publish).toContain("uses: pnpm/action-setup@v5");
       expect(publish).toContain("run: pnpm install --frozen-lockfile");
       expect(publish.indexOf("run: pnpm install --frozen-lockfile")).toBeLessThan(

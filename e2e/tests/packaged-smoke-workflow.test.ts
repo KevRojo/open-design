@@ -2304,6 +2304,10 @@ process.stdin.on("end", () => {
     const action = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
     expect(action).toContain("run: pnpm install --frozen-lockfile");
     expect(action).toContain("uses: actions/cache/restore");
+    expect(workflow).toContain("BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}");
+    expect(workflow.match(/uses: \.\/\.github\/actions\/setup-workspace/g)?.length).toBe(
+      workflow.match(/save-pnpm-cache: \$\{\{ env.BETA_SAVE_PNPM_CACHE \}\}/g)?.length,
+    );
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
@@ -2326,7 +2330,7 @@ process.stdin.on("end", () => {
     expect(mac).toContain("save-pnpm-cache: 'true'");
     expect(mac).not.toContain("actions/cache/save");
     const setup = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
-    expect(setup).toContain("github.ref == 'refs/heads/main'");
+    expect(setup).not.toContain("github.ref");
     expect(setup).toContain("default: 'false'");
   });
 

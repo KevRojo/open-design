@@ -45,7 +45,7 @@ describe("GitHub Actions cache workflows", () => {
     expect(setupPlaywrightStep).toContain("runner-labels:");
   });
 
-  it("[P1] keeps pnpm cache writes on explicit trusted main seed jobs", async () => {
+  it("[P1] leaves pnpm write authorization to callers and keeps persistence/hit guards", async () => {
     const action = await readFile(setupWorkspaceAction, "utf8");
 
     expect(action).toContain("save-pnpm-cache:");
@@ -91,10 +91,9 @@ describe("GitHub Actions cache workflows", () => {
     expect(saveStep).toContain("inputs.save-pnpm-cache == 'true'");
     expect(saveStep).toContain("steps.persistent-pnpm-store.outputs.enabled != 'true'");
     expect(saveStep).toContain("steps.pnpm-cache-restore.outputs.cache-hit != 'true'");
-    expect(saveStep).toContain("github.ref == 'refs/heads/main'");
-    expect(saveStep).toContain("github.event_name == 'push'");
-    expect(saveStep).toContain("github.event_name == 'workflow_dispatch'");
-    expect(saveStep).toContain("github.event_name == 'schedule'");
+    expect(saveStep).not.toContain("github.ref");
+    expect(saveStep).not.toContain("github.event_name");
+    expect(action).not.toContain("feat/plan-foundation");
   });
 
   it("[P1] seeds Windows and Linux from main and deletes only closed-PR BuildKit cache families", async () => {
@@ -144,7 +143,7 @@ describe("GitHub Actions cache workflows", () => {
     expect(workflow).toContain("push:");
     expect(workflow).toContain("- main");
     expect(setupStep).toContain("uses: ./.github/actions/setup-workspace");
-    expect(setupStep).toContain("save-pnpm-cache: 'true'");
+    expect(setupStep).toContain("save-pnpm-cache: ${{ github.ref == 'refs/heads/main' }}");
   });
 
 

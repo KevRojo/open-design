@@ -15,7 +15,7 @@ inputs:
     required: false
     default: '[]'
   save-pnpm-cache:
-    description: Save a missing pnpm cache after install; trusted main seed jobs only
+    description: Save a missing pnpm cache after install; caller owns write authorization
     required: false
     default: 'false'
 
@@ -91,7 +91,7 @@ runs:
       run: pnpm install --frozen-lockfile
 
     - name: Save pnpm store
-      if: ${{ inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.pnpm-cache-restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+      if: ${{ inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.pnpm-cache-restore.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}

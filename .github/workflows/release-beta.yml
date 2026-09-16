@@ -322,6 +322,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}
   OPEN_DESIGN_TELEMETRY_RELAY_URL: ${{ vars.OPEN_DESIGN_TELEMETRY_RELAY_URL }}
   POSTHOG_KEY: ${{ inputs.publish && secrets.POSTHOG_KEY || '' }}
   POSTHOG_HOST: ${{ inputs.publish && vars.POSTHOG_HOST || '' }}
@@ -392,20 +393,12 @@ jobs:
           ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
           fetch-depth: 1
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install dependencies
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
-        run: pnpm install --frozen-lockfile
 
       - name: Resolve built identity
         id: identity
@@ -559,6 +552,8 @@ jobs:
         run: python3 .github/scripts/convergence.py resolve-references --batch source_javascript
       - name: '[prepare] JavaScript build tools'
         uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: '[build] Source packages'
         env:
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.retain && format('{0}/source-products/packages/product', runner.temp) || '' }}
@@ -640,6 +635,8 @@ jobs:
       - name: '[prepare] Workspace source tools'
         if: ${{ matrix.target != 'linux_x64' }}
         uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
 
@@ -1365,20 +1362,12 @@ jobs:
           name: open-design-beta-linux-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install dependencies
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
-        run: pnpm install --frozen-lockfile
 
       - name: Prepare and publish beta release notes
         env:
@@ -1507,6 +1496,7 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
           runner-labels: ${{ toJSON(matrix.runner) }}
       - name: Setup Playwright
         if: ${{ matrix.kind == 'e2e' || matrix.kind == 'ui' }}
@@ -1612,6 +1602,8 @@ jobs:
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
@@ -1684,6 +1676,8 @@ jobs:
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
@@ -1756,6 +1750,8 @@ jobs:
           fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
