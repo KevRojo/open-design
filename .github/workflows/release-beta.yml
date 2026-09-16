@@ -1,5 +1,4 @@
 name: release-beta
-
 on:
   workflow_dispatch:
     inputs:
@@ -296,16 +295,16 @@ on:
         value: ${{ jobs.publish.outputs.version_metadata_url }}
       mac_arm64_url:
         description: "macOS arm64 dmg download URL."
-        value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build.outputs.mac_arm64_url }}
+        value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build_mac_arm64.outputs.url }}
       win_x64_url:
         description: "Windows x64 installer download URL."
-        value: ${{ jobs.publish.outputs.win_x64_url || jobs.build.outputs.win_x64_url }}
+        value: ${{ jobs.publish.outputs.win_x64_url || jobs.build_win_x64.outputs.url }}
       mac_arm64_smoke_result:
         description: "macOS arm64 packaged smoke outcome; advisory to publication."
-        value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build.outputs.mac_arm64_smoke_result }}
+        value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}
       win_x64_smoke_result:
         description: "Windows x64 packaged smoke outcome; advisory to publication."
-        value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build.outputs.win_x64_smoke_result }}
+        value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}
       mac_x64_url:
         description: "macOS x64 dmg download URL."
         value: ${{ jobs.publish.outputs.mac_x64_url }}
@@ -357,7 +356,7 @@ env:
 
 jobs:
   plan:
-    name: '[plan] Beta preparation and execution'
+    name: "[plan] Beta preparation and execution"
     if: github.repository == 'nexu-io/open-design'
     runs-on: ubuntu-latest
     env:
@@ -382,24 +381,25 @@ jobs:
       branch: ${{ steps.identity.outputs.branch }}
       commit: ${{ steps.identity.outputs.commit }}
       previous_commit: ${{ steps.prev.outputs.previous_commit }}
-      # workflow_dispatch has no promote input; a callable explicit false wins.
       promote: ${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}
       release_name: ${{ steps.beta.outputs.release_name }}
       state_source: ${{ steps.beta.outputs.state_source }}
+      test_e2e_vitest_matrix: ${{ steps.plan.outputs.test_e2e_vitest_matrix }}
+      test_verify_matrix: ${{ steps.plan.outputs.test_verify_matrix }}
+      test_daemon_unit_tests_matrix: ${{ steps.plan.outputs.test_daemon_unit_tests_matrix }}
+      test_functional_e2e_matrix: ${{ steps.plan.outputs.test_functional_e2e_matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
           fetch-depth: 1
-
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
-
       - name: Resolve built identity
         id: identity
         env:
@@ -412,7 +412,6 @@ jobs:
             echo "branch=$BUILD_REF"
             echo "commit=$built_sha"
           } >> "$GITHUB_OUTPUT"
-
       - name: Validate shared beta publisher
         if: ${{ inputs.publish }}
         run: |
@@ -434,7 +433,6 @@ jobs:
             echo "Shared beta publication is restricted to the current main commit ($main_sha); got $built_sha. Re-run this ref with publish=false for build artifacts." >&2
             exit 1
           fi
-
       - name: Capture previous beta commit
         id: prev
         run: |
@@ -442,7 +440,6 @@ jobs:
           prev="$(curl -fsSL "$OPEN_DESIGN_BETA_METADATA_URL" | jq -r '.github.commit // ""' 2>/dev/null || true)"
           echo "previous beta commit: ${prev:-<none>}"
           echo "previous_commit=$prev" >> "$GITHUB_OUTPUT"
-
       - name: Validate beta inputs
         run: |
           set -euo pipefail
@@ -458,7 +455,6 @@ jobs:
             echo "release-beta publish requires win_x64_target=nsis or all so the installer and updater feed are produced" >&2
             exit 1
           fi
-
       - name: Validate R2 release access
         if: ${{ inputs.publish }}
         env:
@@ -472,7 +468,6 @@ jobs:
           RELEASE_STORAGE_REGION: auto
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
         run: pnpm exec tools-release check-storage
-
       - name: Prepare beta release metadata
         id: beta
         env:
@@ -481,20 +476,19 @@ jobs:
           OPEN_DESIGN_RELEASE_TAG_REMOTE: origin
           OPEN_DESIGN_RELEASE_FORCE: ${{ inputs.force && '1' || '' }}
         run: pnpm exec tools-release prepare beta
-
-      - name: '[prepare] Distinct workflow control snapshot'
+      - name: "[prepare] Distinct workflow control snapshot"
         if: ${{ steps.identity.outputs.commit != github.sha }}
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ github.sha }}
           path: plan-control
           fetch-depth: 1
-      - name: '[resolve] Actual source runner profiles'
+      - name: "[resolve] Actual source runner profiles"
         id: runners
         env:
           OD_CI_RUNNER_MODE: ${{ vars.OD_CI_RUNNER_MODE }}
         run: python3 .github/scripts/runners.py
-      - name: '[resolve] Authorized result consumption'
+      - name: "[resolve] Authorized result consumption"
         id: mode
         env:
           AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && steps.identity.outputs.commit == github.sha }}
@@ -505,7 +499,7 @@ jobs:
           else
             echo "mode=shadow" >> "$GITHUB_OUTPUT"
           fi
-      - name: '[plan] Frozen source test results'
+      - name: "[plan] Frozen source test results"
         id: plan
         env:
           EXECUTION_INPUTS: ${{ toJSON(inputs) }}
@@ -518,7 +512,7 @@ jobs:
           python3 "$CONTROL_ROOT/.github/scripts/convergence.py" --root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json" github-output \
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
             --execution-inputs-json "$EXECUTION_INPUTS" --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
-      - name: '[retain] Frozen Plan witness'
+      - name: "[retain] Frozen Plan witness"
         uses: actions/upload-artifact@v4
         with:
           name: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -599,22 +593,85 @@ jobs:
       consumer_requests: true
     secrets: inherit
 
-  build:
-    name: ${{ matrix.name }}
-    outputs:
-      mac_arm64_url: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_platform_outputs.outputs.dmg_url || '' }}
-      win_x64_url: ${{ matrix.target == 'win_x64' && steps.win_x64_platform_outputs.outputs.installer_url || '' }}
-      mac_arm64_smoke_result: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_smoke.outcome || '' }}
-      win_x64_smoke_result: ${{ matrix.target == 'win_x64' && steps.win_x64_smoke.outcome || '' }}
-    needs: [plan, common, cache_common_results]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && needs.plan.outputs.build_count != '0' }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
+  source_mac_arm64:
+    name: "[build] mac_arm64 workload"
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_arm64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_mac_arm64.web.operation == 'build' }}
+    runs-on: macos-14
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_arm64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
+      - name: "[prepare] Workspace source tools"
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+      - name: "[restore] Shared JavaScript"
+        shell: bash
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+      - name: "[build] Source web"
+        id: source_web
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
+        run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+      - name: "[retain] Source products"
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-mac_arm64
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+    needs:
+      - plan
+      - common
+      - cache_common_results
+  cache_mac_arm64:
+    name: "[cache] mac_arm64 workload"
+    needs:
+      - plan
+      - source_mac_arm64
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence/release-beta.json
+      handoff_id: beta-source-mac_arm64
+      batches: '["source_mac_arm64"]'
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: manifest
+      consumer_requests: true
+    secrets: inherit
+  build_mac_arm64:
+    outputs:
+      url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
+      smoke_result: ${{ steps.mac_arm64_smoke.outcome }}
+    name: "[build] mac_arm64 Electron full"
+    needs:
+      - plan
+      - common
+      - cache_common_results
+      - source_mac_arm64
+      - cache_mac_arm64
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_arm64 }}
+    runs-on: macos-14
+    defaults:
+      run:
+        shell: bash
     env:
       RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
@@ -622,55 +679,31 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.plan.outputs.commit }}
-
-
-      - name: '[validate] Source references'
-        if: ${{ matrix.target != 'linux_x64' }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
+          SOURCE_REQUESTS: ${{ needs.source_mac_arm64.result == 'success' && needs.cache_mac_arm64.outputs.requests || needs.source_mac_arm64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
-        run: python3 .github/scripts/convergence.py resolve-references --batch source_${{ matrix.target }} ${{ needs.plan.outputs.contribution == 'true' && '--shared packages,daemon,shell' || '' }}
-      - name: '[prepare] Workspace source tools'
-        if: ${{ matrix.target != 'linux_x64' }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_arm64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
+      - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
-
-
-      - name: '[restore] Shared JavaScript'
-        if: ${{ matrix.target != 'linux_x64' }}
+      - name: "[restore] Shared JavaScript"
         shell: bash
-        run: >-
-          pnpm exec tools-pack workspace ${{ needs.plan.outputs.contribution == 'true' && 'import' || 'build' }} javascript
-          --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
-
-      - name: '[build] Source web'
-        if: ${{ matrix.target != 'linux_x64' }}
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+      - name: "[build] Source web"
         id: source_web
         shell: bash
         env:
-          SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.retain && format('{0}/source-products/web/product', runner.temp) || '' }}
-        run: >-
-          pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests)[format('source_{0}', matrix.target)].web.operation == 'restore' && 'import' || 'build' }} web
-          --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT"
-          --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
-
-      - name: '[retain] Source products'
-        if: ${{ matrix.target != 'linux_x64' && (!cancelled()) }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: beta-source-${{ matrix.target }}
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
-
+          SOURCE_OUTPUT: ""
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: Prepare mac_arm64 signing certificate
-        if: ${{ matrix.target == 'mac_arm64' && (inputs.mac_arm64_sign_mode != 'no') }}
+        if: ${{ (inputs.mac_arm64_sign_mode != 'no') }}
         env:
           APPLE_SIGNING_CERTIFICATE_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_BASE64 }}
           APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
@@ -684,21 +717,13 @@ jobs:
             echo "CSC_LINK=$cert_path"
             echo "CSC_KEY_PASSWORD=$APPLE_SIGNING_CERTIFICATE_PASSWORD"
           } >> "$GITHUB_ENV"
-
       - name: Build beta mac_arm64
-        if: ${{ matrix.target == 'mac_arm64' }}
         id: mac_arm64_tools_pack_build
         env:
-          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Bake the AMR profile (tools-pack reads OPEN_DESIGN_AMR_PROFILE) so a
-          # feature-test dispatch produces a packaged app that targets that
-          # profile's AMR backend and enables the workspace-team transport. The
-          # matching console origin arrives via the workflow-level
-          # OD_VELA_WEB_URL. Empty = default (prod) — the normal beta pipeline is
-          # unaffected.
           OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
         run: |
           set -euo pipefail
@@ -730,24 +755,19 @@ jobs:
             printf '%s\n' "$build_output"
             exit "$build_status"
           fi
-
       - name: Upload mac_arm64 DMG for manual distribution
-        # Only when NOT publishing to the release feed: this is the downloadable
-        # artifact for a manual dispatch (e.g. a signed feature-test build handed
-        # to teammates). The normal publish=true release pipeline is unchanged.
-        if: ${{ matrix.target != 'linux_x64' && (matrix.target == 'mac_arm64' && (!cancelled() && !inputs.publish)) }}
+        if: ${{ 'mac_arm64' != 'linux_x64' && ((!cancelled() && !inputs.publish)) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-arm64-dmg
           path: ${{ runner.temp }}/tools-pack/out/mac/namespaces/release-beta/**/*.dmg
           if-no-files-found: warn
           retention-days: 14
-
       - name: Build beta mac_arm64 update fixture
         id: mac_arm64_update_fixture
-        if: ${{ matrix.target == 'mac_arm64' && (inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '') }}
+        if: ${{ (inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '') }}
         env:
-          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
         run: |
           set -euo pipefail
           version="${{ needs.plan.outputs.beta_version }}"
@@ -774,10 +794,9 @@ jobs:
             echo "update_build_json_path=$update_build_json_path"
             echo "update_version=$update_version"
           } >> "$GITHUB_OUTPUT"
-
       - name: Smoke beta mac_arm64 packaged runtime
         id: mac_arm64_smoke
-        if: ${{ matrix.target == 'mac_arm64' && (inputs.mac_arm64_smoke_mode == 'full') }}
+        if: ${{ (inputs.mac_arm64_smoke_mode == 'full') }}
         continue-on-error: true
         working-directory: e2e
         env:
@@ -795,10 +814,9 @@ jobs:
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/release-report/mac_arm64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
-
       - name: Write mac_arm64 release report
         id: report_mac_arm64
-        if: ${{ !cancelled() && matrix.target == 'mac_arm64' && steps.mac_arm64_tools_pack_build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.mac_arm64_tools_pack_build.outcome == 'success' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.log
@@ -808,10 +826,6 @@ jobs:
           RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/mac_arm64
           RELEASE_REPORT_JSON_PATH: ${{ runner.temp }}/release-report/mac_arm64/report.json
           RELEASE_REPORT_SUMMARY_PATH: ${{ runner.temp }}/release-report/mac_arm64/summary.md
-          # The smoke step is continue-on-error, so this job reports success even
-          # when the packaged gate is red. Feed the outcome to the report writer
-          # so the failure gets a run annotation and a summary banner instead of
-          # disappearing behind a green check.
           RELEASE_SMOKE_EXEMPT: "true"
           RELEASE_SMOKE_MODE: ${{ inputs.mac_arm64_smoke_mode }}
           RELEASE_SMOKE_OUTCOME: ${{ steps.mac_arm64_smoke.outcome }}
@@ -819,13 +833,11 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: mac_arm64 beta build
         run: pnpm exec tools-release write-report
-
       - name: Publish mac_arm64 report summary
         if: ${{ !cancelled() && steps.report_mac_arm64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_arm64/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Prepare mac_arm64 assets
-        if: ${{ matrix.target == 'mac_arm64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ARTIFACT_MODE: dmg-and-payload
           RELEASE_ASSET_SUFFIX: .signed
@@ -838,9 +850,8 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
-
       - name: Publish mac_arm64 platform
-        if: ${{ matrix.target == 'mac_arm64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .signed
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_arm64
@@ -861,27 +872,130 @@ jobs:
           RELEASE_TARGET: mac_arm64
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
-
       - name: Read mac_arm64 platform outputs
         id: mac_arm64_platform_outputs
-        if: ${{ matrix.target == 'mac_arm64' && inputs.publish }}
+        if: ${{ inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
             const fs = require("fs");
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-platform-outputs/mac_arm64.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
-
-
       - name: Upload mac_arm64 publish manifest
-        if: ${{ matrix.target == 'mac_arm64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-arm64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests/mac_arm64.json
           if-no-files-found: error
+  source_mac_x64:
+    name: "[build] mac_x64 workload"
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_x64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' }}
+    runs-on: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
+      - name: "[prepare] Workspace source tools"
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+      - name: "[restore] Shared JavaScript"
+        shell: bash
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+      - name: "[build] Source web"
+        id: source_web
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
+        run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+      - name: "[retain] Source products"
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-mac_x64
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+    needs:
+      - plan
+      - common
+      - cache_common_results
+  cache_mac_x64:
+    name: "[cache] mac_x64 workload"
+    needs:
+      - plan
+      - source_mac_x64
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence/release-beta.json
+      handoff_id: beta-source-mac_x64
+      batches: '["source_mac_x64"]'
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: manifest
+      consumer_requests: true
+    secrets: inherit
+  build_mac_x64:
+    name: "[build] mac_x64 Electron full"
+    needs:
+      - plan
+      - common
+      - cache_common_results
+      - source_mac_x64
+      - cache_mac_x64
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_x64 }}
+    runs-on: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.source_mac_x64.result == 'success' && needs.cache_mac_x64.outputs.requests || needs.source_mac_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
+      - name: "[prepare] Workspace source tools"
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+      - name: "[restore] Shared JavaScript"
+        shell: bash
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+      - name: "[build] Source web"
+        id: source_web
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ""
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: Prepare mac_x64 signing certificate
-        if: ${{ matrix.target == 'mac_x64' && (inputs.mac_x64_sign_mode != 'no') }}
+        if: ${{ (inputs.mac_x64_sign_mode != 'no') }}
         env:
           APPLE_SIGNING_CERTIFICATE_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_BASE64 }}
           APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
@@ -895,12 +1009,10 @@ jobs:
             echo "CSC_LINK=$cert_path"
             echo "CSC_KEY_PASSWORD=$APPLE_SIGNING_CERTIFICATE_PASSWORD"
           } >> "$GITHUB_ENV"
-
       - name: Build beta mac_x64
-        if: ${{ matrix.target == 'mac_x64' }}
         id: mac_x64_tools_pack_build
         env:
-          ELECTRON_BUILDER_COMPRESSION_LEVEL: '1'
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -934,9 +1046,8 @@ jobs:
             printf '%s\n' "$build_output"
             exit "$build_status"
           fi
-
       - name: Smoke beta mac_x64 packaged runtime
-        if: ${{ matrix.target == 'mac_x64' && (inputs.mac_x64_smoke_mode == 'full') }}
+        if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
         working-directory: e2e
         env:
           OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
@@ -949,10 +1060,9 @@ jobs:
           OD_PACKAGED_E2E_REPORT_DIR: ${{ runner.temp }}/release-report/mac_x64
           OD_PACKAGED_E2E_TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts
-
       - name: Write mac_x64 release report
         id: report_mac_x64
-        if: ${{ !cancelled() && matrix.target == 'mac_x64' && steps.mac_x64_tools_pack_build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.mac_x64_tools_pack_build.outcome == 'success' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/mac_x64/build.log
@@ -967,13 +1077,11 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: mac_x64 beta build
         run: pnpm exec tools-release write-report
-
       - name: Publish mac_x64 report summary
         if: ${{ !cancelled() && steps.report_mac_x64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Prepare mac_x64 assets
-        if: ${{ matrix.target == 'mac_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ARTIFACT_MODE: ${{ inputs.mac_x64_target == 'all' && 'all' || 'dmg-and-payload' }}
           RELEASE_ASSET_SUFFIX: ${{ inputs.mac_x64_sign_mode != 'no' && '.signed' || '.unsigned' }}
@@ -985,9 +1093,8 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
-
       - name: Publish mac_x64 platform
-        if: ${{ matrix.target == 'mac_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: ${{ inputs.mac_x64_sign_mode != 'no' && '.signed' || '.unsigned' }}
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_x64
@@ -1005,31 +1112,134 @@ jobs:
           RELEASE_TARGET: mac_x64
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
-
       - name: Upload mac_x64 publish manifest
-        if: ${{ matrix.target == 'mac_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests/mac_x64.json
           if-no-files-found: error
+  source_win_x64:
+    name: "[build] win_x64 workload"
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_win_x64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_win_x64.web.operation == 'build' }}
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_win_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
+      - name: "[prepare] Workspace source tools"
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+      - name: "[restore] Shared JavaScript"
+        shell: bash
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+      - name: "[build] Source web"
+        id: source_web
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
+        run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+      - name: "[retain] Source products"
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-source-win_x64
+          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+    needs:
+      - plan
+      - common
+      - cache_common_results
+  cache_win_x64:
+    name: "[cache] win_x64 workload"
+    needs:
+      - plan
+      - source_win_x64
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence/release-beta.json
+      handoff_id: beta-source-win_x64
+      batches: '["source_win_x64"]'
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: manifest
+      consumer_requests: true
+    secrets: inherit
+  build_win_x64:
+    outputs:
+      url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
+      smoke_result: ${{ steps.win_x64_smoke.outcome }}
+    name: "[build] win_x64 Electron full"
+    needs:
+      - plan
+      - common
+      - cache_common_results
+      - source_win_x64
+      - cache_win_x64
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_win_x64 }}
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SOURCE_REQUESTS: ${{ needs.source_win_x64.result == 'success' && needs.cache_win_x64.outputs.requests || needs.source_win_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        run: python3 .github/scripts/convergence.py resolve-references --batch source_win_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
+      - name: "[prepare] Workspace source tools"
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+        env:
+          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+      - name: "[restore] Shared JavaScript"
+        shell: bash
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+      - name: "[build] Source web"
+        id: source_web
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ""
+        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: Setup NSIS
-        if: ${{ matrix.target == 'win_x64' }}
         shell: pwsh
         run: |
           if ((Get-Command makensis.exe -ErrorAction SilentlyContinue) -or (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
             exit 0
           }
           choco install nsis -y --no-progress
-
       - name: Probe Windows signing capability
-        if: ${{ matrix.target == 'win_x64' }}
         id: sign_probe
         shell: pwsh
         run: .\.github\scripts\release\probe-win-signing.ps1 -SignMode "${{ inputs.win_x64_sign_mode }}"
-
       - name: Build beta win_x64
-        if: ${{ matrix.target == 'win_x64' }}
         id: win_tools_pack_build
         shell: pwsh
         env:
@@ -1044,13 +1254,6 @@ jobs:
           OD_BETA_WINDOWS_SIGN_CERT_SHA1: ${{ steps.sign_probe.outputs.thumbprint }}
           OD_PACKAGED_E2E_WIN_UPDATE_METADATA_URL: ${{ inputs.win_x64_update_metadata_url }}
           OD_PACKAGED_E2E_WIN_UPDATE_VERSION: ${{ inputs.win_x64_update_target_version }}
-          # Bake the AMR profile (tools-pack reads OPEN_DESIGN_AMR_PROFILE) so a
-          # feature-test dispatch produces a packaged app that targets that
-          # profile's AMR backend and enables the workspace-team transport. Empty
-          # = default (prod) — the normal beta pipeline is unaffected. Mirrors the
-          # mac_arm64 build step above; this was missing here, so every win_x64
-          # unpublished build silently fell back to prod and could not sign in to a
-          # feature-test AMR environment.
           OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
         run: |
           $ErrorActionPreference = "Stop"
@@ -1063,15 +1266,8 @@ jobs:
           $buildOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\build.json" -Encoding utf8
           $build = $buildOutput | ConvertFrom-Json
           pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.plan.outputs.beta_version }}" --json
-
       - name: Upload win_x64 installer for manual distribution
-        # Only when NOT publishing to the release feed, mirroring the mac DMG
-        # step. Before this existed a publish=false dispatch left the Windows job
-        # with nothing retrievable at all, so a QA/unpublished build could not be
-        # handed to a teammate without also publishing to the public feed. The
-        # glob covers every win_x64_target: nsis produces the setup exe, zip the
-        # portable zip, all both. The normal publish=true pipeline is unchanged.
-        if: ${{ matrix.target != 'linux_x64' && (matrix.target == 'win_x64' && (!cancelled() && !inputs.publish)) }}
+        if: ${{ 'win_x64' != 'linux_x64' && ((!cancelled() && !inputs.publish)) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-win-x64-installer
@@ -1080,9 +1276,8 @@ jobs:
             ${{ runner.temp }}\tools-pack\out\win\namespaces\release-beta-win\builder\*-portable.zip
           if-no-files-found: warn
           retention-days: 14
-
       - name: Build beta win_x64 update fixture
-        if: ${{ matrix.target == 'win_x64' && (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
+        if: ${{ (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -1096,10 +1291,9 @@ jobs:
           $updateOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json" -Encoding utf8
           $updateBuild = $updateOutput | ConvertFrom-Json
           pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $updateBuild.payloadPath --expected-version $updateVersion --json
-
       - name: Smoke beta win_x64 packaged runtime
         id: win_x64_smoke
-        if: ${{ matrix.target == 'win_x64' && (inputs.win_x64_smoke_mode == 'full') }}
+        if: ${{ (inputs.win_x64_smoke_mode == 'full') }}
         continue-on-error: true
         working-directory: e2e
         env:
@@ -1115,10 +1309,9 @@ jobs:
           OD_PACKAGED_E2E_WIN_UPDATE_METADATA_URL: ${{ inputs.win_x64_update_metadata_url }}
           OD_PACKAGED_E2E_WIN_UPDATE_VERSION: ${{ inputs.win_x64_update_target_version }}
         run: pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts
-
       - name: Write win_x64 release report
         id: report_win_x64
-        if: ${{ !cancelled() && matrix.target == 'win_x64' && steps.win_tools_pack_build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.win_tools_pack_build.outcome == 'success' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
           RELEASE_BUILD_TARGET: ${{ inputs.win_x64_target }}
@@ -1127,8 +1320,6 @@ jobs:
           RELEASE_REPORT_DIR: ${{ runner.temp }}\release-report\win_x64
           RELEASE_REPORT_JSON_PATH: ${{ runner.temp }}\release-report\win_x64\report.json
           RELEASE_REPORT_SUMMARY_PATH: ${{ runner.temp }}\release-report\win_x64\summary.md
-          # Same exemption as mac_arm64: keep the job green, but never let the
-          # red be silent.
           RELEASE_SMOKE_EXEMPT: "true"
           RELEASE_SMOKE_MODE: ${{ inputs.win_x64_smoke_mode }}
           RELEASE_SMOKE_OUTCOME: ${{ steps.win_x64_smoke.outcome }}
@@ -1136,15 +1327,12 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: win_x64 beta build
         run: pnpm exec tools-release write-report
-
       - name: Publish win_x64 report summary
         if: ${{ !cancelled() && steps.report_win_x64.outcome == 'success' }}
         shell: pwsh
         run: Get-Content "${{ runner.temp }}\release-report\win_x64\summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
-
-
       - name: Prepare win_x64 assets
-        if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         shell: pwsh
         run: |
           tools\release\scripts\prepare-platform-assets.ps1 `
@@ -1157,9 +1345,8 @@ jobs:
             -ReleaseChannel beta `
             -ReleasePublicOrigin "${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}" `
             -IncludeZip $${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}
-
       - name: Publish win_x64 platform
-        if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}\release-assets\win_x64
@@ -1178,52 +1365,59 @@ jobs:
           RELEASE_TARGET: win_x64
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
-
       - name: Read win_x64 platform outputs
         id: win_x64_platform_outputs
-        if: ${{ matrix.target == 'win_x64' && inputs.publish }}
+        if: ${{ inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
             const fs = require("fs");
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-platform-outputs/win_x64.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
-
-
       - name: Upload win_x64 publish manifest
-        if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-win-x64-publish-manifest
           path: ${{ runner.temp }}\release-platform-manifests\win_x64.json
           if-no-files-found: error
-
+  build_linux_x64:
+    name: "[build] linux_x64 Electron full"
+    needs:
+      - plan
+      - common
+      - cache_common_results
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_linux_x64 }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
       - name: Setup pnpm
-        if: ${{ matrix.target == 'linux_x64' }}
         uses: pnpm/action-setup@v5
         with:
           version: 10.33.2
-
       - name: Setup Node.js
-        if: ${{ matrix.target == 'linux_x64' }}
         uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-
       - name: Install dependencies
-        if: ${{ matrix.target == 'linux_x64' }}
         run: pnpm install --frozen-lockfile
-
       - name: Install Linux smoke dependencies
-        if: ${{ matrix.target == 'linux_x64' && (inputs.linux_x64_smoke_mode != 'skip') }}
+        if: ${{ (inputs.linux_x64_smoke_mode != 'skip') }}
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
-
       - name: Build beta linux_x64
-        if: ${{ matrix.target == 'linux_x64' }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/linux_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/linux_x64/build.log
@@ -1238,9 +1432,8 @@ jobs:
           TOOLS_PACK_CACHE_DIR: ${{ runner.temp }}/tools-pack-cache
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/build-platform.sh
-
       - name: Write linux_x64 release report
-        if: ${{ matrix.target == 'linux_x64' && (always()) }}
+        if: ${{ (always()) }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/linux_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/linux_x64/build.log
@@ -1255,13 +1448,11 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           REPORT_TITLE: linux_x64 beta build
         run: pnpm exec tools-release write-report
-
       - name: Publish linux_x64 report summary
-        if: ${{ matrix.target == 'linux_x64' && (always()) }}
+        if: ${{ (always()) }}
         run: cat "${{ runner.temp }}/release-report/linux_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Prepare linux_x64 assets
-        if: ${{ matrix.target == 'linux_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/linux_x64
@@ -1272,9 +1463,8 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
-
       - name: Publish linux_x64 platform
-        if: ${{ matrix.target == 'linux_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/linux_x64
@@ -1293,9 +1483,8 @@ jobs:
           RELEASE_TARGET: linux_x64
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
-
       - name: Upload linux_x64 publish manifest
-        if: ${{ matrix.target == 'linux_x64' && (inputs.publish) }}
+        if: ${{ (inputs.publish) }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-linux-x64-publish-manifest
@@ -1303,11 +1492,14 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: '[publish] Beta distribution'
+    name: "[publish] Beta distribution"
     needs:
       - plan
-      - build
-    if: >-
+      - build_mac_arm64
+      - build_mac_x64
+      - build_win_x64
+      - build_linux_x64
+    if: |-
       ${{
         always() &&
         !cancelled() &&
@@ -1315,7 +1507,10 @@ jobs:
         needs.plan.outputs.promote == 'true' &&
         needs.plan.result == 'success' &&
         (inputs.enable_mac_arm64 || inputs.enable_win_x64 || inputs.enable_mac_x64 || inputs.enable_linux_x64) &&
-        needs.build.result == 'success'
+        (!inputs.enable_mac_arm64 || needs.build_mac_arm64.result == 'success') &&
+        (!inputs.enable_mac_x64 || needs.build_mac_x64.result == 'success') &&
+        (!inputs.enable_win_x64 || needs.build_win_x64.result == 'success') &&
+        (!inputs.enable_linux_x64 || needs.build_linux_x64.result == 'success')
       }}
     runs-on: ubuntu-latest
     outputs:
@@ -1333,42 +1528,36 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.plan.outputs.commit }}
-
       - name: Download mac_arm64 publish manifest
-        if: ${{ inputs.enable_mac_arm64 && needs.build.result == 'success' }}
+        if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-mac-arm64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
-
       - name: Download mac_x64 publish manifest
-        if: ${{ inputs.enable_mac_x64 && needs.build.result == 'success' }}
+        if: ${{ inputs.enable_mac_x64 && needs.build_mac_x64.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-mac-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
-
       - name: Download win_x64 publish manifest
-        if: ${{ inputs.enable_win_x64 && needs.build.result == 'success' }}
+        if: ${{ inputs.enable_win_x64 && needs.build_win_x64.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-win-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
-
       - name: Download linux_x64 publish manifest
-        if: ${{ inputs.enable_linux_x64 && needs.build.result == 'success' }}
+        if: ${{ inputs.enable_linux_x64 && needs.build_linux_x64.result == 'success' }}
         uses: actions/download-artifact@v8
         with:
           name: open-design-beta-linux-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
-
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
-
       - name: Prepare and publish beta release notes
         env:
           RELEASE_CHANNEL: beta
@@ -1385,7 +1574,6 @@ jobs:
           pnpm exec tools-release prepare-release-note
           pnpm exec tools-release publish-release-note
           pnpm exec tools-release verify-release-note
-
       - name: Publish beta metadata
         env:
           BASE_VERSION: ${{ needs.plan.outputs.base_version }}
@@ -1393,9 +1581,9 @@ jobs:
           ENABLE_MAC_ARM64: ${{ inputs.enable_mac_arm64 }}
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
           ENABLE_WIN_X64: ${{ inputs.enable_win_x64 }}
-          LINUX_X64_RESULT: ${{ needs.build.result }}
-          MAC_ARM64_RESULT: ${{ needs.build.result }}
-          MAC_X64_RESULT: ${{ needs.build.result }}
+          LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
+          MAC_ARM64_RESULT: ${{ needs.build_mac_arm64.result }}
+          MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
           RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}
           RELEASE_CHANNEL: beta
           RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
@@ -1415,9 +1603,8 @@ jobs:
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
           STATE_SOURCE: ${{ needs.plan.outputs.state_source }}
-          WIN_X64_RESULT: ${{ needs.build.result }}
+          WIN_X64_RESULT: ${{ needs.build_win_x64.result }}
         run: pnpm exec tools-release publish-metadata
-
       - name: Read metadata outputs
         id: outputs
         uses: actions/github-script@v8
@@ -1426,16 +1613,15 @@ jobs:
             const fs = require("fs");
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-metadata/outputs.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
-
       - name: Verify beta metadata
         env:
           ENABLE_LINUX_X64: ${{ inputs.enable_linux_x64 }}
           ENABLE_MAC_ARM64: ${{ inputs.enable_mac_arm64 }}
           ENABLE_MAC_X64: ${{ inputs.enable_mac_x64 }}
           ENABLE_WIN_X64: ${{ inputs.enable_win_x64 }}
-          LINUX_X64_RESULT: ${{ needs.build.result }}
-          MAC_ARM64_RESULT: ${{ needs.build.result }}
-          MAC_X64_RESULT: ${{ needs.build.result }}
+          LINUX_X64_RESULT: ${{ needs.build_linux_x64.result }}
+          MAC_ARM64_RESULT: ${{ needs.build_mac_arm64.result }}
+          MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
           RELEASE_CHANNEL: beta
           RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
           RELEASE_LAUNCHER_VERSION_MIN_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_STABLE }}
@@ -1444,36 +1630,30 @@ jobs:
           RELEASE_METADATA_URL: ${{ steps.outputs.outputs.version_metadata_url }}
           RELEASE_NOTE_MANIFEST_PATH: ${{ runner.temp }}/release-metadata/release-note-publication.json
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
-          WIN_X64_RESULT: ${{ needs.build.result }}
+          WIN_X64_RESULT: ${{ needs.build_win_x64.result }}
         run: pnpm exec tools-release verify-metadata
-
       - name: Write beta metadata summary
         env:
           RELEASE_CHANNEL: beta
           RELEASE_METADATA_URL: ${{ steps.outputs.outputs.version_metadata_url }}
           RELEASE_SUMMARY_PATH: ${{ runner.temp }}/release-metadata/summary.md
         run: pnpm exec tools-release summary-metadata
-
       - name: Publish summary
         run: cat "${{ runner.temp }}/release-metadata/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Cleanup workflow artifacts
         if: ${{ success() && steps.outputs.outputs.release_state == 'complete' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          # Source tests/Plan/installation reports coexist in this workflow.
-          ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'
+          ARTIFACT_NAME_REGEX: ^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$
         run: bash .github/scripts/release/github/cleanup-artifacts.sh
 
-  test:
-    needs: [plan, common, cache_common_results]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && needs.plan.outputs.test_count != '0' }}
+  test_e2e_vitest:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.test_e2e_vitest_matrix) }}
     env:
       OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
       OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
@@ -1483,12 +1663,12 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 1
-      - name: '[validate] Source references'
+      - name: "[validate] Source references"
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
-        if: ${{ needs.plan.outputs.contribution == 'true' }}
+        if: ${{ (needs.plan.outputs.contribution == 'true') }}
         run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
       - name: Configure CI parallelism
         if: ${{ matrix.kind == 'ui' }}
@@ -1512,7 +1692,7 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Prepare test dependencies
-        run: ${{ needs.plan.outputs.contribution == 'true' && matrix.prepareShared || matrix.prepare }}
+        run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}
       - name: Clean Playwright state
         if: ${{ matrix.kind == 'ui' }}
         run: pnpm -C e2e exec tsx scripts/playwright.ts clean
@@ -1545,36 +1725,323 @@ jobs:
             e2e/ui/test-results
           if-no-files-found: ignore
           retention-days: 7
-
-  cache_build_results:
-    name: '[cache] Build results'
-    needs: [plan, build]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).manifest }}
+    needs:
+      - plan
+      - common
+      - cache_common_results
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_e2e_vitest }}
+  cache_test_e2e_vitest:
+    name: "[cache] test_e2e_vitest"
+    needs:
+      - plan
+      - test_e2e_vitest
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-build-results
-      batches: '["source_mac_arm64","source_mac_x64","source_win_x64"]'
+      handoff_id: beta-test_e2e_vitest
+      workloads: '["test_e2e_vitest"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: manifest
+      products: none
     secrets: inherit
-
-  cache_test_results:
-    name: '[cache] Test results'
-    needs: [plan, test]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.contributions).none }}
+  test_verify:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_verify_matrix) }}
+    env:
+      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
+      OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        if: ${{ (needs.plan.outputs.contribution == 'true') }}
+        run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
+      - name: Configure CI parallelism
+        if: ${{ matrix.kind == 'ui' }}
+        uses: ./.github/actions/configure-ci-parallelism
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Setup Playwright
+        if: ${{ matrix.kind == 'e2e' || matrix.kind == 'ui' }}
+        uses: ./.github/actions/setup-playwright
+        with:
+          package-json-path: e2e/package.json
+          install-command: pnpm -C e2e exec playwright install --with-deps chromium
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Allow Chromium user namespaces on GitHub Ubuntu
+        if: ${{ matrix.kind == 'e2e' }}
+        run: |
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Prepare test dependencies
+        run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}
+      - name: Clean Playwright state
+        if: ${{ matrix.kind == 'ui' }}
+        run: pnpm -C e2e exec tsx scripts/playwright.ts clean
+      - name: Run test unit
+        run: ${{ matrix.command }}
+      - name: Preserve project-runtime domain artifact
+        if: ${{ success() && matrix.kind == 'ui' && matrix.group == 'project-runtime' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}-domain
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Run UI critical extras
+        if: ${{ matrix.extra != '' }}
+        run: ${{ matrix.extra }}
+      - name: Upload Playwright debug artifact
+        if: ${{ always() && matrix.kind == 'ui' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+    needs:
+      - plan
+      - common
+      - cache_common_results
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_verify }}
+  cache_test_verify:
+    name: "[cache] test_verify"
+    needs:
+      - plan
+      - test_verify
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
     uses: ./.github/workflows/convergence.atom.yml
     with:
       config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test-results
+      handoff_id: beta-test_verify
+      workloads: '["test_verify"]'
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: none
+    secrets: inherit
+  test_daemon_unit_tests:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_daemon_unit_tests_matrix) }}
+    env:
+      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
+      OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        if: ${{ (needs.plan.outputs.contribution == 'true') }}
+        run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
+      - name: Configure CI parallelism
+        if: ${{ matrix.kind == 'ui' }}
+        uses: ./.github/actions/configure-ci-parallelism
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Setup Playwright
+        if: ${{ matrix.kind == 'e2e' || matrix.kind == 'ui' }}
+        uses: ./.github/actions/setup-playwright
+        with:
+          package-json-path: e2e/package.json
+          install-command: pnpm -C e2e exec playwright install --with-deps chromium
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Allow Chromium user namespaces on GitHub Ubuntu
+        if: ${{ matrix.kind == 'e2e' }}
+        run: |
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Prepare test dependencies
+        run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}
+      - name: Clean Playwright state
+        if: ${{ matrix.kind == 'ui' }}
+        run: pnpm -C e2e exec tsx scripts/playwright.ts clean
+      - name: Run test unit
+        run: ${{ matrix.command }}
+      - name: Preserve project-runtime domain artifact
+        if: ${{ success() && matrix.kind == 'ui' && matrix.group == 'project-runtime' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}-domain
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Run UI critical extras
+        if: ${{ matrix.extra != '' }}
+        run: ${{ matrix.extra }}
+      - name: Upload Playwright debug artifact
+        if: ${{ always() && matrix.kind == 'ui' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+    needs:
+      - plan
+      - common
+      - cache_common_results
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_daemon_unit_tests }}
+  cache_test_daemon_unit_tests:
+    name: "[cache] test_daemon_unit_tests"
+    needs:
+      - plan
+      - test_daemon_unit_tests
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence/release-beta.json
+      handoff_id: beta-test_daemon_unit_tests
+      workloads: '["test_daemon_unit_tests"]'
+      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
+      products: none
+    secrets: inherit
+  test_functional_e2e:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_functional_e2e_matrix) }}
+    env:
+      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
+      OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        if: ${{ (needs.plan.outputs.contribution == 'true') }}
+        run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
+      - name: Configure CI parallelism
+        if: ${{ matrix.kind == 'ui' }}
+        uses: ./.github/actions/configure-ci-parallelism
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Setup Playwright
+        if: ${{ matrix.kind == 'e2e' || matrix.kind == 'ui' }}
+        uses: ./.github/actions/setup-playwright
+        with:
+          package-json-path: e2e/package.json
+          install-command: pnpm -C e2e exec playwright install --with-deps chromium
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Allow Chromium user namespaces on GitHub Ubuntu
+        if: ${{ matrix.kind == 'e2e' }}
+        run: |
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Prepare test dependencies
+        run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}
+      - name: Clean Playwright state
+        if: ${{ matrix.kind == 'ui' }}
+        run: pnpm -C e2e exec tsx scripts/playwright.ts clean
+      - name: Run test unit
+        run: ${{ matrix.command }}
+      - name: Preserve project-runtime domain artifact
+        if: ${{ success() && matrix.kind == 'ui' && matrix.group == 'project-runtime' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}-domain
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Run UI critical extras
+        if: ${{ matrix.extra != '' }}
+        run: ${{ matrix.extra }}
+      - name: Upload Playwright debug artifact
+        if: ${{ always() && matrix.kind == 'ui' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: functional-e2e-${{ github.run_id }}-p0-${{ matrix.group }}
+          path: |
+            e2e/ui/reports/playwright-html-report
+            e2e/ui/reports/test-results
+            e2e/ui/reports/results.json
+            e2e/ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+    needs:
+      - plan
+      - common
+      - cache_common_results
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_functional_e2e }}
+  cache_test_functional_e2e:
+    name: "[cache] test_functional_e2e"
+    needs:
+      - plan
+      - test_functional_e2e
+    if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+    uses: ./.github/workflows/convergence.atom.yml
+    with:
+      config: .github/config/convergence/release-beta.json
+      handoff_id: beta-test_functional_e2e
+      workloads: '["test_functional_e2e"]'
       pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
       products: none
     secrets: inherit
 
+
+
   smoke_mac_arm64:
     name: "[validate] beta mac_arm64 downloaded artifact"
-    needs: [plan, build, publish]
-    if: >-
+    needs: [plan, publish]
+    if: |-
       ${{
         always() && !cancelled() &&
         inputs.enable_mac_arm64 &&
@@ -1647,8 +2114,8 @@ jobs:
 
   smoke_mac_x64:
     name: "[validate] beta mac_x64 downloaded artifact"
-    needs: [plan, build, publish]
-    if: >-
+    needs: [plan, publish]
+    if: |-
       ${{
         always() && !cancelled() &&
         inputs.enable_mac_x64 &&
@@ -1721,8 +2188,8 @@ jobs:
 
   smoke_win_x64:
     name: "[validate] beta win_x64 downloaded artifact"
-    needs: [plan, build, publish]
-    if: >-
+    needs: [plan, publish]
+    if: |-
       ${{
         always() && !cancelled() &&
         inputs.enable_win_x64 &&

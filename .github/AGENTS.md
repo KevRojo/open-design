@@ -105,22 +105,28 @@ store preparation continue through `setup-workspace` and its existing trust poli
 
 Release graphs separate delivery, source validation, and reusable-result publication.
 Beta declares its input suites and execution rows in
-`.github/config/convergence/release-beta.json`. Python projects one platform build
-matrix and one test matrix; runner labels for reusable test rows come from their
+`.github/config/convergence/release-beta.json`. Python projects per-workload test
+matrices; runner labels for reusable test rows come from their
 workload execution classes. Each row's command, preparation and parameters enter
 that workload's identity. Matrix grouping does not merge workload identities;
 all declared shard job names must be covered by the matching success proof.
 Do not add aggregate hot-run switches or new actions just to narrow cache inputs.
 Keep publication-only edits outside daemon/UI test inputs; repository topology
 tests and repository-wide validation may intentionally retain broader inputs.
-Native outputs are platform-named and emitted only by the owning matrix member.
+Native outputs are platform-named and emitted only by the owning platform job.
 Unpublished beta builds may retain GitHub artifacts but have no alternate R2 upload
 or receipt protocol. CDN installation validation requires published version metadata.
+Keep platform workload/cache/Electron chains and independent test/cache chains
+directly in `release-beta.yml`, without additional wrapper workflows. A cold
+platform product must publish through the existing convergence atom before its
+Electron consumer runs. Hot workloads skip build/publication, not Electron;
+consumers then use frozen Plan references. Each test workload publishes only
+after its complete declared shard set succeeds, independently of other tests.
 Beta prepares metadata and Plan in one root job, reusing the source checkout unless
 the workflow control SHA differs. Build and test result lanes call the existing
 convergence atom independently with a frozen Plan and product mode; collection and
 trusted publication share a runner, not another transport-only job. Each lane has
-its own concurrency identity. Neither cache lane gates beta publication. Stable's
+its own concurrency identity. Test cache publication does not gate beta publication. Stable's
 existing validation gates remain intact. Prefer shallow checkouts; when beta needs
 the stable version floor, tools-release reads remote tag names explicitly instead
 of assuming a shallow checkout contains every tag or downloading full history.

@@ -29,6 +29,10 @@ on:
         description: Project frozen requests after successful publication
         type: boolean
         default: false
+      workloads:
+        description: JSON array of independently completed workloads to collect
+        type: string
+        default: '[]'
     outputs:
       requests:
         value: ${{ jobs.isolated.outputs.requests }}
@@ -92,10 +96,12 @@ jobs:
           HANDOFF_ID: ${{ inputs.handoff_id }}
           PRODUCT_MODE: ${{ inputs.products }}
           PRODUCT_BATCHES: ${{ inputs.batches || '[]' }}
+          WORKLOADS: ${{ inputs.workloads }}
         run: >-
           python3 .github/scripts/convergence.py --config "$CONVERGENCE_CONFIG" handoff
           --pending "$RUNNER_TEMP/plan/pending-convergence.json" --products-root "$RUNNER_TEMP/references"
-          --products "$PRODUCT_MODE" --batches "$PRODUCT_BATCHES" --handoff-root "$RUNNER_TEMP/handoff-convergence" --id "$HANDOFF_ID"
+          --products "$PRODUCT_MODE" --batches "$PRODUCT_BATCHES" --workloads "$WORKLOADS"
+          --handoff-root "$RUNNER_TEMP/handoff-convergence" --id "$HANDOFF_ID"
       - name: '[validate] Branch, run and isolated storage identity'
         id: trust
         env:

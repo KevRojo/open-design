@@ -1001,6 +1001,12 @@ def project_matrices(workflow: WorkflowContract, run: dict[str, bool],
             selected.append(member)
         outputs[f"{name}_matrix"] = compact_json({"include": selected})
         outputs[f"{name}_count"] = str(len(selected))
+        # Project each receipt's complete shard set for independently scheduled
+        # jobs in the calling workflow. This does not alter workload identity.
+        for identity in sorted({row["workload"] for row in rows if "workload" in row}):
+            outputs[f"{identity}_matrix"] = compact_json({
+                "include": [row for row in selected if row.get("workload") == identity],
+            })
     return outputs
 
 
@@ -1303,6 +1309,16 @@ def handoff_command(args: argparse.Namespace, contract: ConvergenceContract) -> 
         contribute_batches_command(argparse.Namespace(pending=args.pending, output_dir=args.products_root), contract)
     candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract, jobs,
                                    products_mode=products_mode)
+    identities = getattr(args, "workloads", [])
+    if not isinstance(identities, list) or any(not isinstance(value, str) for value in identities) or len(set(identities)) != len(identities):
+        raise ConfigError("contribution workloads must be a unique string array")
+    if identities:
+        workflow = contract.workflow(load_json(args.pending)["workflow"])
+        if any(identity not in workflow.workloads for identity in identities):
+            raise ConfigError("unknown contribution workload")
+        candidate["results"] = [item for item in candidate["results"] if item["receipt"]["workload"] in identities]
+        if {item["receipt"]["workload"] for item in candidate["results"]} != set(identities):
+            raise ConfigError("selected contribution workload lacks complete success evidence")
     batch_names = getattr(args, "batches", [])
     if not isinstance(batch_names, list) or any(not isinstance(name, str) for name in batch_names) or len(set(batch_names)) != len(batch_names):
         raise ConfigError("contribution batches must be a unique string array")
@@ -1966,6 +1982,7 @@ def parse_args() -> argparse.Namespace:
     handoff.add_argument("--id", default="ci-results")
     handoff.add_argument("--products", choices=["none", "manifest"], help="collect one independent result lane")
     handoff.add_argument("--batches", type=json.loads, default=[], help="JSON array of declared product batches to collect")
+    handoff.add_argument("--workloads", type=json.loads, default=[], help="JSON array of independently completed workloads to collect")
     restore = sub.add_parser("restore")
     restore.add_argument("--pending", type=Path, required=True)
     restore.add_argument("--workload", required=True)

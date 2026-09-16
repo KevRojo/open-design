@@ -95,6 +95,29 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("collects only the explicitly completed workload without publishing siblings twice", () => {
+    const result = spawnSync("python3", ["-c", `
+import argparse, copy, sys
+from types import SimpleNamespace
+from unittest.mock import patch
+sys.path.insert(0, '.github/scripts')
+import convergence as c
+candidate={'repositoryId':42,'repository':'example/repo','results':[{'receipt':{'workload':i}} for i in ['a','b']]}
+context={'repositoryId':42,'repository':'example/repo','provenance':{'runId':12,'runAttempt':1}}
+contract=SimpleNamespace(workflow=lambda _:SimpleNamespace(workloads={'a':{},'b':{}}))
+args=argparse.Namespace(pending='pending',products_root='products',products='none',workloads=['a'],batches=[],handoff_root='handoff',id='a')
+with patch.object(c,'event_payload',return_value={}), patch.object(c,'producer_context',return_value=context), patch.object(c,'run_jobs',return_value=[]), patch.object(c,'finalize_candidate',side_effect=lambda *a,**k:copy.deepcopy(candidate)), patch.object(c,'load_json',return_value={'workflow':'ci'}), patch.object(c,'append_outputs'), patch.object(c.handoff_contract,'write_convergence') as write:
+    c.handoff_command(args,contract)
+    assert [i['receipt']['workload'] for i in write.call_args.args[2]['results']]==['a']
+    for selected in [['a','a'],['unknown'],'a']:
+        args.workloads=selected
+        try: c.handoff_command(args,contract)
+        except c.ConfigError: pass
+        else: raise AssertionError('accepted invalid selection')
+`, ], { cwd: repoRoot, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("passes only keys between jobs and resolves cold, hot and mixed references locally", () => {
     const result = spawnSync("python3", ["-c", `
 import argparse, json, os, sys, tempfile
@@ -166,6 +189,10 @@ for mask in range(16):
     assert len(tests) == int(projected["test_count"])
     assert sorted(r["name"] for r in tests) == sorted(name for key in ids if run[key] for name in w.workloads[key].success)
     assert all(r["runner"] == ["test-runner"] for r in tests)
+    for identity in ids:
+        shards = json.loads(projected[identity + "_matrix"])["include"]
+        assert shards == [row for row in tests if row["workload"] == identity]
+        assert {row["name"] for row in shards} == (set(w.workloads[identity].success) if run[identity] else set())
     assert projected["common_count"] == "0"
     for key in w.matrices["common"][0]["workloads"]:
         partial = c.project_matrices(w, {**run, key: True}, runners, inputs)

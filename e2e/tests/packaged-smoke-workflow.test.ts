@@ -147,15 +147,16 @@ function sectionBetween(content: string, start: string, end: string): string {
   return content.slice(startIndex, endIndex);
 }
 
-// Inspect the common setup plus the statically guarded steps for one member.
+function workflowJob(workflow: string, id: string): string {
+  const start = workflow.indexOf(`\n  ${id}:\n`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const body = workflow.slice(start + 1);
+  const next = body.slice(1).search(/\n  [a-z_0-9]+:\n/);
+  return next < 0 ? body : body.slice(0, next + 1);
+}
+
 function betaPlatformBuild(workflow: string, target: string): string {
-  const build = sectionBetween(workflow, "\n  build:\n", "\n  publish:");
-  const split = build.indexOf("    steps:\n");
-  const steps = build.slice(split).split(/(?=      - name:)/).filter((step) => {
-    const guard = step.match(/if: \$\{\{ matrix\.target (==|!=) '([^']+)'/);
-    return !guard || (guard[1] === '==' ? guard[2] === target : guard[2] !== target);
-  });
-  return (build.slice(0, split) + steps.join("")).replaceAll("${{ matrix.target }}", target);
+  return workflowJob(workflow, `build_${target}`);
 }
 
 function extractWorkflowRunScript(workflow: string, stepName: string): string {
@@ -2339,7 +2340,8 @@ process.stdin.on("end", () => {
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
-      expect(job).toContain("needs: [plan, common, cache_common_results]");
+      expect(job).toContain(`- source_${target}`);
+      expect(job).toContain(`- cache_${target}`);
       expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
       expect(job).not.toContain("uses: ./.github/actions/workspace-product");
@@ -2350,15 +2352,22 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("gh cache delete");
       expect(job).not.toContain("Retry beta");
       expect(job.match(/uses: \.\/\.github\/actions\/setup-workspace\n/g)).toHaveLength(1);
-      expect(job.match(/name: '\[retain\] Source products'/g)).toHaveLength(1);
-      expect(job).toContain("source-products/*/product/workspace.tar.gz");
-      expect(job).toContain("if-no-files-found: ignore");
+      expect(job).not.toContain("[retain] Source products");
+      expect(job).toContain(`needs.cache_${target}.outputs.requests`);
+      const source = workflowJob(workflow, `source_${target}`);
+      expect(source).toContain("source-products/*/product/workspace.tar.gz");
+      expect(source).toContain("if-no-files-found: error");
+      const cache = workflowJob(workflow, `cache_${target}`);
+      expect(cache).toContain(`- source_${target}`);
+      expect(cache).not.toContain("- build_");
+      expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
+      expect(cache).toContain("consumer_requests: true");
       for (const unit of ["web"]) {
         expect(job).toContain(`[build] Source ${unit}`);
         expect(job).toContain("needs.plan.outputs.requests");
         expect(config.workflows["release-beta"].workloads[`source_${target}_${unit}`]).toMatchObject({
           inputs: [`suite://source-${unit}`], products: "manifest", runnerClass: `source_${target}`,
-          success: { [target === "mac_arm64" ? "[build] macOS arm64" : target === "mac_x64" ? "[build] macOS x64" : "[build] Windows x64"]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
+          success: { [`[build] ${target} workload`]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
         });
         expect(config.workflows["release-beta"].batches[`source_${target}`].entries[unit]).toEqual({
           workload: `source_${target}_${unit}`, request: { unit }, product: "bundle",
@@ -2373,11 +2382,7 @@ process.stdin.on("end", () => {
         runnerClass: "source_javascript", inputs: [`suite://source-${unit}`],
       });
     }
-    const collection = sectionBetween(workflow, "\n  cache_build_results:", "\n  cache_test_results:");
-    expect(collection).toContain("products: manifest");
-    expect(collection).toContain('batches: \'["source_mac_arm64","source_mac_x64","source_win_x64"]\'');
-    expect(collection).not.toContain("test_verify");
-    expect(collection).not.toContain("needs.build_mac_arm64.result == 'success'");
+    expect(workflow).not.toContain("  cache_build_results:");
 
   });
 
@@ -2398,11 +2403,11 @@ process.stdin.on("end", () => {
     }
     expect(matrices.common).toHaveLength(1);
     expect(matrices.common[0].workloads).toEqual(["source_js_packages", "source_js_daemon", "source_js_shell"]);
-    expect(workflow.match(/    strategy:/g)).toHaveLength(3);
-    expect(workflow).not.toContain("  build_linux_x64:");
+    expect(workflow.match(/    strategy:/g)).toHaveLength(5);
+    expect(workflow).toContain("  build_linux_x64:");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
     expect(workflow).toContain('run: ${{ matrix.command }}');
-    expect(workflow).toContain("run: ${{ needs.plan.outputs.contribution == 'true' && matrix.prepareShared || matrix.prepare }}");
+    expect(workflow).toContain("run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}");
     expect(workflow).toContain('OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}');
     expect(workflow).toContain("OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}");
     expect(workflow).toContain('test_matrix: ${{ steps.plan.outputs.test_matrix }}');
@@ -2414,17 +2419,24 @@ process.stdin.on("end", () => {
 
   it("[P1] keeps beta validation in separate jobs without gating publication or writing channel fixtures", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const publish = sectionBetween(workflow, "\n  publish:", "\n  test:");
+    const publish = workflowJob(workflow, "publish");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
-    expect(workflow).not.toContain("  test_functional_e2e:");
-    const tests = sectionBetween(workflow, "\n  test:\n", "\n  cache_build_results:");
-    expect(tests).toContain("needs.plan.outputs.test_count != '0'");
-    expect(tests).toContain("matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}");
-    expect(tests).toContain("fail-fast: false");
-    expect(tests).toContain("name: ${{ matrix.name }}");
-    expect(tests).toContain("runs-on: ${{ matrix.runner }}");
-    const plan = sectionBetween(workflow, "  plan:", "  build:");
+    for (const id of ["test_e2e_vitest", "test_verify", "test_daemon_unit_tests", "test_functional_e2e"]) {
+      const tests = workflowJob(workflow, id);
+      expect(tests).toContain(`fromJSON(needs.plan.outputs.run).${id}`);
+      expect(tests).toContain(`fromJSON(needs.plan.outputs.${id}_matrix)`);
+      expect(tests).toContain("fail-fast: false");
+      expect(tests).toContain("name: ${{ matrix.name }}");
+      expect(tests).toContain("runs-on: ${{ matrix.runner }}");
+      const cache = workflowJob(workflow, `cache_${id}`);
+      expect(cache).toContain(`- ${id}`);
+      expect(cache).toContain("products: none");
+      expect(cache).toContain(`workloads: '["${id}"]'`);
+      expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
+      expect(cache).not.toContain("build_mac");
+    }
+    const plan = workflowJob(workflow, "plan");
     expect(plan).toContain("steps.identity.outputs.commit == github.sha");
     expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json"');
     expect(plan).toContain("--all-workloads");
@@ -2434,13 +2446,6 @@ process.stdin.on("end", () => {
     expect(plan).toContain("OPEN_DESIGN_RELEASE_TAG_REMOTE: origin");
     expect(workflow).not.toContain("  plan_tests:");
     expect(workflow).not.toContain("  test_results:");
-    const cache = sectionBetween(workflow, "  cache_test_results:", "  smoke_mac_arm64:");
-    expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
-    expect(cache).toContain("config: .github/config/convergence/release-beta.json");
-    expect(cache).toContain("products: none");
-    expect(cache).toContain("needs: [plan, test]");
-    expect(cache).toContain("fromJSON(needs.plan.outputs.contributions).none");
-    expect(cache).not.toContain("build_mac");
     const writer = await readFile(join(workspaceRoot, ".github/workflows/convergence.atom.yml"), "utf8");
     expect(writer).toContain("!cancelled() && github.event_name == 'workflow_dispatch'");
     expect(writer).toContain('--products "$PRODUCT_MODE"');
@@ -2466,7 +2471,7 @@ process.stdin.on("end", () => {
 
   it("[P2] preserves beta linux AppImage smoke reports for platform publication", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const linuxBuildStep = workflow.match(/- name: Build beta linux_x64\r?\n(?:.+\r?\n)+?(?=\r?\n      - name: Write linux_x64 release report)/m);
+    const linuxBuildStep = [sectionBetween(workflow, "- name: Build beta linux_x64", "- name: Write linux_x64 release report")];
     expect(linuxBuildStep?.[0]).toBeDefined();
     expect(linuxBuildStep?.[0]).toContain("RELEASE_TARGET: linux_x64");
     expect(linuxBuildStep?.[0]).toContain("RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/linux_x64");
@@ -2823,7 +2828,7 @@ process.stdin.on("end", () => {
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(notifyDailyFeishuWorkflowPath, "utf8"),
     ]);
-    const metadataJob = sectionBetween(betaWorkflow, "  plan:", "  build:");
+    const metadataJob = workflowJob(betaWorkflow, "plan");
     const publisherGuard = sectionBetween(
       metadataJob,
       "- name: Validate shared beta publisher",
@@ -2848,32 +2853,32 @@ process.stdin.on("end", () => {
     expect(metadataJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
     expect(metadataJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
     expect(metadataJob).toContain(`promote: \${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}`);
-    expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build.outputs.mac_arm64_smoke_result }}");
-    expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build.outputs.win_x64_smoke_result }}");
+    expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}");
+    expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}");
     expect(betaWorkflow).toContain(
-      "value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build.outputs.mac_arm64_url }}",
+      "value: ${{ jobs.publish.outputs.mac_arm64_url || jobs.build_mac_arm64.outputs.url }}",
     );
     expect(betaWorkflow).toContain(
-      "value: ${{ jobs.publish.outputs.win_x64_url || jobs.build.outputs.win_x64_url }}",
+      "value: ${{ jobs.publish.outputs.win_x64_url || jobs.build_win_x64.outputs.url }}",
     );
 
     const macJob = betaPlatformBuild(betaWorkflow, "mac_arm64");
-    expect(macJob).toContain("mac_arm64_smoke_result: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_smoke.outcome || '' }}");
-    expect(macJob).toContain("mac_arm64_url: ${{ matrix.target == 'mac_arm64' && steps.mac_arm64_platform_outputs.outputs.dmg_url || '' }}");
+    expect(macJob).toContain("smoke_result: ${{ steps.mac_arm64_smoke.outcome }}");
+    expect(macJob).toContain("url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}");
     expect(macJob).toContain("id: mac_arm64_smoke");
     expect(macJob).toContain("continue-on-error: true");
     expect(macJob).toContain("id: mac_arm64_platform_outputs");
 
     const winJob = betaPlatformBuild(betaWorkflow, "win_x64");
-    expect(winJob).toContain("win_x64_smoke_result: ${{ matrix.target == 'win_x64' && steps.win_x64_smoke.outcome || '' }}");
-    expect(winJob).toContain("win_x64_url: ${{ matrix.target == 'win_x64' && steps.win_x64_platform_outputs.outputs.installer_url || '' }}");
+    expect(winJob).toContain("smoke_result: ${{ steps.win_x64_smoke.outcome }}");
+    expect(winJob).toContain("url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}");
     expect(winJob).toContain("id: win_x64_smoke");
     expect(winJob).toContain("continue-on-error: true");
     expect(winJob).toContain("id: win_x64_platform_outputs");
 
-    const publishJob = betaWorkflow.slice(betaWorkflow.indexOf("  publish:"));
+    const publishJob = workflowJob(betaWorkflow, "publish");
     expect(publishJob).toContain("needs.plan.outputs.promote == 'true'");
-    expect(publishJob).toContain("ARTIFACT_NAME_REGEX: '^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$'");
+    expect(publishJob).toContain("^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$");
     expect(dailyWorkflow).toContain("tools-release recover-beta");
     expect(dailyWorkflow).toContain("force: ${{ needs.resolve.outputs.force == 'true' }}");
     expect(dailyWorkflow).toContain("promote: ${{ needs.resolve.outputs.promote == 'true' }}");

@@ -244,7 +244,7 @@
           "products": "manifest",
           "reusable": true,
           "success": {
-            "[build] macOS arm64": [
+            "[build] mac_arm64 workload": [
               "[build] Source web",
               "[retain] Source products"
             ]
@@ -259,7 +259,7 @@
           "products": "manifest",
           "reusable": true,
           "success": {
-            "[build] macOS x64": [
+            "[build] mac_x64 workload": [
               "[build] Source web",
               "[retain] Source products"
             ]
@@ -274,7 +274,7 @@
           "products": "manifest",
           "reusable": true,
           "success": {
-            "[build] Windows x64": [
+            "[build] win_x64 workload": [
               "[build] Source web",
               "[retain] Source products"
             ]
