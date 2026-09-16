@@ -177,15 +177,19 @@ function parseWorkflowSteps(content: string): WorkflowStep[] {
 const SKIP_CHAIN_BREAKERS = ["always(", "cancelled(", "failure("];
 
 describe("release workflows", () => {
-  it("retains only the newest outer tools-pack cache for each release lane", async () => {
+  it("disables beta outer tools-pack caches without changing other release lanes", async () => {
     const workflows = await Promise.all([
       readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/workflows/release-prerelease.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/workflows/release-stable.yml", import.meta.url), "utf8"),
     ]);
 
+    expect(workflows[0]).not.toContain("uses: actions/cache/");
+    expect(workflows[0]).not.toContain("win_tools_pack_cache");
+    expect(workflows[0]).toContain("uses: ./.github/actions/setup-workspace");
+    expect(workflows[0]).toContain("--cache-dir");
     expect(workflows.map((workflow) => countOccurrences(workflow, "keep=1"))).toEqual([0, 2, 0]);
-    expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([1, 1, 1]);
+    expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([0, 1, 1]);
     for (const workflow of workflows) {
       expect(workflow).not.toContain("keep=3");
       expect(workflow).not.toContain("$keep = 3");
@@ -266,16 +270,12 @@ describe("release workflows", () => {
       expect(workflow).toContain("tools-release check-storage");
     }
     expect(win).not.toContain("tools\\release\\scripts\\build-platform.ps1");
-    expect(beta).toContain("uses: actions/cache/restore@v5");
-    expect(win).toContain("uses: actions/cache/save@v5");
-    expect(beta).toContain("tools-pack-win-v1-beta-$env:RUNNER_OS-");
     expect(win).toContain('pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\\tools-pack" --namespace release-beta-win --json');
     expect(win).toContain('"tools-pack", "win", "build"');
     expect(buildWin).toContain('$buildArgs += "--require-vela-cli"');
     expect(buildWin).toContain('$updateArgs += "--require-vela-cli"');
     expect(win).toContain("tools-pack win validate-payload");
     expect(win).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
-    expect(win).toContain(".\\.github\\scripts\\release\\cache\\win.ps1");
     for (const metadata of [betaMetadata, prereleaseMetadata, stableMetadata]) {
       expect(metadata).toContain("uses: pnpm/action-setup@v5");
       expect(metadata).toContain("run: pnpm install --frozen-lockfile");

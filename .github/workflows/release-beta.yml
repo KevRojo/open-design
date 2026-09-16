@@ -628,31 +628,6 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
 
-      - name: Compute Windows tools-pack cache key
-        if: ${{ matrix.target == 'win_x64' }}
-        id: win_tools_pack_cache_key
-        shell: pwsh
-        env:
-          WIN_TOOLS_PACK_ORIGIN_KEY: ${{ hashFiles('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/daemon/**', 'apps/web/**', 'apps/desktop/**', 'apps/packaged/**', 'packages/agui-adapter/**', 'packages/contracts/**', 'packages/plugin-runtime/**', 'packages/sidecar-proto/**', 'packages/sidecar/**', 'packages/platform/**', 'tools/pack/bin/**', 'tools/pack/package.json', 'tools/pack/resources/**', 'tools/pack/src/**', 'tools/pack/tsconfig.json', 'assets/community-pets/**', 'assets/frames/**', 'craft/**', 'design-systems/**', 'design-templates/**', 'plugins/_official/**', 'plugins/registry/**', 'prompt-templates/**', 'skills/**', '.github/workflows/release-beta.yml', '.github/scripts/release/cache/win.ps1') }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_TOOLS_PACK_ORIGIN_KEY)) {
-            throw "Windows tools-pack cache origin key is empty"
-          }
-          $prefix = "tools-pack-win-v1-beta-$env:RUNNER_OS-"
-          "origin=$env:WIN_TOOLS_PACK_ORIGIN_KEY" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "key=$prefix$env:WIN_TOOLS_PACK_ORIGIN_KEY" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Restore Windows tools-pack cache
-        if: ${{ matrix.target == 'win_x64' }}
-        id: win_tools_pack_cache_restore
-        uses: actions/cache/restore@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}\tools-pack-cache
-          key: ${{ steps.win_tools_pack_cache_key.outputs.key }}
-          restore-keys: |
-            ${{ steps.win_tools_pack_cache_key.outputs.prefix }}
 
       - name: '[prepare] Workspace source tools'
         if: ${{ matrix.target != 'linux_x64' }}
@@ -1163,33 +1138,6 @@ jobs:
         shell: pwsh
         run: Get-Content "${{ runner.temp }}\release-report\win_x64\summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
 
-      - name: Prune Windows tools-pack cache
-        if: ${{ matrix.target == 'win_x64' }}
-        shell: pwsh
-        continue-on-error: true
-        run: .\.github\scripts\release\cache\win.ps1
-
-      - name: Save Windows tools-pack cache
-        if: ${{ matrix.target == 'win_x64' && success() && steps.win_tools_pack_cache_restore.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}\tools-pack-cache
-          key: ${{ steps.win_tools_pack_cache_key.outputs.key }}
-
-      - name: Retain recent Windows tools-pack caches
-        if: ${{ matrix.target == 'win_x64' && (success()) }}
-        shell: pwsh
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $prefix = "${{ steps.win_tools_pack_cache_key.outputs.prefix }}"
-          $keep = 1
-          $caches = @(gh cache list --key $prefix --sort created_at --order desc --limit 100 --json id,key,createdAt | ConvertFrom-Json)
-          $stale = @($caches | Select-Object -Skip $keep)
-          foreach ($cache in $stale) { gh cache delete $cache.id }
-          "actionsCachePrefix=$prefix kept=$([Math]::Min($caches.Count, $keep)) deleted=$($stale.Count)"
 
       - name: Prepare win_x64 assets
         if: ${{ matrix.target == 'win_x64' && (inputs.publish) }}

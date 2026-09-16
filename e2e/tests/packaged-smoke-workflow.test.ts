@@ -2341,14 +2341,10 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("uses: ./.github/actions/workspace-product");
       expect(job.indexOf("[restore] Shared JavaScript")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
       expect(job).toContain(target === "win_x64" ? '"tools-pack", "win", "package"' : "exec tools-pack mac package");
-      if (target === "mac_arm64" || target === "mac_x64") {
-        expect(job).not.toContain("uses: actions/cache/");
-        expect(job).not.toContain("tools_pack_cache_key");
-        expect(job).not.toContain("gh cache delete");
-        expect(job).not.toContain("Retry beta");
-      } else {
-        expect(job).toContain("uses: actions/cache/restore@v5"); // Windows still reuses native products.
-      }
+      expect(job).not.toContain("uses: actions/cache/");
+      expect(job).not.toContain("tools_pack_cache_key");
+      expect(job).not.toContain("gh cache delete");
+      expect(job).not.toContain("Retry beta");
       expect(job.match(/uses: \.\/\.github\/actions\/setup-workspace\n/g)).toHaveLength(1);
       expect(job.match(/name: '\[retain\] Source products'/g)).toHaveLength(1);
       expect(job).toContain("source-products/*/product/workspace.tar.gz");
@@ -2544,9 +2540,6 @@ process.stdin.on("end", () => {
     expect(releaseBetaWorkflow).toContain("OD_PACKAGED_E2E_MAC_UPDATE_FIXTURE: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' && 'tools-serve' || '' }}");
     const betaWinJob = betaPlatformBuild(releaseBetaWorkflow, "win_x64");
     expect(betaWinJob).not.toContain("tools\\release\\scripts\\build-platform.ps1");
-    expect(betaWinJob).toContain("uses: actions/cache/restore@v5");
-    expect(betaWinJob).toContain("uses: actions/cache/save@v5");
-    expect(betaWinJob).toContain("tools-pack-win-v1-beta-$env:RUNNER_OS-");
     expect(betaWinJob).toContain('"tools-pack", "win", "build"');
     expect(betaWinJob).toContain("tools-pack win validate-payload");
     expect(betaWinJob).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
