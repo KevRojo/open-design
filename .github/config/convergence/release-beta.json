@@ -154,6 +154,7 @@
       ".github/scripts/lib/",
       ".github/workflows/convergence.atom.yml",
       ".github/workflows/release-beta.yml",
+      ".github/actions/convergence/",
       ".github/actions/setup-workspace/"
     ],
     "source-packages": [
@@ -200,8 +201,7 @@
           "reusable": true,
           "success": {
             "[build] Shared JavaScript": [
-              "[build] Source packages",
-              "[retain] Source products"
+              "[build] Source packages"
             ]
           }
         },
@@ -215,8 +215,7 @@
           "reusable": true,
           "success": {
             "[build] Shared JavaScript": [
-              "[build] Source daemon",
-              "[retain] Source products"
+              "[build] Source daemon"
             ]
           }
         },
@@ -230,8 +229,7 @@
           "reusable": true,
           "success": {
             "[build] Shared JavaScript": [
-              "[build] Source shell",
-              "[retain] Source products"
+              "[build] Source shell"
             ]
           }
         },
@@ -245,8 +243,7 @@
           "reusable": true,
           "success": {
             "[build] mac_arm64 workload": [
-              "[build] Source web",
-              "[retain] Source products"
+              "[build] Source web"
             ]
           }
         },
@@ -260,8 +257,7 @@
           "reusable": true,
           "success": {
             "[build] mac_x64 workload": [
-              "[build] Source web",
-              "[retain] Source products"
+              "[build] Source web"
             ]
           }
         },
@@ -275,8 +271,7 @@
           "reusable": true,
           "success": {
             "[build] win_x64 workload": [
-              "[build] Source web",
-              "[retain] Source products"
+              "[build] Source web"
             ]
           }
         },
@@ -292,7 +287,8 @@
               "Prepare test dependencies",
               "Run test unit"
             ]
-          }
+          },
+          "successBoundary": "steps"
         },
         "test_daemon_unit_tests": {
           "inputs": [
@@ -332,7 +328,8 @@
               "Prepare test dependencies",
               "Run test unit"
             ]
-          }
+          },
+          "successBoundary": "steps"
         },
         "test_functional_e2e": {
           "inputs": [

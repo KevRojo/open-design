@@ -2337,17 +2337,22 @@ process.stdin.on("end", () => {
 
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const handoffIds = [...workflow.matchAll(/^\s+handoff_id: (\S+)$/gm)].map((match) => match[1]!);
-    expect(handoffIds).toHaveLength(8);
-    expect(new Set(handoffIds).size).toBe(handoffIds.length);
-    await Promise.all(handoffIds.map((id) => execFileAsync("python3", [
-      join(workspaceRoot, ".github/scripts/handoff.py"), "artifact-name", "convergence", id,
-    ])));
+    const publicationIds = [...workflow.matchAll(/^          id: (beta-[^\n]+)$/gm)].map((match) => match[1]!);
+    expect(publicationIds).toHaveLength(8);
+    expect(new Set(publicationIds).size).toBe(publicationIds.length);
+    const action = await readFile(join(workspaceRoot, ".github/actions/convergence/action.yml"), "utf8");
+    for (const command of ["handoff", "admit --isolated", "publish --isolated"]) {
+      expect(action).toContain(`--config "$CONFIG" ${command}`);
+    }
+    expect(action).toContain('CONVERGENCE_STEP_RESULTS: ${{ inputs.step-results }}');
+    expect(action).toContain('--local-products-root "$LOCAL_PRODUCTS"');
+    expect(action).not.toContain("pnpm");
+    expect(action).not.toContain("continue-on-error");
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
       expect(job).toContain(`- source_${target}`);
-      expect(job).toContain(`- cache_${target}`);
+      expect(job).not.toContain(`- cache_${target}`);
       expect(job).not.toMatch(/needs:.*test_(verify|functional|daemon|e2e)/);
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
       expect(job).not.toContain("uses: ./.github/actions/workspace-product");
@@ -2359,25 +2364,20 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("Retry beta");
       expect(job.match(/uses: \.\/\.github\/actions\/setup-workspace\n/g)).toHaveLength(1);
       expect(job).not.toContain("[retain] Source products");
-      expect(job).toContain(`needs.cache_${target}.outputs.requests`);
+      expect(job).toContain(`needs.source_${target}.outputs.requests`);
       const source = workflowJob(workflow, `source_${target}`);
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
-      expect(source).toContain("source-products/*/product/workspace.tar.gz");
-      expect(source).toContain("if-no-files-found: error");
-      const cache = workflowJob(workflow, `cache_${target}`);
-      expect(cache).toContain(`- source_${target}`);
-      expect(cache).toContain(`needs.source_${target}.result == 'success'`);
-      expect(cache).toContain("!cancelled()");
-      expect(cache).not.toContain("success()");
-      expect(cache).not.toContain("- build_");
-      expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
-      expect(cache).toContain("consumer_requests: true");
+      expect(source).toContain("uses: ./.github/actions/convergence");
+      expect(source).toContain("local-products-root:");
+      expect(source).not.toContain("actions/upload-artifact");
+      expect(source).toContain("steps.source_web.outcome");
+      expect(workflow).not.toContain(`\n  cache_${target}:`);
       for (const unit of ["web"]) {
         expect(job).toContain(`[build] Source ${unit}`);
         expect(job).toContain("needs.plan.outputs.requests");
         expect(config.workflows["release-beta"].workloads[`source_${target}_${unit}`]).toMatchObject({
           inputs: [`suite://source-${unit}`], products: "manifest", runnerClass: `source_${target}`,
-          success: { [`[build] ${target} workload`]: [`[build] Source ${unit}`, "[retain] Source products"] }, successBoundary: "steps",
+          success: { [`[build] ${target} workload`]: [`[build] Source ${unit}`] }, successBoundary: "steps",
         });
         expect(config.workflows["release-beta"].batches[`source_${target}`].entries[unit]).toEqual({
           workload: `source_${target}_${unit}`, request: { unit }, product: "bundle",
@@ -2385,7 +2385,7 @@ process.stdin.on("end", () => {
       }
       for (const unit of ["packages", "daemon", "shell"]) expect(job).not.toContain(`[build] Source ${unit}`);
     }
-    const common = sectionBetween(workflow, "\n  common:", "\n  cache_common_results:");
+    const common = workflowJob(workflow, "common");
     for (const unit of ["packages", "daemon", "shell"]) {
       expect(common).toContain(`[build] Source ${unit}`);
       expect(config.workflows["release-beta"].workloads[`source_js_${unit}`]).toMatchObject({
@@ -2439,15 +2439,18 @@ process.stdin.on("end", () => {
       expect(tests).toContain("fail-fast: false");
       expect(tests).toContain("name: ${{ matrix.name || '[test]");
       expect(tests).toContain("runs-on: ${{ matrix.runner }}");
-      const cache = workflowJob(workflow, `cache_${id}`);
-      expect(cache).toContain(`- ${id}`);
-      expect(cache).toContain(`needs.${id}.result == 'success'`);
-      expect(cache).toContain("!cancelled()");
-      expect(cache).not.toContain("success()");
-      expect(cache).toContain("products: none");
-      expect(cache).toContain(`workloads: '["${id}"]'`);
-      expect(cache).toContain("uses: ./.github/workflows/convergence.atom.yml");
-      expect(cache).not.toContain("build_mac");
+      if (["test_e2e_vitest", "test_verify"].includes(id)) {
+        expect(tests).toContain("uses: ./.github/actions/convergence");
+        expect(tests).toContain("steps.run_test.outcome");
+        expect(workflow).not.toContain(`\n  cache_${id}:`);
+      } else {
+        const cache = workflowJob(workflow, `cache_${id}`);
+        expect(cache).toContain(`needs: [plan, ${id}]`);
+        expect(cache).toContain(`needs.${id}.result == 'success'`);
+        expect(cache).toContain("uses: ./.github/actions/convergence");
+        expect(cache).not.toContain("current-job:");
+        expect(cache).not.toContain("build_mac");
+      }
     }
     const plan = workflowJob(workflow, "plan");
     expect(plan).toContain("steps.identity.outputs.commit == github.sha");

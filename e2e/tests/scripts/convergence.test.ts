@@ -95,6 +95,60 @@ afterEach(() => {
 });
 
 describe("workload convergence", () => {
+  test("uses identical normalization for local products and transported artifacts", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import sys, zipfile
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+source = root / 'local'
+(source / 'web/product').mkdir(parents=True)
+(source / 'web/product/workspace.tar.gz').write_bytes(b'payload')
+archive = root / 'transport.zip'
+with zipfile.ZipFile(archive, 'w') as out:
+    out.writestr('web/product/workspace.tar.gz', b'payload')
+c.normalize_product_archive(source, root / 'local.zip', 'web/product')
+c.normalize_product_archive(archive, root / 'remote.zip', 'web/product')
+assert (root / 'local.zip').read_bytes() == (root / 'remote.zip').read_bytes()
+for prefix in ('../escape', 'absent'):
+    try: c.normalize_product_archive(source, root / 'bad.zip', prefix)
+    except c.ConfigError: pass
+    else: raise AssertionError('accepted unsafe or empty selection')
+(source / 'link').symlink_to(root / 'a.txt')
+try: c.normalize_product_archive(source, root / 'bad.zip')
+except c.ConfigError: pass
+else: raise AssertionError('accepted symlink')
+`, path.dirname(convergenceScript), fixture.root], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  test("restricts local execution evidence to the authorized release checkout", () => {
+    const result = spawnSync("python3", ["-c", `
+import argparse, json, os, sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+context = {'provenance': {'headSha': 'a' * 40}}
+args = argparse.Namespace(current_job='Native')
+env = {'GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_REPOSITORY':'nexu-io/open-design',
+       'GITHUB_REF':'refs/heads/feat/plan-foundation','GITHUB_WORKFLOW':'release-beta',
+       'GITHUB_SHA':'a' * 40,'CONVERGENCE_STEP_RESULTS':json.dumps({'Build':'success'})}
+with patch.dict(os.environ, env, clear=True):
+    assert c.local_execution_evidence(args, context) == {'job':'Native','steps':{'Build':'success'}}
+    assert c.local_execution_evidence(argparse.Namespace(), context) is None
+for key, value in [('GITHUB_EVENT_NAME','pull_request'), ('GITHUB_WORKFLOW','ci'),
+                   ('GITHUB_REF','refs/heads/foreign'), ('GITHUB_SHA','b'*40),
+                   ('GITHUB_REPOSITORY','foreign/repo'), ('CONVERGENCE_STEP_RESULTS','{}')]:
+    with patch.dict(os.environ, {**env,key:value}, clear=True):
+        try: c.local_execution_evidence(args, context)
+        except c.ConfigError: pass
+        else: raise AssertionError('accepted unauthorized local evidence: ' + key)
+`, path.dirname(convergenceScript)], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("collects only the explicitly completed workload without publishing siblings twice", () => {
     const result = spawnSync("python3", ["-c", `
 import argparse, copy, sys
@@ -324,6 +378,30 @@ jobs = [{"id": 1, "name": "Native", "run_id": 12, "run_attempt": 1, "head_sha": 
          (("Build a", "success"), ("Build b", "failure"), ("Retain", "success"))]}]
 candidate = c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, jobs)
 assert [entry["receipt"]["workload"] for entry in candidate["results"]] == ["a"]
+# The same finalizer/admission accepts trusted local step outcomes, never
+# treating a running job as success in the default CI transport.
+running = copy.deepcopy(jobs)
+running[0].update(status="in_progress", conclusion=None, steps=[])
+local = {"job": "Native", "steps": {"Build a": "success", "Build b": "failure", "Retain": "success"}}
+assert c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, running)["results"] == []
+assert c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, running,
+                            local_steps=local) == candidate
+with patch("convergence.run_jobs", return_value=running):
+    c.validate_admitted_plan(candidate, contract, root, tree, local_steps=local)
+    try: c.validate_admitted_plan(candidate, contract, root, tree)
+    except c.ConfigError: pass
+    else: raise AssertionError("CI accepted unfinished job")
+for outcome in ("failure", "skipped", "cancelled"):
+    bad_local = copy.deepcopy(local)
+    bad_local["steps"]["Build a"] = outcome
+    assert c.finalize_candidate(root / "pending.json", provenance, root / "products", contract, running,
+                                local_steps=bad_local)["results"] == []
+try: c.successful_workload_jobs(running, {"Native": ["Build a"]}, provenance,
+                                calculated["a"]["executionClass"], local_steps=local)
+except c.ConfigError: pass
+else: raise AssertionError("local publication bypassed job-wide boundary")
+assert c.successful_workload_jobs(running, {"Native": ["Build a"], "Missing shard": ["Build a"]},
+    provenance, calculated["a"]["executionClass"], boundary="steps", local_steps=local) is None
 # A newly admitted receipt can complete a mixed hot/cold consumer batch without
 # asking tools-pack to refresh or compute an identity.
 promoted = copy.deepcopy(candidate["results"][0]["receipt"])

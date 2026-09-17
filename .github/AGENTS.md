@@ -39,7 +39,7 @@ Atomic capability layer:
 - `autofix.atom.yml` consumes `handoff-autofix-*` artifacts and applies same-repository patches.
 - `report.atom.yml` consumes `handoff-report-*` artifacts and handles advanced comments that need trusted materialization, such as dependency install, R2 access, artifact processing, or report generation before upsert.
 - `rerun.atom.yml` watches completed `ci` runs and requests one `gh run rerun --failed` when leaf jobs died to runner/spot cancel. Decision logic lives in `.github/scripts/rerun_infra_cancel.py`; it must not rerun ordinary assertion failures or stale heads.
-- `convergence.atom.yml` consumes successful `handoff-convergence-*` artifacts and is the sole trusted publisher of immutable reusable workload results.
+- `convergence.atom.yml` consumes successful `handoff-convergence-*` artifacts for low-privilege CI. Authorized release jobs use `.github/actions/convergence` to invoke the same handoff/admit/publish commands with local execution evidence and products.
 - `.github/scripts/handoff.py` owns artifact names, directory layout, discovery, and contract validation for `comment`, `autofix`, `report`, and `convergence` handoffs.
 
 Default rule: do not add a new domain-specific follow-on workflow such as `foo.comment.atom.yml`, `foo.autofix.atom.yml`, or `foo.report.atom.yml` until the flow has been tested against these existing atomic capabilities.
@@ -61,6 +61,9 @@ entrypoints initialize metadata before workload runners start. A Windows job
 must never invoke their planning commands. The stdlib-only `convergence.py resolve-references`
 command is a cross-platform exception: it only validates received keys and assembles
 runner-local URLs, without Git access, identity calculation or cache decisions.
+Trusted release publication commands may also run on native runners: admission
+verifies the existing source snapshot through the same Python identity function;
+it does not make new scheduling or restore decisions. Product tools never calculate Plan identities.
 Keep runner placement, changed-file relevance,
 reusable-result convergence, and fine-grained commands inside a workload independent.
 
@@ -74,7 +77,7 @@ enumerated transient transport failures retry once, then fail visibly. Invalid
 receipts and missing products behind a receipt must not trigger rebuilding. The convergence
 handoff contains only workloads whose declared jobs and execution steps succeeded
 in the producing attempt, even when an unrelated gate failed. Only trusted
-`convergence.atom.yml` code may publish immutable results. `lib/r2.py` knows R2
+`convergence.atom.yml` code or explicitly authorized release runners may publish immutable results. `lib/r2.py` knows R2
 transport only and must not interpret workload policy or handoff schemas.
 
 Manual CI may select existing workload IDs through `workloads`; the resulting
@@ -120,15 +123,20 @@ Unpublished beta builds may retain GitHub artifacts but have no alternate R2 upl
 or receipt protocol. CDN installation validation requires published version metadata.
 Keep platform workload/cache/Electron chains and independent test/cache chains
 directly in `release-beta.yml`, without additional wrapper workflows. A cold
-platform product must publish through the existing convergence atom before its
+platform product must publish through the shared Python commands before its
 Electron consumer runs. Hot workloads skip build/publication, not Electron;
 consumers then use frozen Plan references. Each test workload publishes only
 after its complete declared shard set succeeds, independently of other tests.
 Beta prepares metadata and Plan in one root job, reusing the source checkout unless
-the workflow control SHA differs. Build and test result lanes call the existing
-convergence atom independently with a frozen Plan and product mode; collection and
-trusted publication share a runner, not another transport-only job. Each lane has
-its own concurrency identity. Test cache publication does not gate beta publication. Stable's
+the workflow control SHA differs. Release build and single-job test results publish
+in place through the thin convergence action; product directories go directly to
+the same normalizer/publisher used by transported CI artifacts. Local assertions
+are accepted only for an explicitly authorized release checkout and an explicit
+steps success boundary, using step outcomes rather than continue-on-error conclusions.
+The current run/attempt/commit/runner evidence is still checked against GitHub.
+Multi-job workloads retain their all-shard join; no one shard can publish group success.
+CI keeps its separate trusted writer and does not accept local release assertions.
+Test cache publication does not gate beta publication. Stable's
 existing validation gates remain intact. Prefer shallow checkouts; when beta needs
 the stable version floor, tools-release reads remote tag names explicitly instead
 of assuming a shallow checkout contains every tag or downloading full history.

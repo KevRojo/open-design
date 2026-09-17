@@ -524,6 +524,9 @@ jobs:
 
   common:
     name: ${{ matrix.name || '[build] Shared JavaScript' }}
+    outputs:
+      requests: ${{ steps.workload_results.outputs.requests }}
+      sources: ${{ steps.workload_results.outputs.sources }}
     needs: plan
     if: ${{ needs.plan.outputs.contribution == 'true' && needs.plan.outputs.common_count != '0' }}
     runs-on: ${{ matrix.runner }}
@@ -549,6 +552,7 @@ jobs:
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: '[build] Source packages'
+        id: source_packages
         env:
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.packages.retain && format('{0}/source-products/packages/product', runner.temp) || '' }}
         run: >-
@@ -556,6 +560,7 @@ jobs:
           --url "$SOURCE_PACKAGES_URL" --sha256 "$SOURCE_PACKAGES_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --json
       - name: '[build] Source daemon'
+        id: source_daemon
         env:
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.daemon.retain && format('{0}/source-products/daemon/product', runner.temp) || '' }}
         run: >-
@@ -563,37 +568,39 @@ jobs:
           --url "$SOURCE_DAEMON_URL" --sha256 "$SOURCE_DAEMON_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --json
       - name: '[build] Source shell'
+        id: source_shell
         env:
           SOURCE_OUTPUT: ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.retain && format('{0}/source-products/shell/product', runner.temp) || '' }}
         run: >-
           pnpm exec tools-pack workspace ${{ fromJSON(needs.plan.outputs.requests).source_javascript.shell.operation == 'restore' && 'import' || 'build' }} shell
           --url "$SOURCE_SHELL_URL" --sha256 "$SOURCE_SHELL_SHA256" --output "$SOURCE_OUTPUT"
           --scratch "$RUNNER_TEMP/source-import" --json
-      - name: '[retain] Source products'
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ !cancelled() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
         with:
-          name: beta-source-javascript
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 7
-
-  cache_common_results:
-    name: '[cache] Shared JavaScript results'
-    needs: [plan, common]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.contribution == 'true' && needs.plan.outputs.common_count != '0' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-common-results
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: manifest
-      batches: '["source_javascript"]'
-      consumer_requests: true
-    secrets: inherit
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-common-results
+          products: manifest
+          batches: '["source_javascript"]'
+          current-job: '${{ matrix.name }}'
+          step-results: |
+            {"[build] Source packages":"${{ steps.source_packages.outcome }}","[build] Source daemon":"${{ steps.source_daemon.outcome }}","[build] Source shell":"${{ steps.source_shell.outcome }}"}
+          local-products-root: ${{ runner.temp }}/source-products
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
 
   source_mac_arm64:
+    outputs:
+      requests: ${{ steps.workload_results.outputs.requests }}
+      sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_arm64 workload"
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_arm64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_mac_arm64.web.operation == 'build' }}
     runs-on: macos-14
@@ -611,7 +618,7 @@ jobs:
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
           SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_arm64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
@@ -629,34 +636,30 @@ jobs:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
-      - name: "[retain] Source products"
-        if: ${{ success() }}
-        uses: actions/upload-artifact@v4
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
         with:
-          name: beta-source-mac_arm64
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-source-mac-arm64
+          products: manifest
+          batches: '["source_mac_arm64"]'
+          current-job: '[build] mac_arm64 workload'
+          step-results: |
+            {"[build] Source web":"${{ steps.source_web.outcome }}"}
+          local-products-root: ${{ runner.temp }}/source-products
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
     needs:
       - plan
       - common
-      - cache_common_results
-  cache_mac_arm64:
-    name: "[cache] mac_arm64 workload"
-    needs:
-      - plan
-      - source_mac_arm64
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.source_mac_arm64.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-source-mac-arm64
-      batches: '["source_mac_arm64"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: manifest
-      consumer_requests: true
-    secrets: inherit
   build_mac_arm64:
     outputs:
       url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
@@ -665,9 +668,7 @@ jobs:
     needs:
       - plan
       - common
-      - cache_common_results
       - source_mac_arm64
-      - cache_mac_arm64
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_arm64 }}
     runs-on: macos-14
     defaults:
@@ -685,8 +686,8 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SOURCE_REQUESTS: ${{ needs.source_mac_arm64.result == 'success' && needs.cache_mac_arm64.outputs.requests || needs.source_mac_arm64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SOURCE_REQUESTS: ${{ needs.source_mac_arm64.result == 'success' && needs.source_mac_arm64.outputs.requests || needs.source_mac_arm64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_arm64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
@@ -890,6 +891,9 @@ jobs:
           path: ${{ runner.temp }}/release-platform-manifests/mac_arm64.json
           if-no-files-found: error
   source_mac_x64:
+    outputs:
+      requests: ${{ steps.workload_results.outputs.requests }}
+      sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_x64 workload"
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_x64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' }}
     runs-on: macos-15-intel
@@ -907,7 +911,7 @@ jobs:
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
           SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
@@ -925,42 +929,36 @@ jobs:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
-      - name: "[retain] Source products"
-        if: ${{ success() }}
-        uses: actions/upload-artifact@v4
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
         with:
-          name: beta-source-mac_x64
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-source-mac-x64
+          products: manifest
+          batches: '["source_mac_x64"]'
+          current-job: '[build] mac_x64 workload'
+          step-results: |
+            {"[build] Source web":"${{ steps.source_web.outcome }}"}
+          local-products-root: ${{ runner.temp }}/source-products
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
     needs:
       - plan
       - common
-      - cache_common_results
-  cache_mac_x64:
-    name: "[cache] mac_x64 workload"
-    needs:
-      - plan
-      - source_mac_x64
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.source_mac_x64.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-source-mac-x64
-      batches: '["source_mac_x64"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: manifest
-      consumer_requests: true
-    secrets: inherit
   build_mac_x64:
     name: "[build] mac_x64 Electron full"
     needs:
       - plan
       - common
-      - cache_common_results
       - source_mac_x64
-      - cache_mac_x64
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_x64 }}
     runs-on: macos-15-intel
     defaults:
@@ -978,8 +976,8 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SOURCE_REQUESTS: ${{ needs.source_mac_x64.result == 'success' && needs.cache_mac_x64.outputs.requests || needs.source_mac_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SOURCE_REQUESTS: ${{ needs.source_mac_x64.result == 'success' && needs.source_mac_x64.outputs.requests || needs.source_mac_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
@@ -1122,6 +1120,9 @@ jobs:
           path: ${{ runner.temp }}/release-platform-manifests/mac_x64.json
           if-no-files-found: error
   source_win_x64:
+    outputs:
+      requests: ${{ steps.workload_results.outputs.requests }}
+      sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] win_x64 workload"
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_win_x64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_win_x64.web.operation == 'build' }}
     runs-on: windows-latest
@@ -1139,7 +1140,7 @@ jobs:
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
           SOURCE_REQUESTS: ${{ needs.plan.outputs.requests }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_win_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
@@ -1157,34 +1158,30 @@ jobs:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
-      - name: "[retain] Source products"
-        if: ${{ success() }}
-        uses: actions/upload-artifact@v4
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
         with:
-          name: beta-source-win_x64
-          path: ${{ runner.temp }}/source-products/*/product/workspace.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-source-win-x64
+          products: manifest
+          batches: '["source_win_x64"]'
+          current-job: '[build] win_x64 workload'
+          step-results: |
+            {"[build] Source web":"${{ steps.source_web.outcome }}"}
+          local-products-root: ${{ runner.temp }}/source-products
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
     needs:
       - plan
       - common
-      - cache_common_results
-  cache_win_x64:
-    name: "[cache] win_x64 workload"
-    needs:
-      - plan
-      - source_win_x64
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.source_win_x64.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-source-win-x64
-      batches: '["source_win_x64"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: manifest
-      consumer_requests: true
-    secrets: inherit
   build_win_x64:
     outputs:
       url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
@@ -1193,9 +1190,7 @@ jobs:
     needs:
       - plan
       - common
-      - cache_common_results
       - source_win_x64
-      - cache_win_x64
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_win_x64 }}
     runs-on: windows-latest
     defaults:
@@ -1213,8 +1208,8 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SOURCE_REQUESTS: ${{ needs.source_win_x64.result == 'success' && needs.cache_win_x64.outputs.requests || needs.source_win_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SOURCE_REQUESTS: ${{ needs.source_win_x64.result == 'success' && needs.source_win_x64.outputs.requests || needs.source_win_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_win_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
         uses: ./.github/actions/setup-workspace
@@ -1389,7 +1384,6 @@ jobs:
     needs:
       - plan
       - common
-      - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_linux_x64 }}
     runs-on: ubuntu-latest
     defaults:
@@ -1670,7 +1664,7 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         if: ${{ (needs.plan.outputs.contribution == 'true') }}
         run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
       - name: Configure CI parallelism
@@ -1695,11 +1689,13 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Prepare test dependencies
+        id: prepare_test
         run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}
       - name: Clean Playwright state
         if: ${{ matrix.kind == 'ui' }}
         run: pnpm -C e2e exec tsx scripts/playwright.ts clean
       - name: Run test unit
+        id: run_test
         run: ${{ matrix.command }}
       - name: Preserve project-runtime domain artifact
         if: ${{ success() && matrix.kind == 'ui' && matrix.group == 'project-runtime' }}
@@ -1728,25 +1724,30 @@ jobs:
             e2e/ui/test-results
           if-no-files-found: ignore
           retention-days: 7
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
+        with:
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-test-e2e-vitest
+          products: none
+          workloads: '["test_e2e_vitest"]'
+          current-job: '${{ matrix.name }}'
+          step-results: |
+            {"Prepare test dependencies":"${{ steps.prepare_test.outcome }}","Run test unit":"${{ steps.run_test.outcome }}"}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
     needs:
       - plan
       - common
-      - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_e2e_vitest }}
-  cache_test_e2e_vitest:
-    name: "[cache] E2E Vitest result"
-    needs:
-      - plan
-      - test_e2e_vitest
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_e2e_vitest.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test-e2e-vitest
-      workloads: '["test_e2e_vitest"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: none
-    secrets: inherit
   test_verify:
     name: ${{ matrix.name || '[test] Verify' }}
     runs-on: ${{ matrix.runner }}
@@ -1767,7 +1768,7 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         if: ${{ (needs.plan.outputs.contribution == 'true') }}
         run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
       - name: Configure CI parallelism
@@ -1792,11 +1793,13 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - name: Prepare test dependencies
+        id: prepare_test
         run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}
       - name: Clean Playwright state
         if: ${{ matrix.kind == 'ui' }}
         run: pnpm -C e2e exec tsx scripts/playwright.ts clean
       - name: Run test unit
+        id: run_test
         run: ${{ matrix.command }}
       - name: Preserve project-runtime domain artifact
         if: ${{ success() && matrix.kind == 'ui' && matrix.group == 'project-runtime' }}
@@ -1825,25 +1828,30 @@ jobs:
             e2e/ui/test-results
           if-no-files-found: ignore
           retention-days: 7
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
+        with:
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-test-verify
+          products: none
+          workloads: '["test_verify"]'
+          current-job: '${{ matrix.name }}'
+          step-results: |
+            {"Prepare test dependencies":"${{ steps.prepare_test.outcome }}","Run test unit":"${{ steps.run_test.outcome }}"}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
     needs:
       - plan
       - common
-      - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_verify }}
-  cache_test_verify:
-    name: "[cache] Verify result"
-    needs:
-      - plan
-      - test_verify
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_verify.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test-verify
-      workloads: '["test_verify"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: none
-    secrets: inherit
   test_daemon_unit_tests:
     name: ${{ matrix.name || '[test] Daemon' }}
     runs-on: ${{ matrix.runner }}
@@ -1864,7 +1872,7 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         if: ${{ (needs.plan.outputs.contribution == 'true') }}
         run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
       - name: Configure CI parallelism
@@ -1925,22 +1933,36 @@ jobs:
     needs:
       - plan
       - common
-      - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_daemon_unit_tests }}
   cache_test_daemon_unit_tests:
     name: "[cache] Daemon result"
-    needs:
-      - plan
-      - test_daemon_unit_tests
+    needs: [plan, test_daemon_unit_tests]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_daemon_unit_tests.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test-daemon-unit-tests
-      workloads: '["test_daemon_unit_tests"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: none
-    secrets: inherit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
+        with:
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-test-daemon-unit-tests
+          products: none
+          workloads: '["test_daemon_unit_tests"]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
+
   test_functional_e2e:
     name: ${{ matrix.name || '[test] UI P0' }}
     runs-on: ${{ matrix.runner }}
@@ -1961,7 +1983,7 @@ jobs:
         shell: bash
         env:
           OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
-          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.cache_common_results.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         if: ${{ (needs.plan.outputs.contribution == 'true') }}
         run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
       - name: Configure CI parallelism
@@ -2022,24 +2044,35 @@ jobs:
     needs:
       - plan
       - common
-      - cache_common_results
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_functional_e2e }}
   cache_test_functional_e2e:
     name: "[cache] UI P0 result"
-    needs:
-      - plan
-      - test_functional_e2e
+    needs: [plan, test_functional_e2e]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_functional_e2e.result == 'success' && needs.plan.outputs.contribution == 'true' }}
-    uses: ./.github/workflows/convergence.atom.yml
-    with:
-      config: .github/config/convergence/release-beta.json
-      handoff_id: beta-test-functional-e2e
-      workloads: '["test_functional_e2e"]'
-      pending_artifact: ${{ needs.plan.outputs.pending_artifact }}
-      products: none
-    secrets: inherit
-
-
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: '[cache] Publish workload results'
+        id: workload_results
+        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        uses: ./.github/actions/convergence
+        with:
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-test-functional-e2e
+          products: none
+          workloads: '["test_functional_e2e"]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
 
   smoke_mac_arm64:
     name: "[validate] beta mac_arm64 downloaded artifact"

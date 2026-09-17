@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -521,14 +522,16 @@ def validate_candidate_plan(
 def successful_workload_jobs(
     jobs: list[dict[str, Any]], required: dict[str, list[str]],
     provenance: dict[str, Any], execution_class: dict[str, Any],
-    *, boundary: str = "job",
+    *, boundary: str = "job", local_steps: dict[str, Any] | None = None,
 ) -> list[int] | None:
     """Accept all declared shards and required steps from a trusted attempt API response.
 
     `required` belongs to trusted workflow configuration, never a candidate.
     Missing/failed/cancelled/skipped required execution is never a success.
     Explicit steps boundaries permit a completed job whose unrelated tail failed;
-    cancellation and incomplete jobs remain ineligible. The default is job-wide.
+    cancellation and incomplete jobs remain ineligible by default. Explicitly
+    authorized local evidence can attest completed steps in the current running
+    release job; it cannot attest another shard. The default is job-wide.
     Contradictory or ambiguous identities are invalid evidence. Older attempts
     are not silently borrowed; their independently published receipts remain usable.
     """
@@ -550,13 +553,24 @@ def successful_workload_jobs(
             if job.get(field) != expected:
                 raise ConfigError(f"workload job {name} {field} differs from producing attempt")
         conclusions = {"success", "failure"} if boundary == "steps" else {"success"}
-        if job.get("status") != "completed" or job.get("conclusion") not in conclusions:
+        local = local_steps is not None and name == local_steps["job"]
+        if local and boundary != "steps":
+            raise ConfigError("same-job publication requires an explicit steps success boundary")
+        if not local and (job.get("status") != "completed" or job.get("conclusion") not in conclusions):
+            return None
+        if local and job.get("status") not in {"in_progress", "completed"}:
+            return None
+        if local and job.get("status") == "completed" and job.get("conclusion") not in conclusions:
             return None
         if job.get("labels") != execution_class["labels"]:
             raise ConfigError(f"workload job {name} runner labels differ from plan")
         if type(job.get("id")) is not int or job["id"] <= 0 or job["id"] in accepted:
             raise ConfigError(f"invalid or repeated workload job id: {name}")
         for step in steps:
+            if local:
+                if local_steps["steps"].get(step) != "success":
+                    return None
+                continue
             executions = [item for item in job.get("steps", []) if item.get("name") == step]
             if len(executions) > 1:
                 raise ConfigError(f"ambiguous workload step: {name}/{step}")
@@ -725,8 +739,29 @@ def normalize_product_archive(source: Path, destination: Path, prefix: str | Non
     if prefix is not None and any(not IDENTITY_RE.fullmatch(part) for part in prefix.split("/")):
         raise ConfigError("unsafe product artifact selection")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(source, "r") as input_archive:
-        entries = sorted(input_archive.infolist(), key=lambda entry: entry.filename)
+    with ExitStack() as stack:
+        if source.is_dir():
+            root = source.resolve()
+            files = sorted(source.rglob("*"))
+            if any(file.is_symlink() for file in files):
+                raise ConfigError("local product directory must not contain symlinks")
+            entries = []
+            for file in files:
+                if not file.is_file():
+                    continue
+                entry = zipfile.ZipInfo(file.relative_to(source).as_posix())
+                entry.file_size = file.stat().st_size
+                entries.append(entry)
+            def open_entry(entry):
+                file = (root / entry.filename).resolve()
+                if not file.is_relative_to(root):
+                    raise ConfigError("local product escapes its root")
+                return file.open("rb")
+        else:
+            input_archive = stack.enter_context(zipfile.ZipFile(source, "r"))
+            entries = sorted(input_archive.infolist(), key=lambda entry: entry.filename)
+            def open_entry(entry):
+                return input_archive.open(entry, "r")
         if len(entries) > 10000:
             raise ConfigError("product artifact contains too many entries")
         if sum(entry.file_size for entry in entries) > 2 * 1024 * 1024 * 1024:
@@ -760,7 +795,7 @@ def normalize_product_archive(source: Path, destination: Path, prefix: str | Non
                 if directory:
                     output_archive.writestr(normalized, b"")
                     continue
-                with input_archive.open(entry, "r") as input_file, output_archive.open(normalized, "w") as output_file:
+                with open_entry(entry) as input_file, output_archive.open(normalized, "w") as output_file:
                     shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
         if not selected:
             raise ConfigError("product artifact selection is empty")
@@ -1206,7 +1241,7 @@ def finalize_candidate(
     products_root: Path,
     contract: ConvergenceContract,
     jobs: list[dict[str, Any]],
-    *, products_mode: str | None = None,
+    *, products_mode: str | None = None, local_steps: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     pending = object_value(load_json(pending_path), "pending convergence")
     workflow = contract.workflow(require_string(pending.get("workflow"), "pending workflow"))
@@ -1232,7 +1267,8 @@ def finalize_candidate(
             continue
         if successful_workload_jobs(jobs, workflow.workloads[identity].success,
                                     provenance, value["executionClass"],
-                                    boundary=workflow.workloads[identity].success_boundary) is None:
+                                    boundary=workflow.workloads[identity].success_boundary,
+                                    local_steps=local_steps) is None:
             continue
         products_mode = workflow.workloads[identity].products
         if products_mode == "manifest":
@@ -1327,12 +1363,13 @@ def producer_context(payload: dict[str, Any]) -> dict[str, Any]:
 
 def handoff_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
     context = producer_context(event_payload())
+    local_steps = local_execution_evidence(args, context)
     jobs = run_jobs(context["repository"], context["provenance"]["runId"], context["provenance"]["runAttempt"])
     products_mode = getattr(args, "products", None)
     if products_mode == "manifest":
         contribute_batches_command(argparse.Namespace(pending=args.pending, output_dir=args.products_root), contract)
     candidate = finalize_candidate(args.pending, context["provenance"], args.products_root, contract, jobs,
-                                   products_mode=products_mode)
+                                   products_mode=products_mode, local_steps=local_steps)
     identities = getattr(args, "workloads", [])
     if not isinstance(identities, list) or any(not isinstance(value, str) for value in identities) or len(set(identities)) != len(identities):
         raise ConfigError("contribution workloads must be a unique string array")
@@ -1353,6 +1390,14 @@ def handoff_command(args: argparse.Namespace, contract: ConvergenceContract) -> 
             raise ConfigError("unknown contribution batch")
         selected = {entry["workload"] for name in batch_names for entry in workflow.batches[name]["entries"].values()}
         candidate["results"] = [item for item in candidate["results"] if item["receipt"]["workload"] in selected]
+        if local_steps is not None:
+            required = {identity for identity in selected if pending["workloads"][identity]["run"]
+                        and not pending["workloads"][identity]["resultHit"]
+                        and set(workflow.workloads[identity].success) == {local_steps["job"]}
+                        and all(local_steps["steps"].get(step) == "success"
+                                for step in workflow.workloads[identity].success[local_steps["job"]])}
+            if {item["receipt"]["workload"] for item in candidate["results"]} != required:
+                raise ConfigError("local batch lacks complete execution evidence")
     if candidate.get("repositoryId") != context["repositoryId"] or candidate.get("repository") != context["repository"]:
         raise ConfigError("pending convergence repository differs from the producing run")
     handoff_contract.write_convergence(args.handoff_root, args.id, candidate)
@@ -1509,6 +1554,7 @@ def authenticated_source_tree(entry: dict[str, Any], payload: dict[str, Any]) ->
 
 def validate_admitted_plan(
     candidate: dict[str, Any], contract: ConvergenceContract, root: Path, tree: str,
+    *, local_steps: dict[str, Any] | None = None,
 ) -> None:
     """Authenticate execution via attempt jobs, then recompute the source recipe.
 
@@ -1531,7 +1577,7 @@ def validate_admitted_plan(
         if set(execution) != {"runnerClass", "labels"} or execution["runnerClass"] != workload.runner_class:
             raise ConfigError(f"candidate {identity} runner class differs from declaration")
         if successful_workload_jobs(jobs, workload.success, provenance, execution,
-                                    boundary=workload.success_boundary) is None:
+                                    boundary=workload.success_boundary, local_steps=local_steps) is None:
             raise ConfigError(f"candidate {identity} lacks successful execution in producing attempt")
         if workload.runner_class in runners and runners[workload.runner_class] != execution["labels"]:
             raise ConfigError("candidate has inconsistent runner class labels")
@@ -1854,6 +1900,27 @@ def self_check() -> None:
             raise ConfigError("convergence self-check produced nondeterministic product archives")
 
 
+def local_execution_evidence(args: argparse.Namespace, context: dict[str, Any]) -> dict[str, Any] | None:
+    """Trusted release runners may attest completed steps before their job ends.
+
+    CI never accepts producer assertions. This is an execution location option,
+    not a second identity or receipt protocol, and cannot attest another shard.
+    """
+    job = getattr(args, "current_job", "")
+    if not job:
+        return None
+    if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
+            or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"
+            or os.environ.get("GITHUB_WORKFLOW") != "release-beta"
+            or os.environ.get("GITHUB_SHA") != context["provenance"]["headSha"]):
+        raise ConfigError("same-job evidence requires the authorized release source checkout")
+    steps = object_value(json.loads(os.environ.get("CONVERGENCE_STEP_RESULTS", "{}")), "local step results")
+    if not steps or any(value not in {"success", "failure", "cancelled", "skipped"} for value in steps.values()):
+        raise ConfigError("local step results require explicit execution outcomes")
+    return {"job": require_string(job, "current job name"), "steps": steps}
+
+
 def require_isolated_candidate(candidate: dict[str, Any]) -> None:
     """Task-scoped authorization, deliberately not a production trust override."""
     if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
@@ -1887,7 +1954,8 @@ def admit_isolated_command(args: argparse.Namespace, contract: ConvergenceContra
     if contract.workflow(candidate["workflow"]).policy != candidate["policy"]:
         raise ConfigError("isolated policy differs from declaration")
     root = args.root.resolve() if args.root else repository_root(__file__)
-    validate_admitted_plan(candidate, contract, root, candidate["provenance"]["treeSha"])
+    local_steps = local_execution_evidence(args, producer_context(event_payload()))
+    validate_admitted_plan(candidate, contract, root, candidate["provenance"]["treeSha"], local_steps=local_steps)
     append_outputs({"candidate": entry["candidate_path"], "publish": "true"})
     return 0
 
@@ -1939,8 +2007,9 @@ def publish_command(args: argparse.Namespace) -> int:
             if product["type"] != "job":
                 continue
             source = product["source"]
-            source_archive = args.products_root / f"{source}.zip"
-            if not source_archive.is_file():
+            local_root = getattr(args, "local_products_root", None)
+            source_archive = local_root if local_root is not None else args.products_root / f"{source}.zip"
+            if not source_archive.exists():
                 raise ConfigError(f"current-run product artifact is missing: {source}")
             archive = args.output_dir / "products" / f"{identity}-{name}.zip"
             normalize_product_archive(source_archive, archive, product.get("path"))
@@ -2060,6 +2129,7 @@ def parse_args() -> argparse.Namespace:
     handoff.add_argument("--products", choices=["none", "manifest"], help="collect one independent result lane")
     handoff.add_argument("--batches", type=json.loads, default=[], help="JSON array of declared product batches to collect")
     handoff.add_argument("--workloads", type=json.loads, default=[], help="JSON array of independently completed workloads to collect")
+    handoff.add_argument("--current-job", default="", help="authorized release job; outcomes from CONVERGENCE_STEP_RESULTS")
     restore = sub.add_parser("restore")
     restore.add_argument("--pending", type=Path, required=True)
     restore.add_argument("--workload", required=True)
@@ -2078,6 +2148,7 @@ def parse_args() -> argparse.Namespace:
     admit = sub.add_parser("admit")
     admit.add_argument("--handoff-root", type=Path, required=True)
     admit.add_argument("--isolated", action="store_true")
+    admit.add_argument("--current-job", default="")
     publication = sub.add_parser("prepare-publication")
     publication.add_argument("--candidate", type=Path, required=True)
     publication.add_argument("--output-dir", type=Path, required=True)
@@ -2093,6 +2164,8 @@ def parse_args() -> argparse.Namespace:
     publish.add_argument("--timeout", type=float, default=15.0)
     publish.add_argument("--isolated", action="store_true")
     publish.add_argument("--pending", type=Path, help="project consumer requests after trusted publication")
+    publish.add_argument("--local-products-root", type=lambda value: Path(value) if value else None,
+                         help="current runner products instead of transported artifacts")
     return parser.parse_args()
 
 
