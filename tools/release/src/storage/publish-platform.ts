@@ -14,6 +14,7 @@ import {
 } from "./common.ts";
 import { assertCurrentVersionReservation, versionLockObjectKey } from "./beta-version-reservation.ts";
 import { putStorageObject } from "./s3-upload.ts";
+import { mapWithConcurrency } from "./concurrency.ts";
 import { releaseChannelDescriptor } from "@open-design/release";
 
 type AssetEntry = {
@@ -120,6 +121,8 @@ async function upload(path: string, objectKey: string, cacheControl: string): Pr
     return;
   }
   if (storage == null) throw new Error("storage config is required to upload release assets");
+  const startedAt = performance.now();
+  const bytes = statSync(path).size;
   await putStorageObject({
     ...storage,
     bodyPath: path,
@@ -127,6 +130,7 @@ async function upload(path: string, objectKey: string, cacheControl: string): Pr
     contentType: contentType(path),
     objectKey,
   });
+  console.log(JSON.stringify({ event: "release-upload", objectKey, bytes, durationMs: Math.round(performance.now() - startedAt) }));
 }
 
 async function uploadReport(reportDirectory: string): Promise<Record<string, unknown> | null> {
@@ -135,10 +139,10 @@ async function uploadReport(reportDirectory: string): Promise<Record<string, unk
   if (files.length === 0) return null;
 
   const reportPrefix = `${versionPrefix}/report/${reportDirectory}`;
-  for (const file of files) {
+  await mapWithConcurrency(files, 2, async (file) => {
     const relativePath = normalizePath(relative(reportRoot, file));
     await upload(file, `${reportPrefix}/${relativePath}`, "public, max-age=31536000, immutable");
-  }
+  });
   if (reportZipPath.length > 0) {
     createReportZip(reportRoot, reportZipPath);
     await upload(reportZipPath, `${reportPrefix}/report.zip`, "public, max-age=31536000, immutable");
@@ -249,9 +253,11 @@ function targetConfig(): TargetConfig {
 }
 
 const config = targetConfig();
-for (const name of config.assetNames) {
+const uploadsStartedAt = performance.now();
+await mapWithConcurrency(config.assetNames, 2, async (name) => {
   await upload(join(releaseAssetsDir, name), `${versionPrefix}/${name}`, "public, max-age=31536000, immutable");
-}
+});
+console.log(JSON.stringify({ event: "release-assets-uploaded", concurrency: 2, count: config.assetNames.length, durationMs: Math.round(performance.now() - uploadsStartedAt) }));
 
 const report = config.reportDirectory == null ? null : await uploadReport(config.reportDirectory);
 const versionManifestUrl = publicUrl(publicOrigin, versionPrefix, `platforms/${target}.json`);
