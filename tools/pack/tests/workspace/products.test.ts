@@ -64,8 +64,12 @@ describe("workspace product boundary", () => {
     const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
     const descriptor = source(f.root, archive);
     vi.mocked(fetch).mockRejectedValue(new TypeError("fetch failed", { cause: { code } }));
-    await expect(importWorkspaceOutputs(f.root, f.scratch, descriptor)).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(code === "ECONNRESET" ? 2 : 1);
+    const attempts = code === "ECONNRESET" ? 2 : 1;
+    await expect(importWorkspaceOutputs(f.root, f.scratch, descriptor)).rejects.toThrow(
+      `workspace product request failed after ${attempts} request(s): ${code}`,
+    );
+    expect(fetch).toHaveBeenCalledTimes(attempts);
+    expect(readFileSync(join(f.root, "apps/daemon/dist/cli.js"), "utf8")).toBe("export {};\n");
   });
 
   it("exports portable JavaScript and imports a clean complete declaration closure", async () => {
