@@ -112,8 +112,13 @@ dependencies and the postinstall-declared tool build closure have separate
 Actions cache keys. Neither is a Plan result or a test receipt. Dependency
 snapshots contain only node_modules, never business dist/Next outputs or signing
 material; only an exact hit skips installation, and install-time native validation
-still runs. Tool outputs are saved before business products are imported. Scope
-these executable caches by OS/arch, actual Node version, pnpm and preparation
+still runs. Tool outputs are saved before business products are imported.
+On Windows, never restore or save the installed node_modules snapshot: pnpm's
+junction tree does not reliably survive the archive round trip. Restore its
+content store and run the dependency-only frozen install instead; tool dist
+caching remains independent. Packaging callers validate the CLI can load before
+importing business products.
+Scope these executable caches by OS/arch, actual Node version, pnpm and preparation
 inputs; do not use prefix restore keys for them. Existing callers remain unchanged.
 
 Release graphs separate delivery, source validation, and reusable-result publication.

@@ -2326,6 +2326,14 @@ process.stdin.on("end", () => {
     expect(action).toContain("steps.dependencies-cache.outputs.cache-hit != 'true'");
     expect(action).toContain("workspace-dependencies-v1-${{ runner.os }}-${{ runner.arch }}");
     expect(action).toContain("workspace-tools-v1-${{ runner.os }}-${{ runner.arch }}");
+    const dependencyRestore = sectionBetween(action, "    - name: '[restore] Installed workspace dependencies'", "    - name: Restore pnpm store");
+    const dependencySave = sectionBetween(action, "    - name: '[cache] Installed workspace dependencies'", "    - name: '[restore] Tool build closure'");
+    expect(dependencyRestore).toContain("runner.os != 'Windows'");
+    expect(dependencySave).toContain("runner.os != 'Windows'");
+    // Windows still restores the content store and the independent tool outputs.
+    expect(sectionBetween(action, "    - name: Restore pnpm store", "    - name: Install dependencies")).not.toContain("runner.os != 'Windows'");
+    expect(sectionBetween(action, "    - name: '[restore] Tool build closure'", "    - name: '[build] Tool build closure'")).not.toContain("runner.os != 'Windows'");
+    expect(action).toContain("run: pnpm exec tools-pack --help");
     expect(action).not.toContain("Plan");
   });
 

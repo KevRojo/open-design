@@ -88,7 +88,9 @@ runs:
       run: python3 .github/scripts/workspace.py
 
     - name: '[restore] Installed workspace dependencies'
-      if: ${{ inputs.cache-tools == 'true' }}
+      # Windows pnpm junctions do not reliably survive the tar cache round trip.
+      # Restore the content store there and let pnpm recreate its links instead.
+      if: ${{ inputs.cache-tools == 'true' && runner.os != 'Windows' }}
       id: dependencies-cache
       uses: actions/cache/restore@v5
       with:
@@ -129,7 +131,7 @@ runs:
       run: pnpm run postinstall dependencies
 
     - name: '[cache] Installed workspace dependencies'
-      if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.cache-tools == 'true' && runner.os != 'Windows' && inputs.save-pnpm-cache == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: |
@@ -153,6 +155,11 @@ runs:
       if: ${{ inputs.cache-tools == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: pnpm run postinstall build
+
+    - name: '[validate] Packaging tool readiness'
+      if: ${{ inputs.cache-tools == 'true' && contains(env.OPEN_DESIGN_POSTINSTALL_TARGETS, 'tools/pack') }}
+      shell: bash
+      run: pnpm exec tools-pack --help
 
     - name: '[cache] Tool build closure'
       if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
