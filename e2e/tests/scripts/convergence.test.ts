@@ -281,13 +281,16 @@ for mutation in ("duplicate", "unknown", "runner", "missing-shard"):
   });
 
   test("beta test identities follow source, fixtures and their own execution instead of publication", () => {
+    // Exercise the real declarations against an isolated Git fixture, not the
+    // entire checkout on every mutation (which scales with repository size).
+    const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `
 import copy, os, subprocess, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import convergence as c
 root = Path(sys.argv[2])
-contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
+contract = c.ConvergenceContract(Path(sys.argv[3]) / ".github/config/convergence/release-beta.json")
 ids = {"test_daemon_unit_tests", "test_functional_e2e", "source_js_daemon"}
 runners = {"release_tests": ["ubuntu-latest"], "ui_p0": ["ui-runner"], "source_javascript": ["ubuntu-latest"]}
 with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
@@ -298,6 +301,18 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     def keys(config=contract):
         return {key: value["digest"] for key, value in c.calculate(config, root, "release-beta", runners, index=index, identities=ids).items()}
     git("read-tree", "HEAD")
+    # Seed one tracked witness per declared path; missing selectors still fail
+    # in the production evaluator, and no business source needs to be copied.
+    oid = git("hash-object", "-w", "--stdin", content="baseline witness")
+    names = set()
+    for suite in ("daemon-tests", "ui-tests", "source-daemon"):
+        for token in contract.suite_paths(suite):
+            names.add(token + "fixture.ts" if token.endswith("/") else token)
+    for resource in contract.resources.values():
+        for token in resource.get("exclude", []):
+            names.add(token.replace("**", "fixture").replace("*", "fixture"))
+    git("update-index", "--index-info", content="".join("100644 " + oid + "\\t" + name + "\\n" for name in sorted(names)))
+    baseline_tree = git("write-tree")
     baseline = keys()
     cases = {
       ".github/workflows/release-beta.yml": set(),
@@ -309,17 +324,17 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
       "packages/contracts/tests/plan-witness.test.ts": set(),
     }
     for path, expected in cases.items():
-        git("read-tree", "HEAD")
+        git("read-tree", baseline_tree)
         oid = git("hash-object", "-w", "--stdin", content="identity witness")
         git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
         changed = {key for key, value in keys().items() if value != baseline[key]}
         assert changed == expected, (path, changed, expected)
-    git("read-tree", "HEAD")
+    git("read-tree", baseline_tree)
     changed = copy.deepcopy(contract)
     row = next(r for r in changed.workflow("release-beta").matrices["test"] if r["kind"] == "daemon")
     row["command"] += " --bail=1"
     assert {key for key, value in keys(changed).items() if value != baseline[key]} == {"test_daemon_unit_tests"}
-`, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
+`, path.dirname(convergenceScript), fixture.root, repoRoot], { encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
   });
 
