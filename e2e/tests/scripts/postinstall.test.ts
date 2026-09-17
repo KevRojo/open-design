@@ -198,6 +198,74 @@ function eventIndex(events: StubEvent[], event: StubEvent["event"], target: stri
 }
 
 describe("postinstall script contract", () => {
+  it("[P2] keys dependency preparation separately from tool compilation and business source", () => {
+    const sandbox = createSandbox();
+    try {
+      writeTarget(sandbox, "packages/release", { name: "@open-design/release" });
+      writeTarget(sandbox, "tools/pack", {
+        name: "@open-design/tools-pack", dependencies: { "@open-design/release": "workspace:*" },
+      });
+      writeTarget(sandbox, "apps/daemon", { name: "@open-design/daemon" });
+      for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".github/actions/setup-workspace/action.yml"]) {
+        mkdirSync(dirname(join(sandbox, path)), { recursive: true });
+        writeFileSync(join(sandbox, path), "{}\n");
+      }
+      mkdirSync(join(sandbox, ".github/scripts"), { recursive: true });
+      writeFileSync(join(sandbox, ".github/scripts/workspace.py"), readFileSync(join(workspaceRoot, ".github/scripts/workspace.py")));
+      for (const path of ["tools/pack/src/index.ts", "apps/daemon/src/index.ts"]) {
+        mkdirSync(dirname(join(sandbox, path)), { recursive: true });
+        writeFileSync(join(sandbox, path), "export {};\n");
+      }
+      expect(spawnSync("git", ["init", "--quiet"], { cwd: sandbox }).status).toBe(0);
+      expect(spawnSync("git", ["add", "."], { cwd: sandbox }).status).toBe(0);
+      const describe = () => {
+        const result = spawnSync("python3", ["-c", "import json,runpy; from pathlib import Path; print(json.dumps(runpy.run_path('.github/scripts/workspace.py')['describe'](Path.cwd())))"], {
+          cwd: sandbox, encoding: "utf8", env: { ...process.env, OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]' },
+        });
+        expect(result.status, result.stderr).toBe(0);
+        return JSON.parse(result.stdout) as { key: string; paths: string[]; "dependencies-key": string };
+      };
+      const initial = describe();
+      expect(initial.paths).toEqual(["packages/release/dist", "tools/pack/dist"]);
+      writeFileSync(join(sandbox, "apps/daemon/src/index.ts"), "export const changed = true;\n");
+      expect(describe()).toEqual(initial);
+      writeFileSync(join(sandbox, "tools/pack/src/index.ts"), "export const changed = true;\n");
+      const toolChange = describe();
+      expect(toolChange.key).not.toBe(initial.key);
+      expect(toolChange["dependencies-key"]).toBe(initial["dependencies-key"]);
+      writeFileSync(join(sandbox, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+      expect(describe()["dependencies-key"]).not.toBe(initial["dependencies-key"]);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("[P2] separates dependency preparation, closure description and tool compilation", () => {
+    const sandbox = createSandbox();
+    try {
+      writeTarget(sandbox, "packages/release", { name: "@open-design/release" });
+      writeTarget(sandbox, "tools/pack", {
+        name: "@open-design/tools-pack", dependencies: { "@open-design/release": "workspace:*" },
+      });
+      const log = writePnpmStub(sandbox);
+      const env = { OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]' };
+      const description = runFixturePostinstall(sandbox, { ...env, OPEN_DESIGN_POSTINSTALL_PHASE: "describe" });
+      expect(description.status, String(description.stderr)).toBe(0);
+      expect(JSON.parse(String(description.stdout))).toEqual(["packages/release", "tools/pack"]);
+      expect(readStubEvents(log)).toEqual([]);
+      const dependencies = runFixturePostinstall(sandbox, { ...env, OPEN_DESIGN_POSTINSTALL_PHASE: "dependencies" });
+      expect(dependencies.status, String(dependencies.stderr)).toBe(0);
+      expect(readStubEvents(log)).toEqual([]);
+      const build = runFixturePostinstall(sandbox, { ...env, OPEN_DESIGN_POSTINSTALL_PHASE: "build" });
+      expect(build.status, String(build.stderr)).toBe(0);
+      expect(readStubEvents(log).filter((entry) => entry.event === "start").map((entry) => entry.target))
+        .toEqual(["packages/release", "tools/pack"]);
+      expect(runFixturePostinstall(sandbox, { ...env, OPEN_DESIGN_POSTINSTALL_PHASE: "invalid" }).status).not.toBe(0);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it("[P2] selects a transitive tool build closure without compiling unrelated applications", () => {
     const sandbox = createSandbox();
     try {

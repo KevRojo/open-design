@@ -18,6 +18,10 @@ inputs:
     description: Save a missing pnpm cache after install; caller owns write authorization
     required: false
     default: 'false'
+  cache-tools:
+    description: Cache release dependency installation and the independently keyed tool build closure
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -66,6 +70,7 @@ runs:
         version: ${{ inputs.pnpm-version }}
 
     - name: Setup Node.js
+      id: node
       uses: actions/setup-node@v6.4.0
       with:
         node-version: ${{ inputs.node-version }}
@@ -76,9 +81,29 @@ runs:
       shell: bash
       run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
+    - name: '[resolve] Preparation inputs'
+      if: ${{ inputs.cache-tools == 'true' }}
+      id: tools
+      shell: bash
+      run: python3 .github/scripts/workspace.py
+
+    - name: '[restore] Installed workspace dependencies'
+      if: ${{ inputs.cache-tools == 'true' }}
+      id: dependencies-cache
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+          tools/*/node_modules
+          shells/*/node_modules
+          e2e/node_modules
+        key: workspace-dependencies-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ inputs.pnpm-version }}-${{ steps.tools.outputs.dependencies-key }}
+
     - name: Restore pnpm store
       id: pnpm-cache-restore
-      if: ${{ steps.persistent-pnpm-store.outputs.enabled != 'true' }}
+      if: ${{ steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/restore@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}
@@ -87,11 +112,57 @@ runs:
           pnpm-store-${{ runner.os }}-
 
     - name: Install dependencies
+      if: ${{ inputs.cache-tools != 'true' }}
       shell: bash
       run: pnpm install --frozen-lockfile
 
+    - name: '[prepare] Workspace dependencies'
+      if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        OPEN_DESIGN_POSTINSTALL_PHASE: dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: '[validate] Restored workspace dependencies'
+      if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      run: node scripts/postinstall.mjs dependencies
+
+    - name: '[cache] Installed workspace dependencies'
+      if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+          tools/*/node_modules
+          shells/*/node_modules
+          e2e/node_modules
+        key: ${{ steps.dependencies-cache.outputs.cache-primary-key }}
+
+    - name: '[restore] Tool build closure'
+      if: ${{ inputs.cache-tools == 'true' }}
+      id: tools-cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.tools.outputs.paths }}
+        key: workspace-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ inputs.pnpm-version }}-${{ steps.tools.outputs.key }}
+
+    - name: '[build] Tool build closure'
+      if: ${{ inputs.cache-tools == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: node scripts/postinstall.mjs build
+
+    - name: '[cache] Tool build closure'
+      if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ steps.tools.outputs.paths }}
+        key: ${{ steps.tools-cache.outputs.cache-primary-key }}
+
     - name: Save pnpm store
-      if: ${{ inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.pnpm-cache-restore.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-cache-restore.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}

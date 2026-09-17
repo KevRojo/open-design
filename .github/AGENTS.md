@@ -107,6 +107,14 @@ steps and its declared artifact subdirectory; only those selected products enter
 the immutable cache. Do not equate batch success with every member's success or
 introduce a composite action per cache identity. Runtime dependencies and pnpm
 store preparation continue through `setup-workspace` and its existing trust policy.
+Release source/native consumers may opt into `cache-tools` there: installed
+dependencies and the postinstall-declared tool build closure have separate
+Actions cache keys. Neither is a Plan result or a test receipt. Dependency
+snapshots contain only node_modules, never business dist/Next outputs or signing
+material; only an exact hit skips installation, and install-time native validation
+still runs. Tool outputs are saved before business products are imported. Scope
+these executable caches by OS/arch, actual Node version, pnpm and preparation
+inputs; do not use prefix restore keys for them. Existing callers remain unchanged.
 
 Release graphs separate delivery, source validation, and reusable-result publication.
 Beta declares its input suites and execution rows in

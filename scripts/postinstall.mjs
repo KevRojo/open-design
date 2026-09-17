@@ -7,6 +7,10 @@ import { gunzipSync } from "node:zlib";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
+const phase = process.argv[2] ?? process.env.OPEN_DESIGN_POSTINSTALL_PHASE ?? "all";
+if (!["all", "dependencies", "build", "describe"].includes(phase)) {
+  throw new Error(`Unknown postinstall phase: ${phase}`);
+}
 
 const buildTargets = [
   "packages/release",
@@ -61,8 +65,6 @@ function materializeDomToPptxBundle() {
   process.stdout.write("postinstall: materialized dom-to-pptx browser bundle\n");
 }
 
-materializeDomToPptxBundle();
-
 function availableBuildTargets() {
   const targets = [];
   for (const target of buildTargets) {
@@ -71,7 +73,7 @@ function availableBuildTargets() {
     // building there fails `tsc -p tsconfig.json` with TS5058. Skip instead —
     // such contexts run the real build later, once sources are in place.
     if (!existsSync(resolve(repoRoot, target, "tsconfig.json"))) {
-      process.stdout.write(`postinstall: skipping ${target} (no tsconfig.json in this context)\n`);
+      if (phase !== "describe") process.stdout.write(`postinstall: skipping ${target} (no tsconfig.json in this context)\n`);
       continue;
     }
     targets.push(target);
@@ -194,7 +196,7 @@ async function runBuildTargetsInParallel(targets, concurrency) {
   }
 }
 
-async function runBuildTargets() {
+function selectedBuildTargets() {
   const available = availableBuildTargets();
   const raw = process.env.OPEN_DESIGN_POSTINSTALL_TARGETS;
   let targets = available;
@@ -215,18 +217,32 @@ async function runBuildTargets() {
     }
     for (const target of requested) include(target);
     targets = available.filter((target) => selected.has(target));
-    process.stdout.write(`postinstall: selected build closure ${JSON.stringify(targets)}\n`);
   }
+  return targets;
+}
+
+async function runBuildTargets() {
+  const targets = selectedBuildTargets();
+  process.stdout.write(`postinstall: selected build closure ${JSON.stringify(targets)}\n`);
   const concurrency = postinstallConcurrency();
   await runBuildTargetsInParallel(targets, concurrency);
 }
 
+// Separate installation side effects from source compilation. The default
+// lifecycle still does both; CI may restore independently prepared tool outputs.
+if (phase === "describe") {
+  process.stdout.write(`${JSON.stringify(selectedBuildTargets())}\n`);
+  process.exit(0);
+}
+if (phase !== "build") materializeDomToPptxBundle();
 try {
-  await runBuildTargets();
+  if (phase !== "dependencies") await runBuildTargets();
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
 }
+
+if (phase === "build") process.exit(0);
 
 // Verify the better-sqlite3 native addon loads under the current Node.js ABI.
 // better-sqlite3 is a dep of apps/daemon (not the workspace root), so resolve

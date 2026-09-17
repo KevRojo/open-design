@@ -625,6 +625,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          cache-tools: 'true'
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: "[restore] Shared JavaScript"
@@ -695,6 +696,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          cache-tools: 'true'
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: "[restore] Shared JavaScript"
@@ -919,6 +921,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          cache-tools: 'true'
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: "[restore] Shared JavaScript"
@@ -986,6 +989,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          cache-tools: 'true'
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: "[restore] Shared JavaScript"
@@ -1149,6 +1153,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          cache-tools: 'true'
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: "[restore] Shared JavaScript"
@@ -1219,6 +1224,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          cache-tools: 'true'
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
       - name: "[restore] Shared JavaScript"
