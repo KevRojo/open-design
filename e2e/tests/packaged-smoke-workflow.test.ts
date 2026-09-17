@@ -2321,8 +2321,8 @@ process.stdin.on("end", () => {
     const linux = betaPlatformBuild(workflow, "linux_x64");
     expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
     expect(action).toContain("OPEN_DESIGN_POSTINSTALL_PHASE: dependencies");
-    expect(action).toContain("run: node scripts/postinstall.mjs build");
-    expect(action).toContain("run: node scripts/postinstall.mjs dependencies");
+    expect(action).toContain("run: pnpm run postinstall build");
+    expect(action).toContain("run: pnpm run postinstall dependencies");
     expect(action).toContain("steps.dependencies-cache.outputs.cache-hit != 'true'");
     expect(action).toContain("workspace-dependencies-v1-${{ runner.os }}-${{ runner.arch }}");
     expect(action).toContain("workspace-tools-v1-${{ runner.os }}-${{ runner.arch }}");

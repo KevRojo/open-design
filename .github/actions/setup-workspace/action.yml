@@ -126,7 +126,7 @@ runs:
     - name: '[validate] Restored workspace dependencies'
       if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit == 'true' }}
       shell: bash
-      run: node scripts/postinstall.mjs dependencies
+      run: pnpm run postinstall dependencies
 
     - name: '[cache] Installed workspace dependencies'
       if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
@@ -152,7 +152,7 @@ runs:
     - name: '[build] Tool build closure'
       if: ${{ inputs.cache-tools == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
       shell: bash
-      run: node scripts/postinstall.mjs build
+      run: pnpm run postinstall build
 
     - name: '[cache] Tool build closure'
       if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
