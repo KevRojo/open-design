@@ -2369,6 +2369,7 @@ process.stdin.on("end", () => {
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
       expect(source).toContain("uses: ./.github/actions/convergence");
       expect(source).toContain("local-products-root:");
+      expect(source).toContain("local-product-pattern: '**/workspace.tar.gz'");
       expect(source).not.toContain("actions/upload-artifact");
       expect(source).toContain("steps.source_web.outcome");
       expect(workflow).not.toContain(`\n  cache_${target}:`);

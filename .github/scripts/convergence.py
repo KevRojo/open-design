@@ -735,10 +735,13 @@ def sha256_url(url: str, timeout: float) -> str:
     return digest.hexdigest()
 
 
-def normalize_product_archive(source: Path, destination: Path, prefix: str | None = None) -> None:
+def normalize_product_archive(source: Path, destination: Path, prefix: str | None = None,
+                              *, local_pattern: str | None = None) -> None:
     if prefix is not None and any(not IDENTITY_RE.fullmatch(part) for part in prefix.split("/")):
         raise ConfigError("unsafe product artifact selection")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if local_pattern:
+        ConvergenceContract.validate_path(local_pattern, "local product selection")
     with ExitStack() as stack:
         if source.is_dir():
             root = source.resolve()
@@ -748,6 +751,8 @@ def normalize_product_archive(source: Path, destination: Path, prefix: str | Non
             entries = []
             for file in files:
                 if not file.is_file():
+                    continue
+                if local_pattern and not file.relative_to(source).match(local_pattern):
                     continue
                 entry = zipfile.ZipInfo(file.relative_to(source).as_posix())
                 entry.file_size = file.stat().st_size
@@ -2012,7 +2017,8 @@ def publish_command(args: argparse.Namespace) -> int:
             if not source_archive.exists():
                 raise ConfigError(f"current-run product artifact is missing: {source}")
             archive = args.output_dir / "products" / f"{identity}-{name}.zip"
-            normalize_product_archive(source_archive, archive, product.get("path"))
+            normalize_product_archive(source_archive, archive, product.get("path"),
+                                      local_pattern=getattr(args, "local_product_pattern", None))
             key = product_key(repository_id, workflow, policy, identity, digest, name)
             content_digest = sha256_file(archive)
             data = dict(product.get("data", {}))
@@ -2166,6 +2172,7 @@ def parse_args() -> argparse.Namespace:
     publish.add_argument("--pending", type=Path, help="project consumer requests after trusted publication")
     publish.add_argument("--local-products-root", type=lambda value: Path(value) if value else None,
                          help="current runner products instead of transported artifacts")
+    publish.add_argument("--local-product-pattern", help="local file selection matching the transported product contract")
     return parser.parse_args()
 
 

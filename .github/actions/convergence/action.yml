@@ -28,6 +28,9 @@ inputs:
   local-products-root:
     default: ''
     description: Current-run product directory; empty uses transported artifacts
+  local-product-pattern:
+    default: ''
+    description: Local file selection, matching the original transport contract
 outputs:
   requests:
     value: ${{ steps.publish.outputs.requests }}
@@ -95,8 +98,10 @@ runs:
         LANE: ${{ inputs.id }}
         CANDIDATE: ${{ steps.trust.outputs.candidate }}
         LOCAL_PRODUCTS: ${{ inputs.local-products-root }}
+        LOCAL_PATTERN: ${{ inputs.local-product-pattern }}
       run: >-
         python3 .github/scripts/convergence.py --config "$CONFIG" publish --isolated
         --candidate "$CANDIDATE" --products-root "$RUNNER_TEMP/convergence/$LANE/products"
-        --local-products-root "$LOCAL_PRODUCTS" --output-dir "$RUNNER_TEMP/convergence/$LANE/publication"
+        --local-products-root "$LOCAL_PRODUCTS" --local-product-pattern "$LOCAL_PATTERN"
+        --output-dir "$RUNNER_TEMP/convergence/$LANE/publication"
         --pending "$RUNNER_TEMP/convergence/$LANE/plan/pending-convergence.json"

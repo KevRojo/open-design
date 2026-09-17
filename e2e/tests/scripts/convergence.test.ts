@@ -106,10 +106,11 @@ root = Path(sys.argv[2])
 source = root / 'local'
 (source / 'web/product').mkdir(parents=True)
 (source / 'web/product/workspace.tar.gz').write_bytes(b'payload')
+(source / 'web/product/outputs.json').write_text('scratch metadata, already inside the tar')
 archive = root / 'transport.zip'
 with zipfile.ZipFile(archive, 'w') as out:
     out.writestr('web/product/workspace.tar.gz', b'payload')
-c.normalize_product_archive(source, root / 'local.zip', 'web/product')
+c.normalize_product_archive(source, root / 'local.zip', 'web/product', local_pattern='**/workspace.tar.gz')
 c.normalize_product_archive(archive, root / 'remote.zip', 'web/product')
 assert (root / 'local.zip').read_bytes() == (root / 'remote.zip').read_bytes()
 for prefix in ('../escape', 'absent'):
