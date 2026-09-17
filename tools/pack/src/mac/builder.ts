@@ -137,7 +137,8 @@ export async function runElectronBuilder(
       hardenedRuntime: config.signed,
       icon: macResources.icon,
       identity: config.signed ? undefined : null,
-      notarize: config.macNotarize ? undefined : false,
+      // afterSign owns notarization; undefined enables a second built-in submission.
+      notarize: false,
       target: targets,
     },
     // Register the workspace-invite deeplink scheme so macOS routes
