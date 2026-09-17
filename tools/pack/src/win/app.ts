@@ -65,6 +65,8 @@ async function runPnpm(config: ToolPackConfig, args: string[], extraEnv: NodeJS.
 }
 
 async function runNpmInstall(appRoot: string): Promise<void> {
+  const startedAt = performance.now();
+  process.stderr.write("[tools-pack win] phase:start phase=runtime-dependencies\n");
   const invocation = createCommandInvocation({
     args: ["install", "--omit=dev", "--no-package-lock"],
     command: process.platform === "win32" ? "npm.cmd" : "npm",
@@ -74,6 +76,7 @@ async function runNpmInstall(appRoot: string): Promise<void> {
     env: process.env,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
+  process.stderr.write(`[tools-pack win] phase:done phase=runtime-dependencies durationMs=${Math.round(performance.now() - startedAt)}\n`);
 }
 
 async function runEsbuild(config: ToolPackConfig, args: string[]): Promise<void> {
@@ -81,6 +84,8 @@ async function runEsbuild(config: ToolPackConfig, args: string[]): Promise<void>
 }
 
 async function runElectronRebuild(config: ToolPackConfig, appRoot: string): Promise<void> {
+  const startedAt = performance.now();
+  process.stderr.write("[tools-pack win] phase:start phase=electron-abi\n");
   const foundModules = new Set<string>();
   const rebuildResult = rebuild({
     arch: "x64",
@@ -102,6 +107,7 @@ async function runElectronRebuild(config: ToolPackConfig, appRoot: string): Prom
   if (missingModules.length > 0) {
     throw new Error(`Electron ABI rebuild did not discover required native module(s): ${missingModules.join(", ")}`);
   }
+  process.stderr.write(`[tools-pack win] phase:done phase=electron-abi durationMs=${Math.round(performance.now() - startedAt)}\n`);
 }
 
 function nativeRebuildOutputPath(appRoot: string): string {
