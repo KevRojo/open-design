@@ -147,6 +147,13 @@ runs:
         --filter @open-design/tools-pack...
         --filter @open-design/web...
 
+    - name: '[prepare] Workspace restore support'
+      if: ${{ inputs.install-profile == 'source-web' }}
+      shell: bash
+      run: >-
+        pnpm --filter '@open-design/download...'
+        --workspace-concurrency=1 --if-present run build
+
     - name: '[prepare] Workspace dependencies'
       if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       shell: bash

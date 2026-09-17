@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 
 import { createPackageManagerInvocation } from "@open-design/platform";
 
-import { WORKSPACE_ROOT } from "../config/index.js";
 import { runWorkspaceBuildUnit, workspaceBuildUnitResult, type WorkspaceBuildConfig } from "../workspace-build.js";
+import { WORKSPACE_ROOT } from "../workspace-root.js";
 import { parseWorkspaceBuildUnit } from "./units.js";
 import { exportWorkspaceOutputs, importWorkspaceOutputs, type WorkspaceSource } from "./products.js";
 
