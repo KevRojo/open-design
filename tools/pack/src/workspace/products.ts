@@ -6,6 +6,29 @@ import { workspaceBuildUnitResult } from "../workspace-build.js";
 
 type Output = { schemaVersion: number; unit: Unit; platform?: string; arch?: string; webOutputMode?: string; kind?: string; outputPaths: string[] };
 export type WorkspaceSource = { unit: Unit; url: string; sha256: string };
+
+// Recovery belongs to transport, never to build selection. Missing/invalid
+// products remain failures; only enumerated transient requests get one retry.
+function workspaceFetch(signal: AbortSignal): typeof globalThis.fetch {
+  let retried = false;
+  const transientStatuses = new Set([429, 500, 502, 503, 504]);
+  const transientCodes = new Set(["ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"]);
+  return async (input, init) => {
+    for (;;) {
+      try {
+        const response = await globalThis.fetch(input, { ...init, signal });
+        if (retried || !transientStatuses.has(response.status)) return response;
+        await response.body?.cancel();
+      } catch (error) {
+        const cause = error instanceof Error && error.cause != null ? error.cause : error;
+        const code = typeof cause === "object" && cause != null && "code" in cause ? String(cause.code) : "";
+        if (retried || signal.aborted || !transientCodes.has(code)) throw error;
+      }
+      retried = true;
+      process.stderr.write("[tools-pack workspace] transient product request failed; retrying once\n");
+    }
+  };
+}
 function pathsOf(outputs: Output[], selected: readonly Unit[] = units): string[] {
   if (!Array.isArray(selected) || !selected.length || new Set(selected).size !== selected.length || selected.some((unit) => !units.includes(unit))) throw new Error("invalid source units");
   if (!Array.isArray(outputs) || outputs.length !== selected.length) throw new Error("incomplete source output set");
@@ -57,9 +80,10 @@ export async function importWorkspaceOutputs(root: string, scratch: string, sour
   let retainRecovery = false;
   try {
     const zip = join(directory, "product.zip");
+    const signal = AbortSignal.timeout(120_000);
     const result = await downloadCopyAndClear({ basePath: join(directory, "download"), bucket: "workspace", fileName: "product.zip",
       payload: { url: source.url, checksum: { algorithm: "sha256", value: source.sha256 } },
-      maxAttempts: 1, signal: AbortSignal.timeout(120_000), outputPath: zip,
+      maxAttempts: 1, signal, fetch: workspaceFetch(signal), outputPath: zip,
       onProgress: ({ receivedBytes }) => { if (receivedBytes > 2 * 1024 ** 3) throw new Error("workspace source exceeds 2 GiB"); },
     });
     const members = listArchive(zip, "zip");

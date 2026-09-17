@@ -40,6 +40,34 @@ afterEach(() => {
 });
 
 describe("workspace product boundary", () => {
+  it("retries a transient connection failure once without rebuilding outputs", async () => {
+    const f = fixture();
+    const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
+    const descriptor = source(f.root, archive);
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("fetch failed", { cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) }));
+    expect(await importWorkspaceOutputs(f.root, f.scratch, descriptor)).toBeGreaterThan(0);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([404, 403, 503])("bounds HTTP %s recovery without changing existing outputs", async (status) => {
+    const f = fixture();
+    const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
+    const descriptor = source(f.root, archive);
+    vi.mocked(fetch).mockImplementation(async () => new Response("unavailable", { status }));
+    await expect(importWorkspaceOutputs(f.root, f.scratch, descriptor)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(status === 503 ? 2 : 1);
+    expect(readFileSync(join(f.root, "apps/daemon/dist/cli.js"), "utf8")).toBe("export {};\n");
+  });
+
+  it.each(["ECONNRESET", "CERT_HAS_EXPIRED", "unknown"])("bounds %s failures without a rebuild fallback", async (code) => {
+    const f = fixture();
+    const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
+    const descriptor = source(f.root, archive);
+    vi.mocked(fetch).mockRejectedValue(new TypeError("fetch failed", { cause: { code } }));
+    await expect(importWorkspaceOutputs(f.root, f.scratch, descriptor)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(code === "ECONNRESET" ? 2 : 1);
+  });
+
   it("exports portable JavaScript and imports a clean complete declaration closure", async () => {
     const f = fixture();
     const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
