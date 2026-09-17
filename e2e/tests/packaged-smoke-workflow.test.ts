@@ -2361,6 +2361,7 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("[retain] Source products");
       expect(job).toContain(`needs.cache_${target}.outputs.requests`);
       const source = workflowJob(workflow, `source_${target}`);
+      expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
       expect(source).toContain("source-products/*/product/workspace.tar.gz");
       expect(source).toContain("if-no-files-found: error");
       const cache = workflowJob(workflow, `cache_${target}`);

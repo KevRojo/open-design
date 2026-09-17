@@ -627,6 +627,7 @@ jobs:
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
+          OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: "[retain] Source products"
         if: ${{ success() }}
@@ -922,6 +923,7 @@ jobs:
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
+          OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: "[retain] Source products"
         if: ${{ success() }}
@@ -1153,6 +1155,7 @@ jobs:
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
+          OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm exec tools-pack workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: "[retain] Source products"
         if: ${{ success() }}

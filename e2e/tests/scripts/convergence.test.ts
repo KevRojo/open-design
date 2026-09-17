@@ -142,13 +142,22 @@ with tempfile.TemporaryDirectory() as directory:
             c.resolve_references(argparse.Namespace(shared=','.join(units),batch=None))
         assert {s['unit']:s['url'] for s in json.loads(envfile.read_text().split('=',1)[1])}=={u:origin+'/'+u+'.zip' for u in units}
     mixed=json.loads(json.dumps(hot))
-    mixed['source_javascript']['daemon']={'unit':'daemon','operation':'build','retain':True}
+    mixed['source_javascript']['daemon']={'unit':'daemon','operation':'build','retain':True,'buildId':'b'*64}
     wire=c.key_requests(mixed,origin)
     assert c.consumer_sources(wire)['source_javascript'] is None
     envfile.write_text('')
     with patch.dict(os.environ,{**base,'SOURCE_REQUESTS':json.dumps(wire)},clear=True):
         c.resolve_references(argparse.Namespace(shared=None,batch='source_javascript'))
     assert 'SOURCE_DAEMON_URL=\\n' in envfile.read_text()
+    assert 'SOURCE_DAEMON_BUILD_ID='+'b'*64 in envfile.read_text()
+    for invalid in [None, '', '../x', 'a'*63, 'a'*64+'\\nINJECT=1']:
+        wire['source_javascript']['daemon']['buildId']=invalid
+        envfile.write_text('')
+        with patch.dict(os.environ,{**base,'SOURCE_REQUESTS':json.dumps(wire)},clear=True):
+            try:c.resolve_references(argparse.Namespace(shared=None,batch='source_javascript'))
+            except c.ConfigError:pass
+            else:raise AssertionError('accepted invalid build identity')
+        assert envfile.read_text()==''
     for key in ['../x','/x','a//b','https://evil/x','a/%2e%2e/b','a?query','a\\\\b']:
         try:c.reference_key(key)
         except c.ConfigError:pass
@@ -283,7 +292,7 @@ pending = {"schemaVersion": 1, "protocol": c.PROTOCOL, "repositoryId": 42, "repo
            "workflow": "ci", "policy": "test-v1", "mode": "enforce", "workloads": {
     name: {**value, "scopeEnabled": True, "run": True, "resultHit": False} for name, value in calculated.items()}}
 c.project_batches(workflow, pending, root / "requests")
-assert json.loads((root / "requests/source/a.json").read_text()) == {"units": ["a"], "operation": "build", "retain": True}
+assert json.loads((root / "requests/source/a.json").read_text()) == {"units": ["a"], "operation": "build", "retain": True, "buildId": calculated["a"]["digest"]}
 hot = copy.deepcopy(pending)
 hot["workloads"]["a"].update(run=False, resultHit=True, result={"products": {"bundle": {
     "type": "url", "source": "https://cache.example/a.zip", "data": {"sha256": "a" * 64}}}})
@@ -607,10 +616,10 @@ assert calculated["a"]["digest"] != calculated["b"]["digest"]
     expect(result.status, result.stderr).toBe(0);
   });
 
-  test("repeated publication sends no product PUT and rejects changed bytes before writes", () => {
+  test("repeated publication preserves the verified winner and rejects partial or corrupt results", () => {
     const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `
-import argparse, copy, json, sys, zipfile
+import argparse, copy, hashlib, json, sys, zipfile
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, sys.argv[1])
@@ -627,24 +636,62 @@ objects = {}
 writes = []
 def put(*, key, file, **kwargs):
     writes.append(key)
+    if key in objects: raise c.R2PreconditionFailed(key)
     objects[key] = file.read_bytes()
 def get(url, timeout):
     body = objects.get(url.removeprefix("https://results.example/"))
     return json.loads(body) if body is not None else None
-with patch("convergence.storage_config", return_value=storage), patch.object(c.R2Client, "put_file", side_effect=put), patch("convergence.existing_receipt", side_effect=get):
+def checksum(url, timeout):
+    return hashlib.sha256(objects[url.removeprefix("https://results.example/")]).hexdigest()
+with patch("convergence.storage_config", return_value=storage), patch.object(c.R2Client, "put_file", side_effect=put), patch("convergence.existing_receipt", side_effect=get), patch.object(c, "sha256_url", side_effect=checksum), patch.object(c, "append_outputs") as output:
     c.publish_command(args)
     assert len(writes) == 2 and writes[0].startswith("workload-products/") and writes[1].startswith("workload-results/")
+    product_key, receipt_key = writes
+    winner = json.loads(objects[receipt_key])
+    original_objects = dict(objects)
     writes.clear()
     candidate["provenance"]["runId"] = 13
     candidate["results"][0]["receipt"]["validated"]["runId"] = 13
     path.write_text(json.dumps(candidate))
     c.publish_command(args)
     assert writes == [], "repeated result reuploaded a product"
+    # Initial read misses an already completed publication; identical bytes
+    # reach the receipt CAS and must still return the first producer's receipt.
+    with patch.object(c, "existing_receipt", side_effect=[None, winner]):
+        c.publish_command(args)
+    assert json.loads(output.call_args.args[0]['receipts']) == [winner]
+    assert objects == original_objects
+    writes.clear()
     with zipfile.ZipFile(source, "w") as archive: archive.writestr("entry.txt", "different")
+    c.publish_command(args)
+    assert writes == [], "losing build uploaded different bytes"
+    assert json.loads(output.call_args.args[0]['receipts']) == [winner]
+    # Different concurrent product bytes also converge only on a complete receipt.
+    with patch.object(c, "existing_receipt", side_effect=[None, winner]):
+        c.publish_command(args)
+    assert json.loads(output.call_args.args[0]['receipts']) == [winner]
+    assert objects == original_objects
+    writes.clear()
+    output.reset_mock()
+    with patch.object(c, "existing_receipt", return_value=None):
+        try: c.publish_command(args)
+        except c.ConfigError as error: assert "incomplete immutable publication" in str(error)
+        else: raise AssertionError("accepted a product without its receipt")
+    assert not output.called and objects == original_objects
+    writes.clear()
+    objects[product_key] = b'corrupt'
     try: c.publish_command(args)
-    except c.ConfigError as error: assert "collision" in str(error)
-    else: raise AssertionError("accepted different product content under one recipe")
-    assert writes == [], "collision caused a write before validation"
+    except c.ConfigError as error: assert "integrity mismatch" in str(error)
+    else: raise AssertionError("accepted corrupt winner bytes")
+    assert writes == []
+    objects.update(original_objects)
+    mismatched = copy.deepcopy(winner)
+    mismatched['executionClass']['labels'] = ['other-runner']
+    with patch.object(c, "existing_receipt", return_value=mismatched):
+        try: c.publish_command(args)
+        except c.ConfigError as error: assert "contract collision" in str(error)
+        else: raise AssertionError("accepted a different execution contract")
+    assert writes == []
 `, path.dirname(convergenceScript), fixture.root, JSON.stringify(candidate({ bundle: { type: "job", source: "build" } }))], { cwd: fixture.root, encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('"uploadedProductBytes": 0');

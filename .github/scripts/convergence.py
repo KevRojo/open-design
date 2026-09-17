@@ -771,6 +771,23 @@ def result_sources(workflow: WorkflowContract, identity: str, expected: dict[str
     return [own, *[source for source in expected.get("trustedSources", []) if source != own]]
 
 
+def retry_public_read(read):
+    """One retry for enumerated transport failures; never authorize a build."""
+    for attempt in range(2):
+        try:
+            return read()
+        except urllib.error.HTTPError as error:
+            if error.code not in {408, 429, 500, 502, 503, 504} or attempt:
+                raise
+        except (TimeoutError, ConnectionError, http.client.IncompleteRead,
+                http.client.RemoteDisconnected) as error:
+            if attempt:
+                raise ConfigError(f"public read unavailable after one retry: {type(error).__name__}") from error
+        except urllib.error.URLError as error:
+            if not isinstance(error.reason, (TimeoutError, ConnectionError)) or attempt:
+                raise ConfigError(f"public read unavailable: {type(error.reason).__name__}") from error
+
+
 def resolve_results(
     base_url: str | None,
     repository_id: int,
@@ -781,40 +798,38 @@ def resolve_results(
     hits: dict[str, bool] = {}
     reasons: dict[str, str] = {}
     results: dict[str, dict[str, Any]] = {}
-    invalid_base_url = False
     if base_url:
         parsed = urllib.parse.urlparse(base_url)
         if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            base_url = None
-            invalid_base_url = True
+            raise ConfigError("invalid configured workload result base URL")
     def resolve_one(item: tuple[str, dict[str, Any]]) -> tuple[str, bool, str, Any]:
         identity, expected = item
         if not expected["reusable"]:
             return identity, False, "reuse-disabled", None
         if not base_url:
-            return identity, False, "base-url-invalid" if invalid_base_url else "base-url-missing", None
+            return identity, False, "base-url-missing", None
         reason = "result-missing"
         for source in result_sources(workflow, identity, expected):
             key = result_key(repository_id, source["workflow"], source["policy"], source["workload"], expected["digest"])
             url = f"{base_url.rstrip('/')}/{key}"
             try:
-                value = fetch_result(url, timeout)
-                result = validate_result(value, repository_id=repository_id, workflow=workflow,
-                                         identity=identity, expected=expected)
-                if any(result[field] != source[field] for field in source):
-                    raise ConfigError("workload result producer differs from requested storage key")
-                for product in result["products"].values():
-                    # Planning observes availability, never materializes payloads.
-                    probe_product(product["source"], timeout)
-                return identity, True, "result-hit", result
+                value = retry_public_read(lambda: fetch_result(url, timeout))
             except urllib.error.HTTPError as error:
-                reason = "result-missing" if error.code == 404 else f"read-http-{error.code}"
-            except (ConfigError, json.JSONDecodeError, UnicodeError, http.client.HTTPException,
-                    OSError, urllib.error.URLError, TimeoutError) as error:
-                reason = f"read-unavailable:{type(error).__name__}"
+                if error.code == 404:
+                    continue
+                raise ConfigError(f"result read failed for {identity}: HTTP {error.code}") from error
+            result = validate_result(value, repository_id=repository_id, workflow=workflow,
+                                     identity=identity, expected=expected)
+            if any(result[field] != source[field] for field in source):
+                raise ConfigError("workload result producer differs from requested storage key")
+            for product in result["products"].values():
+                # A receipt with missing products is broken, not a cache miss.
+                # Planning observes availability, never materializes payloads.
+                retry_public_read(lambda: probe_product(product["source"], timeout))
+            return identity, True, "result-hit", result
         return identity, False, reason, None
-    # Bound independent public metadata reads; preserve declaration order and
-    # per-workload fail-open decisions regardless of completion order.
+    # Bound independent public metadata reads; preserve declaration order
+    # regardless of completion order. Unavailable is not absent.
     if calculated:
         with ThreadPoolExecutor(max_workers=min(8, len(calculated))) as executor:
             for identity, hit, reason, result in executor.map(resolve_one, calculated.items()):
@@ -871,6 +886,10 @@ def project_batches(workflow: WorkflowContract, pending: dict[str, Any], output:
                 if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
                     raise ConfigError("execution input requires a verified product digest")
                 request.update(operation="restore", artifact={"url": product["source"], "sha256": digest})
+            else:
+                # Project the already calculated identity, never hash again in
+                # a runner or require the native executor to understand Plan.
+                request["buildId"] = decision["digest"]
             requests[batch_name][name] = request
             if output is not None:
                 write_json_atomic(output / batch_name / f"{name}.json", request)
@@ -962,6 +981,11 @@ def resolve_references(args: argparse.Namespace) -> int:
             artifact = resolve(request.get("artifact")) if operation == "restore" else {}
             values[f"SOURCE_{name.upper()}_URL"] = artifact.get("url", "")
             values[f"SOURCE_{name.upper()}_SHA256"] = artifact.get("sha256", "")
+            if operation == "build":
+                build_id = request.get("buildId")
+                if not isinstance(build_id, str) or not DIGEST_RE.fullmatch(build_id):
+                    raise ConfigError("build request requires its projected build identity")
+                values[f"SOURCE_{name.upper()}_BUILD_ID"] = build_id
     if not values:
         raise ConfigError("no references selected")
     # Atomic validation before writing any local environment values. Never
@@ -1623,23 +1647,41 @@ def public_origin(value: str) -> str:
 
 def existing_receipt(url: str, timeout: float) -> Any | None:
     try:
-        return fetch_result(url, timeout)
+        return retry_public_read(lambda: fetch_result(url, timeout))
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
         raise
 
 
-def same_reusable_result(existing: Any, expected: Any) -> bool:
+def same_reusable_contract(existing: Any, expected: Any) -> bool:
     if not isinstance(existing, dict) or not isinstance(expected, dict):
         return False
     try:
         validated_provenance(existing.get("validated"))
+        def contract(value):
+            products = validate_products(value.get("products"), "result products", require_urls=True)
+            for product in products.values():
+                data = product.get("data", {})
+                if not isinstance(data.get("sha256"), str) or not DIGEST_RE.fullmatch(data["sha256"]):
+                    raise ConfigError("published product requires SHA-256")
+                product["data"] = {key: value for key, value in data.items() if key != "sha256"}
+            return {**{key: value for key, value in value.items() if key not in {"validated", "products"}},
+                    "products": products}
+        return canonical_json(contract(existing)) == canonical_json(contract(expected))
     except ConfigError:
         return False
-    return canonical_json({key: value for key, value in existing.items() if key != "validated"}) == canonical_json(
-        {key: value for key, value in expected.items() if key != "validated"}
-    )
+
+
+def verified_winner(existing: Any, expected: Any, timeout: float) -> dict[str, Any]:
+    """A complete immutable receipt wins; never project the losing build's bytes."""
+    if not same_reusable_contract(existing, expected):
+        raise ConfigError("immutable workload result contract collision")
+    for product in existing["products"].values():
+        actual = retry_public_read(lambda: sha256_url(product["source"], timeout))
+        if actual != product["data"]["sha256"]:
+            raise ConfigError("immutable workload result product integrity mismatch")
+    return existing
 
 
 def self_check() -> None:
@@ -1685,29 +1727,42 @@ def self_check() -> None:
         if shadow_run != {"unit": True}:
             raise ConfigError("convergence self-check omitted a shadow-mode result hit")
     with patch.object(module, "fetch_result", return_value={}):
-        hits, _, _ = resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
-        if hits != {"unit": False}:
+        try:
+            resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
+        except ConfigError:
+            pass
+        else:
             raise ConfigError("convergence self-check accepted a malformed result")
-    with patch.object(module, "fetch_result", side_effect=TimeoutError()):
+    with patch.object(module, "fetch_result", side_effect=[TimeoutError(), receipt]) as read:
         hits, _, _ = resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
-        if hits != {"unit": False}:
-            raise ConfigError("convergence self-check did not fail open on timeout")
+        if hits != {"unit": True} or read.call_count != 2:
+            raise ConfigError("convergence self-check did not retry a transient read once")
+    with patch.object(module, "fetch_result", side_effect=urllib.error.HTTPError("url", 404, "missing", {}, None)) as read:
+        hits, _, _ = resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
+        if hits != {"unit": False} or read.call_count != 1:
+            raise ConfigError("convergence self-check did not recognize confirmed absence")
     for unavailable in (
+        TimeoutError(),
         UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
         http.client.IncompleteRead(b"{", 2),
     ):
-        with patch.object(module, "fetch_result", side_effect=unavailable):
-            hits, _, _ = resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
-            if hits != {"unit": False}:
-                raise ConfigError(
-                    f"convergence self-check did not fail open on {type(unavailable).__name__}"
-                )
+        with patch.object(module, "fetch_result", side_effect=unavailable) as read:
+            try:
+                resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
+            except (ConfigError, UnicodeError):
+                if read.call_count != (1 if isinstance(unavailable, UnicodeError) else 2):
+                    raise ConfigError("unexpected public read retry count")
+            else:
+                raise ConfigError("unavailable result silently selected execution")
     for malformed_provenance in ({"runId": 1}, {**provenance, "unexpected": True}):
         malformed_receipt = json.loads(canonical_json(receipt))
         malformed_receipt["validated"] = malformed_provenance
         with patch.object(module, "fetch_result", return_value=malformed_receipt):
-            hits, _, _ = resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
-            if hits != {"unit": False}:
+            try:
+                resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
+            except ConfigError:
+                pass
+            else:
                 raise ConfigError("convergence self-check accepted malformed provenance")
     product_expected = {**expected, "products": "manifest"}
     product_receipt = json.loads(canonical_json(receipt))
@@ -1727,24 +1782,33 @@ def self_check() -> None:
         patch.object(module, "fetch_result", return_value=product_receipt),
         patch.object(module, "probe_product", side_effect=TimeoutError()),
     ):
-        hits, _, _ = resolve_results(
-            "https://results.example",
-            42,
-            workflow,
-            {"unit": product_expected},
-            0.1,
-        )
-        if hits != {"unit": False}:
+        try:
+            resolve_results("https://results.example", 42, workflow, {"unit": product_expected}, 0.1)
+        except ConfigError:
+            pass
+        else:
             raise ConfigError("convergence self-check accepted an unavailable product set")
-    hits, reasons, _ = resolve_results("not-a-url", 42, workflow, {"unit": expected}, 0.1)
-    if hits != {"unit": False} or reasons != {"unit": "base-url-invalid"}:
-        raise ConfigError("convergence self-check did not fail open on an invalid base URL")
+    try:
+        resolve_results("not-a-url", 42, workflow, {"unit": expected}, 0.1)
+    except ConfigError:
+        pass
+    else:
+        raise ConfigError("convergence self-check accepted an invalid configured base URL")
+    for status, attempts in ((403, 1), (429, 2), (503, 2)):
+        with patch.object(module, "fetch_result", side_effect=urllib.error.HTTPError("url", status, "unavailable", {}, None)) as read:
+            try:
+                resolve_results("https://results.example", 42, workflow, {"unit": expected}, 0.1)
+            except ConfigError:
+                if read.call_count != attempts:
+                    raise ConfigError("unexpected HTTP retry count")
+            else:
+                raise ConfigError("HTTP failure silently selected execution")
     repeated = json.loads(canonical_json(receipt))
     repeated["validated"]["runId"] = 2
-    if not same_reusable_result(receipt, repeated):
+    if not same_reusable_contract(receipt, repeated):
         raise ConfigError("convergence self-check rejected an idempotent repeated result")
     repeated["executionClass"]["labels"] = ["different-runner"]
-    if same_reusable_result(receipt, repeated):
+    if same_reusable_contract(receipt, repeated):
         raise ConfigError("convergence self-check accepted a nondeterministic repeated result")
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -1895,18 +1959,21 @@ def publish_command(args: argparse.Namespace) -> int:
     promoted_candidate = args.output_dir / "promoted-candidate.json"
     write_json_atomic(promoted_candidate, candidate)
     manifest = prepare_publication(promoted_candidate, args.output_dir)
-    requests = None
+    pending = None
     if getattr(args, "pending", None):
         pending = load_json(args.pending)
         if args.config is None:
             raise ConfigError("consumer projection requires explicit config")
         contract = ConvergenceContract(args.config)
-        requests = published_requests(contract.workflow(pending["workflow"]), pending,
-                                      [item["receipt"] for item in candidate["results"]])
+        # Validate the request contract before writes, but project final consumer
+        # references only after resolving any preexisting or concurrent winner.
+        published_requests(contract.workflow(pending["workflow"]), pending,
+                           [item["receipt"] for item in candidate["results"]])
     published = 0
     unchanged = 0
     uploaded_products = 0
     uploaded_product_bytes = 0
+    winners = []
     for item in manifest:
         key = item["key"]
         file = Path(item["file"])
@@ -1914,13 +1981,12 @@ def publish_command(args: argparse.Namespace) -> int:
         url = f"{origin}/{key}"
         existing = existing_receipt(url, args.timeout)
         if existing is not None:
-            if not same_reusable_result(existing, receipt):
-                raise ConfigError(f"immutable workload result collision: {key}")
+            winners.append(verified_winner(existing, receipt, args.timeout))
             unchanged += 1
             continue
-        # Compare the complete normalized recipe/result before sending product
-        # bodies. A prior successful receipt proves all its products were
-        # published; retries must not PUT the same products again.
+        # Never overwrite partial uploads. A product collision may belong to a
+        # concurrent completed receipt; without that receipt, fail explicitly.
+        raced_winner = None
         for product_object_key, archive, content_digest in product_uploads.get(receipt["workload"], []):
             try:
                 client.put_file(key=product_object_key, file=archive, content_type="application/zip")
@@ -1928,14 +1994,24 @@ def publish_command(args: argparse.Namespace) -> int:
                 uploaded_product_bytes += archive.stat().st_size
             except R2PreconditionFailed:
                 if sha256_url(f"{origin}/{product_object_key}", args.timeout) != content_digest:
-                    raise ConfigError(f"immutable workload product collision: {product_object_key}")
+                    raced = existing_receipt(url, args.timeout)
+                    if raced is None:
+                        raise ConfigError(f"incomplete immutable publication: {product_object_key}")
+                    raced_winner = verified_winner(raced, receipt, args.timeout)
+                    break
+        if raced_winner is not None:
+            winners.append(raced_winner)
+            unchanged += 1
+            continue
         try:
             client.put_file(key=key, file=file)
+            winners.append(receipt)
             published += 1
         except R2PreconditionFailed:
             raced = existing_receipt(url, args.timeout)
-            if raced is None or not same_reusable_result(raced, receipt):
-                raise ConfigError(f"immutable workload result publication race differs: {key}")
+            if raced is None:
+                raise ConfigError(f"immutable workload result publication race is incomplete: {key}")
+            winners.append(verified_winner(raced, receipt, args.timeout))
             unchanged += 1
     print(
         json.dumps(
@@ -1944,8 +2020,9 @@ def publish_command(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
-    append_outputs({"receipts": compact_json([item["receipt"] for item in candidate["results"]])})
-    if requests is not None:
+    append_outputs({"receipts": compact_json(winners)})
+    if pending is not None:
+        requests = published_requests(contract.workflow(pending["workflow"]), pending, winners)
         transport = key_requests(requests, origin)
         append_outputs({"requests": compact_json(transport)})
         append_outputs({"sources": compact_json(consumer_sources(transport))})

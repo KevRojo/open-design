@@ -69,7 +69,9 @@ execution class, product mode, policy, and `schema.version`. Changes to hashing
 or declaration interpretation require a schema version bump. The control file
 set remains a trusted-writer admission boundary, not an implicit global cache
 input; execution-affecting configuration must be declared by workloads. Public
-result reads are credential-free and fail open to execution. The convergence
+result reads are credential-free. Only confirmed missing receipts select execution;
+enumerated transient transport failures retry once, then fail visibly. Invalid
+receipts and missing products behind a receipt must not trigger rebuilding. The convergence
 handoff contains only workloads whose declared jobs and execution steps succeeded
 in the producing attempt, even when an unrelated gate failed. Only trusted
 `convergence.atom.yml` code may publish immutable results. `lib/r2.py` knows R2
