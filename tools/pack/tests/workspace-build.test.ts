@@ -31,6 +31,7 @@ const PACKAGE_DIRS = [
   "packages/platform",
   "packages/sidecar",
   "packages/download",
+  "packages/standalone",
   "packages/host",
   "packages/agui-adapter",
   "packages/plugin-runtime",
@@ -62,6 +63,8 @@ const OUTPUT_FILES = [
   "packages/sidecar/dist/index.d.ts",
   "packages/download/dist/index.mjs",
   "packages/download/dist/index.d.ts",
+  "packages/standalone/dist/index.mjs",
+  "packages/standalone/dist/index.d.ts",
   "packages/host/dist/index.mjs",
   "packages/host/dist/index.d.ts",
   "packages/agui-adapter/dist/index.mjs",
@@ -407,6 +410,21 @@ describe("ensureWorkspaceBuildArtifacts", () => {
 });
 
 describe("runWorkspaceBuild", () => {
+  it("retains Standalone declarations in the shared package result before consumers typecheck", async () => {
+    const root = await mkdtemp(join(tmpdir(), "workspace-standalone-"));
+    try {
+      await writeWorkspace(root);
+      await writeOutputs(root, "fixture");
+      const config = { workspaceRoot: root, webOutputMode: "standalone" as const };
+      const result = await workspaceBuildUnitResult(config, "packages");
+      expect(result.outputPaths).toContain("packages/standalone/dist");
+      expect(workspaceUnitPackages("packages").map(({ name }) => name)).toContain("@open-design/standalone");
+      await rm(join(root, "packages/standalone/dist/index.d.ts"));
+      await expect(workspaceBuildUnitResult(config, "packages")).rejects.toThrow("packages/standalone/dist/index.d.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("partitions the existing closure without rebuilding dependencies inside an app unit", async () => {
     const root = await mkdtemp(join(tmpdir(), "open-design-workspace-unit-"));
     const config = createConfig(root, join(root, ".cache"));
@@ -437,7 +455,7 @@ describe("runWorkspaceBuild", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-  it("keeps the cache/artifact contract aligned with the packaged dependency closure", async () => {
+  it("keeps shared outputs aligned with packaged and Standalone validation dependencies", async () => {
     const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
     const packages = new Map<string, { dependencies: Record<string, string> }>();
     for (const scope of ["packages", "apps"]) {
@@ -454,7 +472,7 @@ describe("runWorkspaceBuild", () => {
       }
     }
     const closure = new Set<string>();
-    const pending = ["@open-design/packaged"];
+    const pending = ["@open-design/packaged", "@open-design/standalone"];
     while (pending.length > 0) {
       const name = pending.pop()!;
       if (closure.has(name)) continue;
@@ -553,6 +571,21 @@ describe("runWorkspaceBuild", () => {
 });
 
 describe("createWorkspaceBuildCacheKey", () => {
+  it("tracks Standalone source but not its generated declarations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "workspace-standalone-key-"));
+    try {
+      await writeWorkspace(root);
+      const config = createConfig(root, join(root, ".cache"));
+      const original = await createWorkspaceBuildCacheKey(config);
+      await mkdir(join(root, "packages/standalone/dist"), { recursive: true });
+      await writeFile(join(root, "packages/standalone/dist/index.d.ts"), "export declare const generated: number;\n");
+      expect(await createWorkspaceBuildCacheKey(config)).toBe(original);
+      await writeFile(join(root, "packages/standalone/src/index.ts"), "export const changed = true;\n");
+      expect(await createWorkspaceBuildCacheKey(config)).not.toBe(original);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("witnesses every declared package source and ignores generated outputs", async () => {
     const root = await mkdtemp(join(tmpdir(), "open-design-workspace-key-"));
     const config = createConfig(root, join(root, ".cache"));

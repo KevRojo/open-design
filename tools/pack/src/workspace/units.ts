@@ -9,6 +9,7 @@ export const WORKSPACE_BUILD_PACKAGES = [
   { directory: "packages/platform", name: "@open-design/platform" },
   { directory: "packages/sidecar", name: "@open-design/sidecar" },
   { directory: "packages/download", name: "@open-design/download" },
+  { directory: "packages/standalone", name: "@open-design/standalone" },
   { directory: "packages/host", name: "@open-design/host" },
   { directory: "packages/agui-adapter", name: "@open-design/agui-adapter" },
   { directory: "packages/plugin-runtime", name: "@open-design/plugin-runtime" },

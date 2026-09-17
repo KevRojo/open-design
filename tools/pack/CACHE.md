@@ -68,9 +68,14 @@ Packages, daemon and shell emit a portable JavaScript output contract; Web
 emits a platform/arch and output-mode contract because standalone includes
 platform runtime dependencies. Neither computes a workflow identity or makes
 a skip decision. The ordinary local aggregate runs the same units in
-order and retains its existing whole-workspace cache (schema 12). Changing unit
+order and retains its existing whole-workspace cache (schema 13). Changing unit
 commands therefore changes the aggregate cache key; this is not yet per-unit
 workflow cache integration. Plan owns that external decision.
+
+The public package unit includes Standalone JavaScript and declarations. Consumers
+such as Closure and Terminal typecheck these completed outputs without rebuilding
+the shared dependency inside parallel typecheck hooks. Ordinary workspace install
+prepares Standalone through the existing postinstall build graph.
 
 `workspace export <unit> --output <directory>` exports generated leaves only;
 `workspace import <unit> --url <url> --sha256 <digest> --scratch <directory>`
