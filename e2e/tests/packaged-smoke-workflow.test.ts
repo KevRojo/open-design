@@ -2399,6 +2399,10 @@ process.stdin.on("end", () => {
       expect(job).toContain(`needs.source_${target}.outputs.requests`);
       const source = workflowJob(workflow, `source_${target}`);
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
+      expect(source).toContain("install-profile: source-web");
+      expect(source).toContain("pnpm --filter @open-design/tools-pack dev workspace build web");
+      expect(source).not.toContain("cache-tools: 'true'");
+      expect(source).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
       expect(source).toContain("uses: ./.github/actions/convergence");
       expect(source).toContain("local-products-root:");
       expect(source).toContain("local-product-pattern: '**/workspace.tar.gz'");
@@ -2486,13 +2490,20 @@ process.stdin.on("end", () => {
       }
     }
     const plan = workflowJob(workflow, "plan");
+    const releasePrepare = workflowJob(workflow, "release_prepare");
     expect(plan).toContain("steps.identity.outputs.commit == github.sha");
     expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json"');
     expect(plan).toContain("--all-workloads");
     expect(plan).toContain("contributions: ${{ steps.plan.outputs.contributions }}");
     expect(plan).toContain("steps.identity.outputs.commit != github.sha");
     expect(plan).not.toContain("fetch-depth: 0");
-    expect(plan).toContain("OPEN_DESIGN_RELEASE_TAG_REMOTE: origin");
+    expect(plan).not.toContain("setup-workspace");
+    expect(plan).not.toContain("pnpm");
+    expect(plan).not.toContain("tools-release");
+    expect(releasePrepare).toContain("OPEN_DESIGN_RELEASE_TAG_REMOTE: origin");
+    expect(releasePrepare).toContain("pnpm exec tools-release prepare beta");
+    expect(workflowJob(workflow, "source_mac_arm64")).not.toContain("- release_prepare");
+    expect(workflowJob(workflow, "build_mac_arm64")).toContain("- release_prepare");
     expect(workflow).not.toContain("  plan_tests:");
     expect(workflow).not.toContain("  test_results:");
     const writer = await readFile(join(workspaceRoot, ".github/workflows/convergence.atom.yml"), "utf8");
@@ -2878,7 +2889,8 @@ process.stdin.on("end", () => {
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(notifyDailyFeishuWorkflowPath, "utf8"),
     ]);
-    const metadataJob = workflowJob(betaWorkflow, "plan");
+    const planJob = workflowJob(betaWorkflow, "plan");
+    const metadataJob = workflowJob(betaWorkflow, "release_prepare");
     const publisherGuard = sectionBetween(
       metadataJob,
       "- name: Validate shared beta publisher",
@@ -2900,8 +2912,8 @@ process.stdin.on("end", () => {
     expect(publisherGuard).toContain("publish=false");
     expect(betaWorkflow).not.toContain("recover_foreign_beta");
     expect(betaWorkflow).not.toContain("OPEN_DESIGN_RECOVER_FOREIGN_BETA");
-    expect(metadataJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
-    expect(metadataJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
+    expect(planJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
+    expect(planJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
     expect(metadataJob).toContain(`promote: \${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}`);
     expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}");
     expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}");
@@ -2927,12 +2939,13 @@ process.stdin.on("end", () => {
     expect(winJob).toContain("id: win_x64_platform_outputs");
 
     const publishJob = workflowJob(betaWorkflow, "publish");
-    expect(publishJob).toContain("needs.plan.outputs.promote == 'true'");
+    expect(publishJob).toContain("needs.release_prepare.outputs.promote == 'true'");
     expect(publishJob).not.toContain("actions/download-artifact");
     expect(publishJob).not.toContain("Cleanup workflow artifacts");
     for (const target of ["mac_arm64", "mac_x64", "win_x64", "linux_x64"]) {
       expect(publishJob).toContain(`Download ${target} platform manifest`);
       expect(publishJob).toContain(`RELEASE_TARGET: ${target}`);
+      expect(publishJob).toContain(`RELEASE_PLATFORM_MANIFEST_KEY: \${{ needs.build_${target}.outputs.manifest_key }}`);
     }
     expect(publishJob.match(/tools-release download-platform-manifest/g)).toHaveLength(4);
     expect(publishJob.indexOf("Setup workspace")).toBeLessThan(
@@ -3585,7 +3598,7 @@ process.stdin.on("end", () => {
     expect(releaseBetaWorkflow).toContain("tools-release publish-platform");
     expect(releaseBetaWorkflow).toContain("tools-release publish-metadata");
     expect(releaseBetaWorkflow).toContain("RELEASE_MANIFEST_DIR:");
-    expect(releaseBetaWorkflow).toContain("RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}");
+    expect(releaseBetaWorkflow).toContain("RELEASE_ASSET_SUFFIX: ${{ needs.release_prepare.outputs.asset_version_suffix }}");
     expect(platformPublishScript).toContain("artifacts.payload");
     expect(platformPublishScript).toContain("open-design-${releaseVersion}${assetSuffix}-mac-${arch}-payload.zip");
     expect(platformPublishScript).toContain("open-design-${releaseVersion}${assetSuffix}-win-x64-payload.7z");

@@ -22,10 +22,31 @@ inputs:
     description: Cache release dependency installation and the independently keyed tool build closure
     required: false
     default: 'false'
+  install-profile:
+    description: Dependency installation boundary (workspace|source-web)
+    required: false
+    default: 'workspace'
 
 runs:
   using: composite
   steps:
+    - name: Validate install profile
+      shell: bash
+      run: |
+        case "${{ inputs.install-profile }}" in
+          workspace) ;;
+          source-web)
+            if [ "${{ inputs.cache-tools }}" = "true" ]; then
+              echo "source-web install profile cannot cache the full workspace tool closure" >&2
+              exit 1
+            fi
+            ;;
+          *)
+            echo "unsupported setup-workspace install profile: ${{ inputs.install-profile }}" >&2
+            exit 1
+            ;;
+        esac
+
     - name: Detect persistent pnpm store
       id: persistent-pnpm-store
       shell: bash
@@ -114,9 +135,17 @@ runs:
           pnpm-store-${{ runner.os }}-
 
     - name: Install dependencies
-      if: ${{ inputs.cache-tools != 'true' }}
+      if: ${{ inputs.cache-tools != 'true' && inputs.install-profile == 'workspace' }}
       shell: bash
       run: pnpm install --frozen-lockfile
+
+    - name: '[prepare] Web source dependencies'
+      if: ${{ inputs.install-profile == 'source-web' }}
+      shell: bash
+      run: >-
+        pnpm install --frozen-lockfile --ignore-scripts
+        --filter @open-design/tools-pack...
+        --filter @open-design/web...
 
     - name: '[prepare] Workspace dependencies'
       if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}

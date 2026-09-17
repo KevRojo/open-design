@@ -35,6 +35,10 @@ describe("platform manifest download", () => {
   it("reads the immutable version manifest directly from release storage", async () => {
     const manifest = JSON.stringify({ channel: "beta", platformKey: "mac_arm64" });
     storage.getStorageObjectText.mockResolvedValue(manifest);
+    vi.stubEnv(
+      "RELEASE_PLATFORM_MANIFEST_KEY",
+      "beta/versions/0.22.3-beta.99.signed/platforms/mac_arm64.json",
+    );
 
     await import("@/storage/download-platform-manifest.ts");
 
@@ -42,6 +46,18 @@ describe("platform manifest download", () => {
       objectKey: "beta/versions/0.22.3-beta.99.signed/platforms/mac_arm64.json",
     }));
     expect(readFileSync(join(root, "mac_arm64.json"), "utf8")).toBe(`${manifest}\n`);
+  });
+
+  it("rejects a producer key outside the requested release identity", async () => {
+    vi.stubEnv(
+      "RELEASE_PLATFORM_MANIFEST_KEY",
+      "beta/versions/0.22.3-beta.98.signed/platforms/mac_arm64.json",
+    );
+
+    await expect(import("@/storage/download-platform-manifest.ts")).rejects.toThrow(
+      "platform manifest key does not match beta 0.22.3-beta.99 mac_arm64",
+    );
+    expect(storage.getStorageObjectText).not.toHaveBeenCalled();
   });
 
   it("fails instead of synthesizing a missing manifest", async () => {

@@ -30,7 +30,6 @@
         "tools/pack/src/config/",
         "tools/pack/src/workspace/",
         "tools/pack/tsconfig.json",
-        "scripts/postinstall.mjs",
         ".github/actions/setup-workspace/"
       ],
       "exclude": [
@@ -50,6 +49,12 @@
         "**/vitest.config.ts",
         "**/tsconfig.tests.json"
       ]
+    },
+    "source-postinstall": {
+      "paths": [
+        "scripts/postinstall.mjs"
+      ],
+      "exclude": []
     },
     "source-web": {
       "paths": [
@@ -164,10 +169,12 @@
       ".github/actions/setup-workspace/"
     ],
     "source-packages": [
-      "resource://source-common"
+      "resource://source-common",
+      "resource://source-postinstall"
     ],
     "source-daemon": [
       "resource://source-common",
+      "resource://source-postinstall",
       "resource://source-daemon"
     ],
     "source-web": [
@@ -176,6 +183,7 @@
     ],
     "source-shell": [
       "resource://source-common",
+      "resource://source-postinstall",
       "resource://source-shell",
       "resource://packaged-execution"
     ],

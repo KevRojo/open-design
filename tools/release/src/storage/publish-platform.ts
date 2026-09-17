@@ -298,6 +298,7 @@ await upload(manifestPath, `${versionPrefix}/platforms/${target}.json`, "public,
 
 const outputs: Record<string, string> = {
   platform_latest_manifest_url: latestManifestUrl,
+  platform_manifest_key: `${versionPrefix}/platforms/${target}.json`,
   platform_manifest_path: manifestPath,
   platform_manifest_url: versionManifestUrl,
   release_target: target,

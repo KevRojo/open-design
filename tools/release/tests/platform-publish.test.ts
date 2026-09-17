@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +58,9 @@ describe("platform publication barrier", () => {
     expect(maximum).toBe(2);
     expect(completed.at(-1)).toMatch(/\/platforms\/mac_arm64.json$/);
     expect(existsSync(join(root, "outputs.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, "outputs.json"), "utf8"))).toMatchObject({
+      platform_manifest_key: "beta/versions/0.22.3-beta.99/platforms/mac_arm64.json",
+    });
   });
 
   it("fails without publishing a manifest or success outputs when an upload fails", async () => {
