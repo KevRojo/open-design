@@ -638,14 +638,14 @@ jobs:
           install-profile: source-web
       - name: "[restore] Shared JavaScript"
         shell: bash
-        run: pnpm --filter @open-design/tools-pack dev workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+        run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
-        run: pnpm --filter @open-design/tools-pack dev workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+        run: pnpm --filter @open-design/tools-pack workspace:dev build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: '[cache] Publish workload results'
         id: workload_results
         if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
@@ -929,14 +929,14 @@ jobs:
           install-profile: source-web
       - name: "[restore] Shared JavaScript"
         shell: bash
-        run: pnpm --filter @open-design/tools-pack dev workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+        run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
-        run: pnpm --filter @open-design/tools-pack dev workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+        run: pnpm --filter @open-design/tools-pack workspace:dev build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: '[cache] Publish workload results'
         id: workload_results
         if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
@@ -1165,14 +1165,14 @@ jobs:
           install-profile: source-web
       - name: "[restore] Shared JavaScript"
         shell: bash
-        run: pnpm --filter @open-design/tools-pack dev workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+        run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
-        run: pnpm --filter @open-design/tools-pack dev workspace build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+        run: pnpm --filter @open-design/tools-pack workspace:dev build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: '[cache] Publish workload results'
         id: workload_results
         if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
