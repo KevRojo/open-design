@@ -22,7 +22,10 @@ function workspaceFetch(signal: AbortSignal): typeof globalThis.fetch {
       } catch (error) {
         const cause = error instanceof Error && error.cause != null ? error.cause : error;
         const code = typeof cause === "object" && cause != null && "code" in cause ? String(cause.code) : "";
-        if (retried || signal.aborted || !transientCodes.has(code)) throw error;
+        if (retried || signal.aborted || !transientCodes.has(code)) {
+          throw new Error(`workspace product request failed after ${retried ? 2 : 1} request(s): ${code || (error instanceof Error ? error.name : "unknown")}`, { cause: error });
+        }
+        process.stderr.write(`[tools-pack workspace] transient connection error code=${code}\n`);
       }
       retried = true;
       process.stderr.write("[tools-pack workspace] transient product request failed; retrying once\n");
