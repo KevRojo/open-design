@@ -522,6 +522,10 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
                            ("tools/release/src/plan-witness.ts", set()), ("tools/dev/src/plan-witness.ts", set()),
                            ("tools/serve/src/plan-witness.ts", set()),
                            ("tools/pack/src/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
+                           ("tools/pack/src/workspace/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
+                           ("tools/pack/src/mac/report.ts", set()),
+                           ("tools/pack/src/win/report.ts", set()),
+                           ("tools/pack/src/metrics/path-size-index.ts", set()),
                            ("packages/download/src/archive.ts", {"packages", "daemon", "web", "shell"}),
                            (".github/scripts/release/workspace-products.ts", set())):
         git("read-tree", "HEAD")

@@ -37,13 +37,6 @@ on:
         required: false
         type: string
         default: ""
-      release_origin:
-        description: "Release storage origin."
-        required: true
-        type: choice
-        options:
-          - cloudflare-r2
-        default: cloudflare-r2
       release_public_origin:
         description: "Optional public release origin override."
         required: false
@@ -59,6 +52,14 @@ on:
         required: false
         type: string
         default: ""
+      mac_compression:
+        description: "macOS artifact compression used by both architectures. Store is the low-CPU experiment."
+        required: true
+        type: choice
+        options:
+          - normal
+          - store
+        default: normal
       mac_arm64_sign_mode:
         description: "macOS arm64 signing mode."
         required: true
@@ -202,10 +203,6 @@ on:
         required: false
         type: string
         default: ""
-      release_origin:
-        required: false
-        type: string
-        default: cloudflare-r2
       release_public_origin:
         required: false
         type: string
@@ -218,6 +215,10 @@ on:
         required: false
         type: string
         default: ""
+      mac_compression:
+        required: false
+        type: string
+        default: normal
       mac_arm64_sign_mode:
         required: false
         type: string
@@ -443,10 +444,6 @@ jobs:
       - name: Validate beta inputs
         run: |
           set -euo pipefail
-          if [ "${{ inputs.release_origin }}" != "cloudflare-r2" ]; then
-            echo "release-beta supports release_origin=cloudflare-r2 only" >&2
-            exit 1
-          fi
           if [ "${{ inputs.enable_mac_arm64 }}" != "true" ] && [ "${{ inputs.enable_win_x64 }}" != "true" ] && [ "${{ inputs.enable_mac_x64 }}" != "true" ] && [ "${{ inputs.enable_linux_x64 }}" != "true" ]; then
             echo "release-beta requires at least one target to be enabled" >&2
             exit 1
@@ -731,6 +728,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
+          OD_WEB_SOURCEMAP_UPLOAD: "true"
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/release-build/mac_arm64"
@@ -743,7 +741,7 @@ jobs:
             --namespace release-beta
             --portable
             --app-version "${{ needs.plan.outputs.beta_version }}"
-            --mac-compression normal
+            --mac-compression "${{ inputs.mac_compression }}"
             --to "${{ inputs.mac_arm64_target }}"
             --json
             --require-vela-cli
@@ -774,6 +772,7 @@ jobs:
         if: ${{ (inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '') }}
         env:
           ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
+          OD_WEB_SOURCEMAP_UPLOAD: "false"
         run: |
           set -euo pipefail
           version="${{ needs.plan.outputs.beta_version }}"
@@ -791,7 +790,7 @@ jobs:
             --namespace release-beta \
             --portable \
             --app-version "$update_version" \
-            --mac-compression normal \
+            --mac-compression "${{ inputs.mac_compression }}" \
             --to dmg \
             --require-vela-cli \
             --json)"
@@ -887,13 +886,6 @@ jobs:
             const fs = require("fs");
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-platform-outputs/mac_arm64.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
-      - name: Upload mac_arm64 publish manifest
-        if: ${{ (inputs.publish) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: open-design-beta-mac-arm64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests/mac_arm64.json
-          if-no-files-found: error
   source_mac_x64:
     outputs:
       requests: ${{ steps.workload_results.outputs.requests }}
@@ -1023,6 +1015,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          OD_WEB_SOURCEMAP_UPLOAD: ${{ !inputs.enable_mac_arm64 }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/release-build/mac_x64"
@@ -1035,7 +1028,7 @@ jobs:
             --namespace release-beta-x64
             --portable
             --app-version "${{ needs.plan.outputs.beta_version }}"
-            --mac-compression normal
+            --mac-compression "${{ inputs.mac_compression }}"
             --to "${{ inputs.mac_x64_target }}"
             --json
             --require-vela-cli
@@ -1119,13 +1112,6 @@ jobs:
           RELEASE_TARGET: mac_x64
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
-      - name: Upload mac_x64 publish manifest
-        if: ${{ (inputs.publish) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: open-design-beta-mac-x64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests/mac_x64.json
-          if-no-files-found: error
   source_win_x64:
     outputs:
       requests: ${{ steps.workload_results.outputs.requests }}
@@ -1382,13 +1368,6 @@ jobs:
             const fs = require("fs");
             const outputs = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/release-platform-outputs/win_x64.json`, "utf8"));
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
-      - name: Upload win_x64 publish manifest
-        if: ${{ (inputs.publish) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: open-design-beta-win-x64-publish-manifest
-          path: ${{ runner.temp }}\release-platform-manifests\win_x64.json
-          if-no-files-found: error
   build_linux_x64:
     name: "[build] linux_x64 Electron full"
     needs:
@@ -1490,14 +1469,6 @@ jobs:
           RELEASE_TARGET: linux_x64
           RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
         run: pnpm exec tools-release publish-platform
-      - name: Upload linux_x64 publish manifest
-        if: ${{ (inputs.publish) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: open-design-beta-linux-x64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests/linux_x64.json
-          if-no-files-found: error
-
   publish:
     name: "[publish] Beta distribution"
     needs:
@@ -1530,41 +1501,50 @@ jobs:
     env:
       GITHUB_SHA: ${{ needs.plan.outputs.commit }}
       RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      RELEASE_ASSET_SUFFIX: ${{ needs.plan.outputs.asset_version_suffix }}
+      RELEASE_CHANNEL: beta
+      RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
+      RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
+      RELEASE_STORAGE_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_RELEASES_URL }}
+      RELEASE_STORAGE_REGION: auto
+      RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.beta_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.plan.outputs.commit }}
-      - name: Download mac_arm64 publish manifest
-        if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: open-design-beta-mac-arm64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests
-      - name: Download mac_x64 publish manifest
-        if: ${{ inputs.enable_mac_x64 && needs.build_mac_x64.result == 'success' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: open-design-beta-mac-x64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests
-      - name: Download win_x64 publish manifest
-        if: ${{ inputs.enable_win_x64 && needs.build_win_x64.result == 'success' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: open-design-beta-win-x64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests
-      - name: Download linux_x64 publish manifest
-        if: ${{ inputs.enable_linux_x64 && needs.build_linux_x64.result == 'success' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: open-design-beta-linux-x64-publish-manifest
-          path: ${{ runner.temp }}/release-platform-manifests
+          fetch-depth: 1
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
+      - name: Download mac_arm64 platform manifest
+        if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
+        env:
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/release-platform-manifests
+          RELEASE_TARGET: mac_arm64
+        run: pnpm exec tools-release download-platform-manifest
+      - name: Download mac_x64 platform manifest
+        if: ${{ inputs.enable_mac_x64 && needs.build_mac_x64.result == 'success' }}
+        env:
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/release-platform-manifests
+          RELEASE_TARGET: mac_x64
+        run: pnpm exec tools-release download-platform-manifest
+      - name: Download win_x64 platform manifest
+        if: ${{ inputs.enable_win_x64 && needs.build_win_x64.result == 'success' }}
+        env:
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/release-platform-manifests
+          RELEASE_TARGET: win_x64
+        run: pnpm exec tools-release download-platform-manifest
+      - name: Download linux_x64 platform manifest
+        if: ${{ inputs.enable_linux_x64 && needs.build_linux_x64.result == 'success' }}
+        env:
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/release-platform-manifests
+          RELEASE_TARGET: linux_x64
+        run: pnpm exec tools-release download-platform-manifest
       - name: Prepare and publish beta release notes
         env:
           RELEASE_CHANNEL: beta
@@ -1647,13 +1627,6 @@ jobs:
         run: pnpm exec tools-release summary-metadata
       - name: Publish summary
         run: cat "${{ runner.temp }}/release-metadata/summary.md" >> "$GITHUB_STEP_SUMMARY"
-      - name: Cleanup workflow artifacts
-        if: ${{ success() && steps.outputs.outputs.release_state == 'complete' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT_NAME_REGEX: ^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$
-        run: bash .github/scripts/release/github/cleanup-artifacts.sh
-
   test_e2e_vitest:
     name: ${{ matrix.name || '[test] E2E Vitest' }}
     runs-on: ${{ matrix.runner }}

@@ -2299,6 +2299,22 @@ process.stdin.on("end", () => {
     expect(beta).not.toContain("uses: ./.github/workflows/release-prerelease.yml");
   });
 
+  it("[P1] keeps beta mac compression explicit and uploads identical mac sourcemaps once", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    expect(workflow.match(/^      mac_compression:$/gm)).toHaveLength(2);
+    expect(workflow.match(/^        default: normal$/gm)?.length).toBeGreaterThanOrEqual(2);
+    expect(workflow.match(/--mac-compression "\$\{\{ inputs\.mac_compression \}\}"/g)).toHaveLength(3);
+    expect(workflow).not.toContain("--mac-compression normal");
+
+    const arm = betaPlatformBuild(workflow, "mac_arm64");
+    const intel = betaPlatformBuild(workflow, "mac_x64");
+    const windows = betaPlatformBuild(workflow, "win_x64");
+    expect(arm).toContain('OD_WEB_SOURCEMAP_UPLOAD: "true"');
+    expect(arm).toContain('OD_WEB_SOURCEMAP_UPLOAD: "false"');
+    expect(intel).toContain("OD_WEB_SOURCEMAP_UPLOAD: ${{ !inputs.enable_mac_arm64 }}");
+    expect(windows).not.toContain("OD_WEB_SOURCEMAP_UPLOAD");
+  });
+
   it("[P2] limits beta native install compilation to tools and their dependency closure", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const targets = '["tools/pack","tools/release","tools/dev","tools/serve"]';
@@ -2513,9 +2529,10 @@ process.stdin.on("end", () => {
     expect(workflow).toContain("RELEASE_REPORT_JSON_PATH: ${{ runner.temp }}/release-report/linux_x64/report.json");
     expect(workflow).toContain("Prepare linux_x64 assets");
     expect(workflow).toContain("Publish linux_x64 platform");
-    expect(workflow).toContain("Upload linux_x64 publish manifest");
-    expect(workflow).toContain("open-design-beta-linux-x64-publish-manifest");
-    expect(workflow).toContain("Download linux_x64 publish manifest");
+    expect(workflow).not.toContain("Upload linux_x64 publish manifest");
+    expect(workflow).not.toContain("open-design-beta-linux-x64-publish-manifest");
+    expect(workflow).toContain("Download linux_x64 platform manifest");
+    expect(workflow).toContain("tools-release download-platform-manifest");
     expect(workflow).not.toContain(".github/scripts/release/assets/linux.sh");
     expect(workflow).not.toContain(".github/scripts/release/r2/publish-platform.ts");
   });
@@ -2911,7 +2928,16 @@ process.stdin.on("end", () => {
 
     const publishJob = workflowJob(betaWorkflow, "publish");
     expect(publishJob).toContain("needs.plan.outputs.promote == 'true'");
-    expect(publishJob).toContain("^open-design-beta-(mac-arm64|mac-x64|win-x64|linux-x64)-publish-manifest$");
+    expect(publishJob).not.toContain("actions/download-artifact");
+    expect(publishJob).not.toContain("Cleanup workflow artifacts");
+    for (const target of ["mac_arm64", "mac_x64", "win_x64", "linux_x64"]) {
+      expect(publishJob).toContain(`Download ${target} platform manifest`);
+      expect(publishJob).toContain(`RELEASE_TARGET: ${target}`);
+    }
+    expect(publishJob.match(/tools-release download-platform-manifest/g)).toHaveLength(4);
+    expect(publishJob.indexOf("Setup workspace")).toBeLessThan(
+      publishJob.indexOf("Download mac_arm64 platform manifest"),
+    );
     expect(dailyWorkflow).toContain("tools-release recover-beta");
     expect(dailyWorkflow).toContain("force: ${{ needs.resolve.outputs.force == 'true' }}");
     expect(dailyWorkflow).toContain("promote: ${{ needs.resolve.outputs.promote == 'true' }}");
@@ -3571,7 +3597,7 @@ process.stdin.on("end", () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const macX64Job = betaPlatformBuild(workflow, "mac_x64");
     const prepareStep = sectionBetween(macX64Job, "      - name: Prepare mac_x64 assets", "      - name: Publish mac_x64 platform");
-    const publishStep = sectionBetween(macX64Job, "      - name: Publish mac_x64 platform", "      - name: Upload mac_x64 publish manifest");
+    const publishStep = macX64Job.slice(macX64Job.indexOf("      - name: Publish mac_x64 platform"));
     const artifactMode = "RELEASE_ARTIFACT_MODE: ${{ inputs.mac_x64_target == 'all' && 'all' || 'dmg-and-payload' }}";
 
     expect(prepareStep).toContain(artifactMode);
