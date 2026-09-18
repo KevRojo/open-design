@@ -539,6 +539,40 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
     expect(result.status, result.stderr).toBe(0);
   });
 
+  test("keys the mac x64 release executor by its exact workspace closure", () => {
+    const result = spawnSync("python3", ["-c", `
+import os, subprocess, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+root = Path(sys.argv[2])
+contract = c.ConvergenceContract(root / ".github/config/convergence/release-beta.json")
+with tempfile.TemporaryDirectory(prefix="platform-executor-identity-") as scratch:
+    index = Path(scratch) / "index"
+    env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    def git(*args, content=None):
+        return subprocess.check_output(["git", *args], cwd=root, env=env, input=content, text=True).strip()
+    def identity():
+        return c.calculate(contract, root, "release-beta", {"source_mac_x64": ["macos-15-intel"]},
+                           index=index, identities={"source_mac_x64_executor"})["source_mac_x64_executor"]["digest"]
+    def changed(path):
+        git("read-tree", "HEAD")
+        oid = git("hash-object", "-w", "--stdin", content="// executor identity witness")
+        git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
+        return identity()
+    git("read-tree", "HEAD")
+    baseline = identity()
+    for path in ("packages/download/src/plan-witness.ts", "packages/sidecar/src/plan-witness.ts",
+                 "tools/pack/src/plan-witness.ts", "tools/release/src/plan-witness.ts",
+                 ".github/actions/setup-workspace/plan-witness.yml"):
+        assert changed(path) != baseline, path + " reused a stale executor"
+    for path in ("packages/diagnostics/src/plan-witness.ts", "apps/web/src/plan-witness.ts",
+                 "tools/pack/tests/plan-witness.test.ts"):
+        assert changed(path) == baseline, path + " invalidated the executor"
+`, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("projects declared JSON fields from Git without coupling product code to Plan", () => {
     const fixture = createRepository();
     const resourcePath = path.join(fixture.root, "release.json");
