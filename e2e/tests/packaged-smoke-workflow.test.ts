@@ -1368,6 +1368,9 @@ process.stdin.on("end", () => {
     expect(workflow).toContain("ci_mode:");
     expect(plan).toContain("run: ${{ steps.convergence.outputs.run }}");
     expect(plan).toContain("scopes: ${{ steps.scopes.outputs.scopes }}");
+    expect(plan).toContain("github.event_name == 'merge_group'");
+    expect(plan).toContain("github.event.pull_request.head.repo.full_name == github.repository");
+    expect(plan).toContain("&& 'enforce' || 'shadow'");
     expect(workflow).toContain("fromJSON(needs.plan.outputs.run).ui_p0");
     expect(validate).toContain("[$run | to_entries[] | select(.value) | .key]");
 

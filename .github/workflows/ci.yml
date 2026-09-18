@@ -99,7 +99,7 @@ jobs:
           --workflow ci
           --scope-plan "$RUNNER_TEMP/scope-plan.json"
           --runner-plan-json "$RUNNER_PLAN_JSON"
-          --mode ${{ github.event_name == 'workflow_dispatch' && inputs.workloads != '' && 'enforce' || 'shadow' }}
+          --mode ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && inputs.workloads != '')) && 'enforce' || 'shadow' }}
           --pending "$RUNNER_TEMP/pending-convergence.json"
 
       # Shadow mode records reusable-result hits without omitting validation.
