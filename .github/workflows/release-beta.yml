@@ -465,6 +465,7 @@ jobs:
       contributions: ${{ steps.plan.outputs.contributions }}
       branch: ${{ steps.identity.outputs.branch }}
       commit: ${{ steps.identity.outputs.commit }}
+      test_web_workspace_tests_matrix: ${{ steps.plan.outputs.test_web_workspace_tests_matrix }}
       test_e2e_vitest_matrix: ${{ steps.plan.outputs.test_e2e_vitest_matrix }}
       test_verify_matrix: ${{ steps.plan.outputs.test_verify_matrix }}
       test_daemon_unit_tests_matrix: ${{ steps.plan.outputs.test_daemon_unit_tests_matrix }}
@@ -1713,6 +1714,69 @@ jobs:
         run: pnpm exec tools-release summary-metadata
       - name: Publish summary
         run: cat "${{ runner.temp }}/release-metadata/summary.md" >> "$GITHUB_STEP_SUMMARY"
+  test_web_workspace_tests:
+    name: ${{ matrix.name || '[test] Web workspace' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_web_workspace_tests_matrix) }}
+    env:
+      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: "[validate] Source references"
+        shell: bash
+        env:
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
+        if: ${{ needs.plan.outputs.contribution == 'true' }}
+        run: python3 .github/scripts/convergence.py resolve-references --shared packages,daemon,shell
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          runner-labels: ${{ toJSON(matrix.runner) }}
+      - name: Prepare test dependencies
+        run: ${{ needs.plan.outputs.contribution == 'true' && matrix.prepareShared || matrix.prepare }}
+      - name: Run test unit
+        run: ${{ matrix.command }}
+    needs:
+      - plan
+      - common
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && fromJSON(needs.plan.outputs.run).test_web_workspace_tests }}
+
+  cache_test_web_workspace_tests:
+    name: "[cache] Web workspace result"
+    needs: [plan, test_web_workspace_tests]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.test_web_workspace_tests.result == 'success' && needs.plan.outputs.contribution == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 1
+      - name: '[cache] Publish workload results'
+        uses: ./.github/actions/convergence
+        with:
+          config: .github/config/convergence/release-beta.json
+          pending-artifact: ${{ needs.plan.outputs.pending_artifact }}
+          id: beta-test-web-workspace
+          products: none
+          workloads: '["test_web_workspace_tests"]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_URL: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET }}
+          OD_WORKLOAD_RESULTS_BASE_URL: ${{ secrets.OD_WORKLOAD_RESULTS_BASE_URL }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_AK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_AK }}
+          CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
+
   test_e2e_vitest:
     name: ${{ matrix.name || '[test] E2E Vitest' }}
     runs-on: ${{ matrix.runner }}

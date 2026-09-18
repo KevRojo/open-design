@@ -291,7 +291,7 @@ sys.path.insert(0, sys.argv[1])
 import convergence as c
 root = Path(sys.argv[2])
 contract = c.ConvergenceContract(Path(sys.argv[3]) / ".github/config/convergence/release-beta.json")
-ids = {"test_daemon_unit_tests", "test_functional_e2e", "source_js_daemon"}
+ids = {"test_web_workspace_tests", "test_daemon_unit_tests", "test_functional_e2e", "source_js_daemon"}
 runners = {"release_tests": ["ubuntu-latest"], "ui_p0": ["ui-runner"], "source_javascript": ["ubuntu-latest"]}
 with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     index = Path(scratch) / "index"
@@ -305,7 +305,7 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     # in the production evaluator, and no business source needs to be copied.
     oid = git("hash-object", "-w", "--stdin", content="baseline witness")
     names = set()
-    for suite in ("daemon-tests", "ui-tests", "source-daemon"):
+    for suite in ("web-tests", "daemon-tests", "ui-tests", "source-daemon"):
         for token in contract.suite_paths(suite):
             names.add(token + "fixture.ts" if token.endswith("/") else token)
     for resource in contract.resources.values():
@@ -316,9 +316,10 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     baseline = keys()
     cases = {
       ".github/workflows/release-beta.yml": set(),
-      "apps/daemon/src/plan-witness.ts": ids,
+      "apps/daemon/src/plan-witness.ts": {"test_daemon_unit_tests", "test_functional_e2e", "source_js_daemon"},
       "apps/daemon/tests/plan-witness.test.ts": {"test_daemon_unit_tests"},
-      "apps/web/src/plan-witness.ts": {"test_functional_e2e"},
+      "apps/web/src/plan-witness.ts": {"test_web_workspace_tests", "test_functional_e2e"},
+      "apps/web/tests/plan-witness.test.ts": {"test_web_workspace_tests"},
       "plugins/registry/plan-witness.json": {"test_daemon_unit_tests", "test_functional_e2e"},
       "packages/contracts/src/plan-witness.ts": ids,
       "packages/contracts/tests/plan-witness.test.ts": set(),

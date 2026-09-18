@@ -2467,19 +2467,21 @@ process.stdin.on("end", () => {
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     const { workloads, matrices } = config.workflows["release-beta"];
     expect(matrices.build.map((row: { target: string }) => row.target)).toEqual(["mac_arm64", "mac_x64", "win_x64", "linux_x64"]);
-    expect(matrices.test).toHaveLength(12);
+    expect(matrices.test).toHaveLength(14);
     for (const row of matrices.test) expect(Object.keys(workloads[row.workload].success)).toContain(row.name);
     // Install-time tool preparation is not the app build dependency closure.
     for (const row of matrices.test) {
       expect(row.prepareShared).toContain('tools-pack workspace import javascript --sources "$WORKSPACE_SOURCES"');
-      expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/daemon^...'");
+      expect(row.prepare.split("\n")[0]).toContain(
+        row.kind === "web" ? "--filter '@open-design/web^...'" : "--filter '@open-design/daemon^...'",
+      );
       expect(row.prepare.split("\n")[0]).toContain("--if-present run build");
-      if (row.kind !== "daemon") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/desktop^...'");
+      if (row.kind !== "daemon" && row.kind !== "web") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/desktop^...'");
       if (row.kind === "ui" || row.kind === "e2e") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/web^...'");
     }
     expect(matrices.common).toHaveLength(1);
     expect(matrices.common[0].workloads).toEqual(["source_js_packages", "source_js_daemon", "source_js_shell"]);
-    expect(workflow.match(/    strategy:/g)).toHaveLength(5);
+    expect(workflow.match(/    strategy:/g)).toHaveLength(6);
     expect(workflow).toContain("  build_linux_x64:");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
     expect(workflow).toContain('run: ${{ matrix.command }}');
@@ -2498,7 +2500,7 @@ process.stdin.on("end", () => {
     const publish = workflowJob(workflow, "publish");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
-    for (const id of ["test_e2e_vitest", "test_verify", "test_daemon_unit_tests", "test_functional_e2e"]) {
+    for (const id of ["test_web_workspace_tests", "test_e2e_vitest", "test_verify", "test_daemon_unit_tests", "test_functional_e2e"]) {
       const tests = workflowJob(workflow, id);
       expect(tests).toContain(`fromJSON(needs.plan.outputs.run).${id}`);
       expect(tests).toContain(`fromJSON(needs.plan.outputs.${id}_matrix)`);

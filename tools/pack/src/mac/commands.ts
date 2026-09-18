@@ -86,7 +86,10 @@ export async function runNpmPrune(appRoot: string): Promise<void> {
 
 export async function runEsbuild(config: ToolPackConfig, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promise<void> {
   const esbuildCli = createRequire(import.meta.url).resolve("esbuild/bin/esbuild");
-  await execFileAsync(process.execPath, [esbuildCli, ...args], {
+  // esbuild may replace its JavaScript shim with the native executable during
+  // installation. Both forms implement the package bin contract, but only the
+  // shim can be interpreted by Node directly.
+  await execFileAsync(esbuildCli, args, {
     cwd: config.workspaceRoot,
     env: { ...process.env, ...extraEnv },
   });

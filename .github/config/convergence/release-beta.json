@@ -84,6 +84,13 @@
         "**/tsconfig.tests.json"
       ]
     },
+    "web-tests": {
+      "paths": [
+        "apps/web/tests/",
+        "apps/web/vitest.config.ts"
+      ],
+      "exclude": []
+    },
     "source-shell": {
       "paths": [
         "apps/desktop/",
@@ -257,6 +264,11 @@
       "resource://daemon-dependencies",
       "resource://test-resources",
       "resource://ui-tests"
+    ],
+    "web-tests": [
+      "resource://test-environment",
+      "suite://source-web",
+      "resource://web-tests"
     ]
   },
   "workflows": {
@@ -375,6 +387,24 @@
           "success": {
             "[build] win_x64 workload": [
               "[build] Source web"
+            ]
+          }
+        },
+        "test_web_workspace_tests": {
+          "inputs": [
+            "suite://web-tests"
+          ],
+          "runnerClass": "release_tests",
+          "products": "none",
+          "reusable": true,
+          "success": {
+            "[test] beta Web workspace tests (1/2)": [
+              "Prepare test dependencies",
+              "Run test unit"
+            ],
+            "[test] beta Web workspace tests (2/2)": [
+              "Prepare test dependencies",
+              "Run test unit"
             ]
           }
         },
@@ -579,8 +609,30 @@
             "shell": "bash"
           }
         ],
-        "test": [
-          {
+      "test": [
+        {
+          "workload": "test_web_workspace_tests",
+          "kind": "web",
+          "name": "[test] beta Web workspace tests (1/2)",
+          "timeout": 20,
+          "prepare": "pnpm --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/web build:sidecar",
+          "command": "pnpm --filter @open-design/web exec vitest run -c vitest.config.ts --maxWorkers=2 --shard=1/2",
+          "postinstall": "[\"tools/pack\"]",
+          "shard": 1,
+          "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+        },
+        {
+          "workload": "test_web_workspace_tests",
+          "kind": "web",
+          "name": "[test] beta Web workspace tests (2/2)",
+          "timeout": 20,
+          "prepare": "pnpm --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/web build:sidecar",
+          "command": "pnpm --filter @open-design/web exec vitest run -c vitest.config.ts --maxWorkers=2 --shard=2/2",
+          "postinstall": "[\"tools/pack\"]",
+          "shard": 2,
+          "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+        },
+        {
             "workload": "test_e2e_vitest",
             "kind": "e2e",
             "name": "[test] beta E2E Vitest",
