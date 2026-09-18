@@ -926,7 +926,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          install-profile: source-web
+          install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json

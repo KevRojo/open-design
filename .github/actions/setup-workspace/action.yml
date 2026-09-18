@@ -23,7 +23,7 @@ inputs:
     required: false
     default: 'false'
   install-profile:
-    description: Dependency installation boundary (workspace|source-web)
+    description: Dependency installation boundary (workspace|source-web|release-executor)
     required: false
     default: 'workspace'
 
@@ -35,9 +35,9 @@ runs:
       run: |
         case "${{ inputs.install-profile }}" in
           workspace) ;;
-          source-web)
+          source-web|release-executor)
             if [ "${{ inputs.cache-tools }}" = "true" ]; then
-              echo "source-web install profile cannot cache the full workspace tool closure" >&2
+              echo "${{ inputs.install-profile }} install profile cannot cache the full workspace tool closure" >&2
               exit 1
             fi
             ;;
@@ -148,8 +148,16 @@ runs:
         --filter @open-design/tools-release...
         --filter @open-design/web...
 
+    - name: '[prepare] Release executor dependencies'
+      if: ${{ inputs.install-profile == 'release-executor' }}
+      shell: bash
+      run: >-
+        pnpm install --frozen-lockfile --ignore-scripts
+        --filter @open-design/tools-pack...
+        --filter @open-design/tools-release...
+
     - name: '[prepare] Workspace restore support'
-      if: ${{ inputs.install-profile == 'source-web' }}
+      if: ${{ inputs.install-profile == 'source-web' || inputs.install-profile == 'release-executor' }}
       shell: bash
       run: >-
         pnpm --filter '@open-design/download...'

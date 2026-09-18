@@ -196,6 +196,36 @@ describe("release workflows", () => {
     }
   });
 
+  it("installs only the required producer closure for a mac x64 executor-only miss", async () => {
+    const [beta, setupWorkspace, convergenceConfig] = await Promise.all([
+      readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/actions/setup-workspace/action.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/config/convergence/release-beta.json", import.meta.url), "utf8"),
+    ]);
+    const macX64Producer = sectionBetween(beta, "  source_mac_x64:", "  build_mac_x64:");
+    const executorPaths = (JSON.parse(convergenceConfig) as {
+      resources: { "platform-executor": { paths: string[] } };
+    }).resources["platform-executor"].paths;
+
+    expect(macX64Producer).toContain(
+      "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
+    );
+    expect(setupWorkspace).toContain("source-web|release-executor)");
+    expect(setupWorkspace).toContain("inputs.install-profile == 'release-executor'");
+    expect(setupWorkspace).toContain("--filter @open-design/tools-pack...");
+    expect(setupWorkspace).toContain("--filter @open-design/tools-release...");
+    expect(executorPaths).not.toContain("packages/");
+    expect(executorPaths).toEqual(expect.arrayContaining([
+      "packages/download/",
+      "packages/launcher-proto/",
+      "packages/metatool/",
+      "packages/platform/",
+      "packages/release/",
+      "packages/sidecar/",
+      "packages/sidecar-proto/",
+    ]));
+  });
+
   it("requires Vela CLI for every beta desktop packaging target", async () => {
     const [beta, prerelease, stable, stablePrepare, buildMac, buildWin, prepareMac, prepareWin, publishPlatform, desktopUpdater, installUnsafeDmg] = await Promise.all([
       readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
