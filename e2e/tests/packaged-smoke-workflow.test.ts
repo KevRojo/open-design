@@ -2419,7 +2419,9 @@ process.stdin.on("end", () => {
       expect(job).toContain(`needs.source_${target}.outputs.requests`);
       const source = workflowJob(workflow, `source_${target}`);
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
-      expect(source).toContain("install-profile: source-web");
+      expect(source).toContain(target === "mac_x64"
+        ? "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
+        : "install-profile: source-web");
       expect(source).toContain("pnpm --filter @open-design/tools-pack workspace:dev build web");
       expect(source).not.toContain("cache-tools: 'true'");
       expect(source).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
