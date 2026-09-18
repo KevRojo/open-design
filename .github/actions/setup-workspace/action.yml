@@ -23,7 +23,7 @@ inputs:
     required: false
     default: 'false'
   install-profile:
-    description: Dependency installation boundary (workspace|source-web|release-executor)
+    description: Dependency installation boundary (workspace|source-web|release-executor|mac-runtime)
     required: false
     default: 'workspace'
 
@@ -35,7 +35,7 @@ runs:
       run: |
         case "${{ inputs.install-profile }}" in
           workspace) ;;
-          source-web|release-executor)
+          source-web|release-executor|mac-runtime)
             if [ "${{ inputs.cache-tools }}" = "true" ]; then
               echo "${{ inputs.install-profile }} install profile cannot cache the full workspace tool closure" >&2
               exit 1
@@ -156,8 +156,18 @@ runs:
         --filter @open-design/tools-pack...
         --filter @open-design/tools-release...
 
+    - name: '[prepare] macOS runtime product dependencies'
+      if: ${{ inputs.install-profile == 'mac-runtime' }}
+      shell: bash
+      run: >-
+        pnpm install --frozen-lockfile --ignore-scripts
+        --filter @open-design/tools-pack...
+        --filter @open-design/tools-release...
+        --filter @open-design/web...
+        --filter @open-design/daemon...
+
     - name: '[prepare] Workspace restore support'
-      if: ${{ inputs.install-profile == 'source-web' || inputs.install-profile == 'release-executor' }}
+      if: ${{ inputs.install-profile == 'source-web' || inputs.install-profile == 'release-executor' || inputs.install-profile == 'mac-runtime' }}
       shell: bash
       run: >-
         pnpm --filter '@open-design/download...'

@@ -904,7 +904,7 @@ jobs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_x64 workload"
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_x64 && needs.plan.outputs.contribution == 'true' && (fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' || fromJSON(needs.plan.outputs.requests).source_mac_x64.executor.operation == 'build') }}
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_x64 && needs.plan.outputs.contribution == 'true' && (fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' || fromJSON(needs.plan.outputs.requests).source_mac_x64.executor.operation == 'build' || fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build') }}
     runs-on: macos-15-intel
     defaults:
       run:
@@ -926,7 +926,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
+          install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -938,6 +938,11 @@ jobs:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm --filter @open-design/tools-pack workspace:dev build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+      - name: "[prepare] Platform product tools"
+        id: platform_product_tools
+        if: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.executor.operation == 'build' || fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' }}
+        shell: bash
+        run: pnpm --filter @open-design/tools-pack build
       - name: "[build] Release executor"
         id: release_executor
         if: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.executor.operation == 'build' }}
@@ -946,9 +951,20 @@ jobs:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/executor/product/workspace.tar.gz
         run: |
           set -euo pipefail
-          pnpm --filter @open-design/tools-pack build
           pnpm --filter @open-design/tools-release build
           pnpm --filter @open-design/tools-pack executor:dev export --output "$SOURCE_OUTPUT" --json
+      - name: "[build] mac_x64 runtime"
+        id: mac_x64_runtime
+        if: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' }}
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ${{ runner.temp }}/source-products/runtime/product/workspace.tar.gz
+        run: >-
+          pnpm exec tools-pack mac runtime-export
+          --dir "$RUNNER_TEMP/mac-runtime-export"
+          --namespace runtime-export
+          --output "$SOURCE_OUTPUT"
+          --json
       - name: '[cache] Publish workload results'
         id: workload_results
         if: ${{ !cancelled() && needs.plan.outputs.contribution == 'true' }}
@@ -961,7 +977,7 @@ jobs:
           batches: '["source_mac_x64"]'
           current-job: '[build] mac_x64 workload'
           step-results: |
-            {"[build] Source web":"${{ steps.source_web.outcome }}","[build] Release executor":"${{ steps.release_executor.outcome }}"}
+            {"[build] Source web":"${{ steps.source_web.outcome }}","[prepare] Platform product tools":"${{ steps.platform_product_tools.outcome }}","[build] Release executor":"${{ steps.release_executor.outcome }}","[build] mac_x64 runtime":"${{ steps.mac_x64_runtime.outcome }}"}
           local-products-root: ${{ runner.temp }}/source-products
           local-product-pattern: '**/workspace.tar.gz'
         env:
@@ -1010,6 +1026,13 @@ jobs:
           python3 .github/scripts/release/executor.py restore
           --url "$SOURCE_EXECUTOR_URL" --sha256 "$SOURCE_EXECUTOR_SHA256"
           --output "$RUNNER_TEMP/release-executor"
+      - name: "[restore] mac_x64 runtime"
+        shell: bash
+        run: >-
+          node "$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac runtime-restore
+          --url "$SOURCE_RUNTIME_URL" --sha256 "$SOURCE_RUNTIME_SHA256"
+          --output "$RUNNER_TEMP/mac-runtime-product"
+          --json
       - name: Setup Node.js
         uses: actions/setup-node@v6.4.0
         with:
@@ -1059,6 +1082,7 @@ jobs:
             --namespace release-beta-x64
             --portable
             --app-version "${{ needs.release_prepare.outputs.beta_version }}"
+            --mac-runtime-product "$RUNNER_TEMP/mac-runtime-product"
             --mac-compression "${{ inputs.mac_compression }}"
             --to "${{ inputs.mac_x64_target }}"
             --json

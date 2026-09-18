@@ -103,6 +103,21 @@
         "**/tsconfig.tests.json"
       ]
     },
+    "platform-mac-runtime": {
+      "paths": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tools/pack/",
+        ".github/actions/setup-workspace/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json"
+      ]
+    },
     "daemon-dependencies": {
       "paths": [
         "packages/agui-adapter/",
@@ -315,6 +330,22 @@
             ]
           }
         },
+        "source_mac_x64_runtime": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://source-packages",
+            "resource://platform-mac-runtime"
+          ],
+          "runnerClass": "source_mac_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] mac_x64 workload": [
+              "[prepare] Platform product tools",
+              "[build] mac_x64 runtime"
+            ]
+          }
+        },
         "source_win_x64_web": {
           "successBoundary": "steps",
           "inputs": [
@@ -448,6 +479,13 @@
               "workload": "source_mac_x64_executor",
               "request": {
                 "unit": "executor"
+              },
+              "product": "bundle"
+            },
+            "runtime": {
+              "workload": "source_mac_x64_runtime",
+              "request": {
+                "unit": "runtime"
               },
               "product": "bundle"
             }

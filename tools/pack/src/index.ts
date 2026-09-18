@@ -13,6 +13,7 @@ import {
   stopPackedMacApp,
   uninstallPackedMacApp,
 } from "./mac/index.js";
+import { exportMacRuntimeProduct, restoreMacRuntimeProduct, validateMacRuntimeProductRoot } from "./mac/runtime-product.js";
 import {
   cleanupPackedWinNamespace,
   diagnosePackedWinIpc,
@@ -99,7 +100,12 @@ function addBuildOptions(command: CacCommand, platform: ToolPackPlatform) {
 
 function addMacBuildOptions(command: CacCommand) {
   return addBuildOptions(command, "mac")
-    .option("--mac-compression <mode>", "mac artifact compression: normal|maximum|store (default: normal)");
+    .option("--mac-compression <mode>", "mac artifact compression: normal|maximum|store (default: normal)")
+    .option("--mac-runtime-product <path>", "restored platform runtime product root")
+    .option("--archive <path>", "runtime-restore: local product archive")
+    .option("--output <path>", "runtime-export/runtime-restore output path")
+    .option("--url <url>", "runtime-restore: verified product URL")
+    .option("--sha256 <digest>", "runtime-restore: expected product SHA-256");
 }
 
 function addWinLifecycleOptions(command: CacCommand) {
@@ -140,7 +146,7 @@ cli.command('verify-runtime', 'Verify installed prerelease Vela/OpenCode identit
     printJson(await verifyPackagedRuntime({ ...options, expectedOpenCode: options.expectedOpencode }));
   });
 
-addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging commands: build|package|install|start|stop|logs|uninstall|cleanup|inspect"))).action(
+addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging commands: build|package|runtime-export|runtime-restore|install|start|stop|logs|uninstall|cleanup|inspect"))).action(
   async (action: string, options: CliOptions) => {
     const config = resolveToolPackConfig("mac", options);
     switch (action) {
@@ -148,7 +154,21 @@ addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging c
         printJson(await packMac(config));
         return;
       case "package":
-        printJson(await packageMac(config));
+        if (options.macRuntimeProduct != null) await validateMacRuntimeProductRoot(config, options.macRuntimeProduct);
+        printJson(await packageMac(config, options.macRuntimeProduct));
+        return;
+      case "runtime-export":
+        if (options.output == null) throw new Error("mac runtime-export requires --output");
+        printJson(await exportMacRuntimeProduct(config, options.output));
+        return;
+      case "runtime-restore":
+        if (options.output == null) throw new Error("mac runtime-restore requires --output");
+        printJson(await restoreMacRuntimeProduct(config, {
+          archive: options.archive,
+          output: options.output,
+          sha256: options.sha256,
+          url: options.url,
+        }));
         return;
       case "install":
         printJson(await installPackedMacDmg(config));

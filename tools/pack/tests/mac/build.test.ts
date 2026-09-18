@@ -64,6 +64,12 @@ describe("Mac source/packaging execution boundary", () => {
     }
   });
 
+  it("skips workspace tarball materialization for a restored runtime product", async () => {
+    await packageMac(config, "restored-runtime");
+    expect(mocks.tarballs).not.toHaveBeenCalled();
+    expect(mocks.assemble).toHaveBeenCalledWith(config, expect.anything(), [], "restored-runtime");
+  });
+
   it("retains the complete local build and its existing workspace cache path", async () => {
     const result = await packMac(config);
     expect(mocks.source).toHaveBeenCalledTimes(1);

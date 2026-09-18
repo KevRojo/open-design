@@ -26,11 +26,15 @@ export async function packMac(config: ToolPackConfig): Promise<MacPackResult> {
 }
 
 /** Package caller-built/restored source outputs; source provenance belongs to the caller. */
-export async function packageMac(config: ToolPackConfig): Promise<MacPackResult> {
-  return executeMacPackaging(config, "existing");
+export async function packageMac(config: ToolPackConfig, runtimeProductRoot?: string): Promise<MacPackResult> {
+  return executeMacPackaging(config, "existing", runtimeProductRoot);
 }
 
-async function executeMacPackaging(config: ToolPackConfig, source: "build" | "existing"): Promise<MacPackResult> {
+async function executeMacPackaging(
+  config: ToolPackConfig,
+  source: "build" | "existing",
+  runtimeProductRoot?: string,
+): Promise<MacPackResult> {
   const paths = resolveMacPaths(config);
   const targets = resolveElectronBuilderTargets(config.to as MacBuildOutput);
   const cache = new ToolPackCache(config.roots.cacheRoot);
@@ -70,9 +74,11 @@ async function executeMacPackaging(config: ToolPackConfig, source: "build" | "ex
   await runPhase("resource-tree", async () => {
     await copyResourceTree(config, paths);
   });
-  const tarballs = await runPhase("workspace-tarballs", async () => collectWorkspaceTarballs(config, paths));
+  const tarballs = await runPhase("workspace-tarballs", async () => runtimeProductRoot == null
+    ? collectWorkspaceTarballs(config, paths)
+    : []);
   await runPhase("assembled-app", async () => {
-    await writeAssembledApp(config, paths, tarballs);
+    await writeAssembledApp(config, paths, tarballs, runtimeProductRoot);
   });
   await runPhase("electron-builder", async () => {
     await runElectronBuilder(config, paths, targets);

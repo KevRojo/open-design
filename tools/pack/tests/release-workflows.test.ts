@@ -196,7 +196,7 @@ describe("release workflows", () => {
     }
   });
 
-  it("installs only the required producer closure for a mac x64 executor-only miss", async () => {
+  it("selects bounded producer closures for mac x64 platform products", async () => {
     const [beta, setupWorkspace, convergenceConfig] = await Promise.all([
       readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/actions/setup-workspace/action.yml", import.meta.url), "utf8"),
@@ -204,14 +204,22 @@ describe("release workflows", () => {
     ]);
     const macX64Producer = sectionBetween(beta, "  source_mac_x64:", "  build_mac_x64:");
     const executorPaths = (JSON.parse(convergenceConfig) as {
-      resources: { "platform-executor": { paths: string[] } };
+      resources: { "platform-executor": { paths: string[] }; "platform-mac-runtime": { paths: string[] } };
     }).resources["platform-executor"].paths;
+    const runtimePaths = (JSON.parse(convergenceConfig) as {
+      resources: { "platform-mac-runtime": { paths: string[] } };
+    }).resources["platform-mac-runtime"].paths;
 
     expect(macX64Producer).toContain(
-      "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
+      "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
     );
-    expect(setupWorkspace).toContain("source-web|release-executor)");
+    expect(macX64Producer).toContain("[build] mac_x64 runtime");
+    expect(macX64Producer).toContain("mac runtime-export");
+    expect(beta).toContain("mac runtime-restore");
+    expect(beta).toContain('--mac-runtime-product "$RUNNER_TEMP/mac-runtime-product"');
+    expect(setupWorkspace).toContain("source-web|release-executor|mac-runtime)");
     expect(setupWorkspace).toContain("inputs.install-profile == 'release-executor'");
+    expect(setupWorkspace).toContain("inputs.install-profile == 'mac-runtime'");
     expect(setupWorkspace).toContain("--filter @open-design/tools-pack...");
     expect(setupWorkspace).toContain("--filter @open-design/tools-release...");
     expect(executorPaths).not.toContain("packages/");
@@ -224,6 +232,8 @@ describe("release workflows", () => {
       "packages/sidecar/",
       "packages/sidecar-proto/",
     ]));
+    expect(runtimePaths).toContain("tools/pack/");
+    expect(runtimePaths).not.toContain("tools/release/");
   });
 
   it("requires Vela CLI for every beta desktop packaging target", async () => {

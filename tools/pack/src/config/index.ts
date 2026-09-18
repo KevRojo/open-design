@@ -20,6 +20,7 @@ export type ToolPackVelaWebUrls = Partial<Record<ToolPackAmrProfile, string>>;
 
 export type ToolPackCliOptions = {
   appVersion?: string;
+  archive?: string;
   cacheDir?: string;
   containerized?: boolean;
   dir?: string;
@@ -29,6 +30,7 @@ export type ToolPackCliOptions = {
   headless?: boolean;
   json?: boolean;
   macCompression?: string;
+  macRuntimeProduct?: string;
   notarize?: boolean;
   namespace?: string;
   path?: string;
@@ -46,6 +48,9 @@ export type ToolPackCliOptions = {
   statusPollIntervalMs?: string | number;
   to?: string;
   updateAction?: string;
+  output?: string;
+  url?: string;
+  sha256?: string;
 };
 
 export type ToolPackRoots = {

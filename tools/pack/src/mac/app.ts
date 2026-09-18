@@ -297,6 +297,7 @@ export async function runMacElectronRebuild(
 export async function collectWorkspaceTarballs(
   config: ToolPackConfig,
   paths: MacPaths,
+  options: { includeResolvers?: boolean } = {},
 ): Promise<PackedTarballInfo[]> {
   await rm(paths.tarballsRoot, { force: true, recursive: true });
   await mkdir(paths.tarballsRoot, { recursive: true });
@@ -308,9 +309,9 @@ export async function collectWorkspaceTarballs(
       packageName: packageInfo.name,
       webOutputMode: config.webOutputMode,
     });
-    if (!installedAtRuntime && !MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
+    if (!installedAtRuntime && (options.includeResolvers === false || !MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
       packageInfo.name as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
-    )) {
+    ))) {
       continue;
     }
 
@@ -392,16 +393,81 @@ export async function writeAssembledApp(
   config: ToolPackConfig,
   paths: MacPaths,
   packedTarballs: PackedTarballInfo[],
+  runtimeProductRoot?: string,
 ): Promise<void> {
   const packagedVersion = await readPackagedVersion(config);
-  const packageVersion = electronBuilderVersionForAppVersion(packagedVersion);
-  const identity = resolveMacInstallIdentity(config);
   await rm(join(config.roots.output.namespaceRoot, "assembled"), { force: true, recursive: true });
   await mkdir(paths.assembledAppRoot, { recursive: true });
   await cp(
     join(config.workspaceRoot, "apps", "desktop", "dist", "main", "preload.cjs"),
     join(paths.assembledAppRoot, "preload.cjs"),
   );
+  const usePrebundledStandaloneWeb = shouldUseMacStandalonePrebundle(config.webOutputMode);
+  if (runtimeProductRoot == null) {
+    await writeMacAssembledPackageJson(config, paths, packedTarballs, packagedVersion);
+  } else {
+    const productManifest = JSON.parse(await readFile(join(runtimeProductRoot, "app-package.json"), "utf8")) as Record<string, unknown>;
+    const identity = resolveMacInstallIdentity(config);
+    await writeFile(paths.assembledPackageJsonPath, `${JSON.stringify({
+      ...productManifest,
+      main: "./main.cjs",
+      name: "open-design-packaged-app",
+      private: true,
+      productName: identity.productName,
+      version: electronBuilderVersionForAppVersion(packagedVersion),
+    }, null, 2)}\n`, "utf8");
+  }
+  const resolverTarballs = packedTarballs
+    .filter((entry) => MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
+      entry.packageName as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
+    ))
+    .map((entry) => join(paths.tarballsRoot, entry.fileName));
+  if (runtimeProductRoot == null) {
+    await runNpmInstall(paths.assembledAppRoot, resolverTarballs);
+  } else {
+    await cp(join(runtimeProductRoot, "node_modules"), join(paths.assembledAppRoot, "node_modules"), {
+      dereference: false,
+      recursive: true,
+    });
+  }
+  if (usePrebundledStandaloneWeb) await buildPrebundledStandaloneRuntime(config, paths);
+  if (runtimeProductRoot == null && resolverTarballs.length > 0) await runNpmPrune(paths.assembledAppRoot);
+  await writeFile(
+    paths.assembledMainEntryPath,
+    renderMacPackagedMainEntry(usePrebundledStandaloneWeb),
+    "utf8",
+  );
+  await writeFile(
+    paths.packagedConfigPath,
+    renderMacPackagedConfig({
+      appVersion: packagedVersion,
+      config,
+      usePrebundledStandaloneWeb,
+    }),
+    "utf8",
+  );
+  if (runtimeProductRoot == null && usePrebundledStandaloneWeb) {
+    await copyMacPrebundleRuntimeDependencies(config, paths.assembledAppRoot);
+  }
+  if (runtimeProductRoot == null) {
+    await prepareNodePtyRuntime({
+      appRoot: paths.assembledAppRoot,
+      arch: resolveNodePtyRuntimeArch(process.arch),
+      platform: "darwin",
+    });
+    await runMacElectronRebuild(config, paths.assembledAppRoot);
+  }
+  await finalizeRuntimeManifest(paths.assembledAppRoot);
+}
+
+export async function writeMacAssembledPackageJson(
+  config: ToolPackConfig,
+  paths: MacPaths,
+  packedTarballs: PackedTarballInfo[],
+  packagedVersion = "0.0.0",
+): Promise<void> {
+  const packageVersion = electronBuilderVersionForAppVersion(packagedVersion);
+  const identity = resolveMacInstallIdentity(config);
   const tarballByPackage = Object.fromEntries(
     packedTarballs.map((entry) => [entry.packageName, entry.fileName] as const),
   );
@@ -444,36 +510,4 @@ export async function writeAssembledApp(
     )}\n`,
     "utf8",
   );
-  const resolverTarballs = packedTarballs
-    .filter((entry) => MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
-      entry.packageName as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
-    ))
-    .map((entry) => join(paths.tarballsRoot, entry.fileName));
-  await runNpmInstall(paths.assembledAppRoot, resolverTarballs);
-  if (usePrebundledStandaloneWeb) await buildPrebundledStandaloneRuntime(config, paths);
-  if (resolverTarballs.length > 0) await runNpmPrune(paths.assembledAppRoot);
-  await writeFile(
-    paths.assembledMainEntryPath,
-    renderMacPackagedMainEntry(usePrebundledStandaloneWeb),
-    "utf8",
-  );
-  await writeFile(
-    paths.packagedConfigPath,
-    renderMacPackagedConfig({
-      appVersion: packagedVersion,
-      config,
-      usePrebundledStandaloneWeb,
-    }),
-    "utf8",
-  );
-  if (usePrebundledStandaloneWeb) {
-    await copyMacPrebundleRuntimeDependencies(config, paths.assembledAppRoot);
-  }
-  await prepareNodePtyRuntime({
-    appRoot: paths.assembledAppRoot,
-    arch: resolveNodePtyRuntimeArch(process.arch),
-    platform: "darwin",
-  });
-  await runMacElectronRebuild(config, paths.assembledAppRoot);
-  await finalizeRuntimeManifest(paths.assembledAppRoot);
 }
