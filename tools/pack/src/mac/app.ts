@@ -322,6 +322,17 @@ export async function collectWorkspaceTarballs(
   return packedTarballs;
 }
 
+export function resolveMacPrebundleResolverTarballs(
+  paths: MacPaths,
+  packedTarballs: readonly PackedTarballInfo[],
+): string[] {
+  return packedTarballs
+    .filter((entry) => MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
+      entry.packageName as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
+    ))
+    .map((entry) => join(paths.tarballsRoot, entry.fileName));
+}
+
 async function workspacePackageVersions(config: ToolPackConfig): Promise<Map<string, string>> {
   return new Map(await Promise.all(INTERNAL_PACKAGES.map(async (entry) => {
     const manifest = JSON.parse(await readFile(join(config.workspaceRoot, entry.directory, "package.json"), "utf8")) as {
@@ -417,11 +428,7 @@ export async function writeAssembledApp(
       version: electronBuilderVersionForAppVersion(packagedVersion),
     }, null, 2)}\n`, "utf8");
   }
-  const resolverTarballs = packedTarballs
-    .filter((entry) => MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
-      entry.packageName as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
-    ))
-    .map((entry) => join(paths.tarballsRoot, entry.fileName));
+  const resolverTarballs = resolveMacPrebundleResolverTarballs(paths, packedTarballs);
   if (runtimeProductRoot == null) {
     await runNpmInstall(paths.assembledAppRoot, resolverTarballs);
   } else {
@@ -431,7 +438,7 @@ export async function writeAssembledApp(
     });
   }
   if (usePrebundledStandaloneWeb) await buildPrebundledStandaloneRuntime(config, paths);
-  if (runtimeProductRoot == null && resolverTarballs.length > 0) await runNpmPrune(paths.assembledAppRoot);
+  if (resolverTarballs.length > 0 || runtimeProductRoot != null) await runNpmPrune(paths.assembledAppRoot);
   await writeFile(
     paths.assembledMainEntryPath,
     renderMacPackagedMainEntry(usePrebundledStandaloneWeb),

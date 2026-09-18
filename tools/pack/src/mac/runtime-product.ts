@@ -9,19 +9,20 @@ import { prepareNodePtyRuntime, resolveNodePtyRuntimeArch } from "../node-pty-ru
 import {
   collectWorkspaceTarballs,
   copyMacPrebundleRuntimeDependencies,
+  resolveMacPrebundleResolverTarballs,
   runMacElectronRebuild,
   writeMacAssembledPackageJson,
 } from "./app.js";
-import { runNpmInstall, runNpmPrune } from "./commands.js";
+import { runNpmInstall } from "./commands.js";
 import { resolveMacPaths } from "./paths.js";
 
-export const MAC_RUNTIME_PRODUCT_SCHEMA = 1;
+export const MAC_RUNTIME_PRODUCT_SCHEMA = 2;
 
 export type MacRuntimeProductManifest = {
   arch: NodeJS.Architecture;
   electronVersion: string;
   platform: "darwin";
-  protocol: "open-design-mac-runtime-v1";
+  protocol: "open-design-mac-runtime-v2";
   schemaVersion: typeof MAC_RUNTIME_PRODUCT_SCHEMA;
 };
 
@@ -30,7 +31,7 @@ export function macRuntimeProductManifest(config: ToolPackConfig): MacRuntimePro
     arch: process.arch,
     electronVersion: config.electronVersion,
     platform: "darwin",
-    protocol: "open-design-mac-runtime-v1",
+    protocol: "open-design-mac-runtime-v2",
     schemaVersion: MAC_RUNTIME_PRODUCT_SCHEMA,
   };
 }
@@ -85,7 +86,7 @@ function assertManifest(value: unknown, config: ToolPackConfig): MacRuntimeProdu
   const manifest = value as Partial<MacRuntimeProductManifest>;
   if (
     manifest.schemaVersion !== MAC_RUNTIME_PRODUCT_SCHEMA
-    || manifest.protocol !== "open-design-mac-runtime-v1"
+    || manifest.protocol !== "open-design-mac-runtime-v2"
     || manifest.platform !== "darwin"
     || manifest.arch !== process.arch
     || manifest.electronVersion !== config.electronVersion
@@ -122,11 +123,10 @@ export async function exportMacRuntimeProduct(config: ToolPackConfig, outputPath
   const assembledRoot = dirname(paths.assembledAppRoot);
   await rm(assembledRoot, { force: true, recursive: true });
   await mkdir(paths.assembledAppRoot, { recursive: true });
-  const tarballs = await runPhase("workspace-tarballs", async () =>
-    collectWorkspaceTarballs(config, paths, { includeResolvers: false }));
+  const tarballs = await runPhase("workspace-tarballs", async () => collectWorkspaceTarballs(config, paths));
   await runPhase("package-manifest", async () => writeMacAssembledPackageJson(config, paths, tarballs));
-  await runPhase("npm-install", async () => runNpmInstall(paths.assembledAppRoot));
-  await runPhase("npm-prune", async () => runNpmPrune(paths.assembledAppRoot));
+  const resolverTarballs = resolveMacPrebundleResolverTarballs(paths, tarballs);
+  await runPhase("npm-install", async () => runNpmInstall(paths.assembledAppRoot, resolverTarballs));
   await runPhase("copied-dependencies", async () => copyMacPrebundleRuntimeDependencies(config, paths.assembledAppRoot));
   await runPhase("node-pty", async () => prepareNodePtyRuntime({
     appRoot: paths.assembledAppRoot,

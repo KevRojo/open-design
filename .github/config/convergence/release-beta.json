@@ -50,6 +50,23 @@
         "**/tsconfig.tests.json"
       ]
     },
+    "daemon-runtime-dependencies": {
+      "json": "apps/daemon/package.json",
+      "omit": [
+        "version",
+        "scripts",
+        "devDependencies",
+        "bin",
+        "engines",
+        "exports",
+        "files",
+        "main",
+        "name",
+        "private",
+        "type",
+        "types"
+      ]
+    },
     "source-postinstall": {
       "paths": [
         "scripts/postinstall.mjs"
@@ -334,6 +351,7 @@
           "successBoundary": "steps",
           "inputs": [
             "suite://source-packages",
+            "resource://daemon-runtime-dependencies",
             "resource://platform-mac-runtime"
           ],
           "runnerClass": "source_mac_x64",

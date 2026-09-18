@@ -209,6 +209,10 @@ describe("release workflows", () => {
     const runtimePaths = (JSON.parse(convergenceConfig) as {
       resources: { "platform-mac-runtime": { paths: string[] } };
     }).resources["platform-mac-runtime"].paths;
+    const convergence = JSON.parse(convergenceConfig) as {
+      resources: { "daemon-runtime-dependencies": { json: string; omit: string[] } };
+      workflows: { "release-beta": { workloads: { source_mac_x64_runtime: { inputs: string[] } } } };
+    };
 
     expect(macX64Producer).toContain(
       "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
@@ -234,6 +238,12 @@ describe("release workflows", () => {
     ]));
     expect(runtimePaths).toContain("tools/pack/");
     expect(runtimePaths).not.toContain("tools/release/");
+    expect(convergence.resources["daemon-runtime-dependencies"]).toMatchObject({
+      json: "apps/daemon/package.json",
+      omit: expect.arrayContaining(["version", "scripts", "devDependencies"]),
+    });
+    expect(convergence.workflows["release-beta"].workloads.source_mac_x64_runtime.inputs)
+      .toContain("resource://daemon-runtime-dependencies");
   });
 
   it("requires Vela CLI for every beta desktop packaging target", async () => {

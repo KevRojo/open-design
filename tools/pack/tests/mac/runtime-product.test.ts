@@ -9,6 +9,8 @@ import {
   macRuntimeProductManifest,
   restoreMacRuntimeProduct,
 } from "@/mac/runtime-product.js";
+import { resolveMacPrebundleResolverTarballs } from "@/mac/app.js";
+import type { MacPaths } from "@/mac/types.js";
 
 const roots: string[] = [];
 const config = { electronVersion: "41.3.0" } as ToolPackConfig;
@@ -41,6 +43,30 @@ async function product(root: string, manifest = macRuntimeProductManifest(config
 }
 
 describe("mac runtime product", () => {
+  it("declares the prebundle closure protocol separately from an app version", () => {
+    expect(macRuntimeProductManifest(config)).toEqual({
+      arch: process.arch,
+      electronVersion: "41.3.0",
+      platform: "darwin",
+      protocol: "open-design-mac-runtime-v2",
+      schemaVersion: 2,
+    });
+  });
+
+  it("selects the complete internal resolver closure from packed products", () => {
+    const paths = { tarballsRoot: "/products/tarballs" } as MacPaths;
+    expect(resolveMacPrebundleResolverTarballs(paths, [
+      { fileName: "daemon.tgz", packageName: "@open-design/daemon" },
+      { fileName: "launcher.tgz", packageName: "@open-design/launcher-proto" },
+      { fileName: "sidecar.tgz", packageName: "@open-design/sidecar-proto" },
+      { fileName: "release.tgz", packageName: "@open-design/release" },
+    ])).toEqual([
+      "/products/tarballs/daemon.tgz",
+      "/products/tarballs/launcher.tgz",
+      "/products/tarballs/sidecar.tgz",
+    ]);
+  });
+
   it("restores a version-neutral product for the exact platform ABI", async () => {
     const root = await fixture();
     const output = join(root, "restored");
