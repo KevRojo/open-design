@@ -6,9 +6,9 @@ await build({
   },
   bundle: true,
   entryPoints: ["./src/index.ts"],
+  external: ["sharp"],
   format: "esm",
   outfile: "./dist/index.mjs",
-  packages: "external",
   platform: "node",
   target: "node24",
 });
