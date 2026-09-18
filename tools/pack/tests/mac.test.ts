@@ -372,6 +372,7 @@ describe("runElectronBuilder", () => {
       ...overrides,
     });
     const paths = resolveMacPaths(config);
+    await mkdir(paths.assembledAppRoot, { recursive: true });
     const nodePtyPrebuildRoot = join(
       paths.appPath,
       "Contents",
@@ -386,8 +387,10 @@ describe("runElectronBuilder", () => {
       cliPath,
       [
         'import { chmod, mkdir, writeFile } from "node:fs/promises";',
+        'import { realpathSync } from "node:fs";',
         `const prebuildRoot = ${JSON.stringify(nodePtyPrebuildRoot)};`,
         `const appRoot = ${JSON.stringify(join(paths.appPath, "Contents", "Resources", "app"))};`,
+        `if (realpathSync(process.cwd()) !== realpathSync(${JSON.stringify(paths.assembledAppRoot)})) throw new Error("electron-builder must run from the assembled npm application");`,
         'for (const name of ["sidecar", "platform"]) {',
         '  const root = appRoot + "/node_modules/@open-design/" + name;',
         '  await mkdir(root + "/dist", { recursive:true });',

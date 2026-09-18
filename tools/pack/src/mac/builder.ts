@@ -168,6 +168,11 @@ export async function runElectronBuilder(
   await rm(paths.appBuilderOutputRoot, { force: true, recursive: true });
   await mkdir(dirname(paths.appBuilderConfigPath), { recursive: true });
   await writeFile(paths.appBuilderConfigPath, `${JSON.stringify(builderConfig, null, 2)}\n`, "utf8");
+  const builderEnvironment = { ...process.env };
+  // The assembled application is materialized by npm. Do not let the outer
+  // workspace's pnpm invocation leak into electron-builder's package-manager
+  // detection: the portable executor deliberately exposes no global pnpm.
+  delete builderEnvironment.npm_execpath;
   await execFileAsync(process.execPath, [
     config.electronBuilderCliPath,
     "--mac",
@@ -178,9 +183,9 @@ export async function runElectronBuilder(
     "--publish",
     "never",
   ], {
-    cwd: config.workspaceRoot,
+    cwd: paths.assembledAppRoot,
     env: {
-      ...process.env,
+      ...builderEnvironment,
       ...(config.signed ? {} : { CSC_IDENTITY_AUTO_DISCOVERY: "false" }),
       ...(webStandaloneHookConfigPath == null ? {} : { [WEB_STANDALONE_HOOK_CONFIG_ENV]: webStandaloneHookConfigPath }),
     },
