@@ -907,6 +907,9 @@ importers:
         specifier: 1.7.2
         version: 1.7.2
     devDependencies:
+      '@open-design/metatool':
+        specifier: workspace:*
+        version: link:../../packages/metatool
       '@types/node':
         specifier: 24.12.2
         version: 24.12.2
@@ -945,6 +948,9 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
     devDependencies:
+      '@open-design/metatool':
+        specifier: workspace:*
+        version: link:../../packages/metatool
       '@types/node':
         specifier: 24.12.2
         version: 24.12.2

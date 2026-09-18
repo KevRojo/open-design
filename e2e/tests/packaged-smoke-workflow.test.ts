@@ -2327,11 +2327,21 @@ process.stdin.on("end", () => {
     );
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
-      expect(job).toContain("uses: ./.github/actions/setup-workspace");
-      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
-      expect(job).toContain("cache-tools: 'true'");
+      if (target === "mac_x64") {
+        expect(job).toContain('name: "[prepare] Full smoke dependencies"');
+        expect(job).toContain("if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}");
+        expect(job).toContain("uses: ./.github/actions/setup-workspace");
+        expect(job).toContain('"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package');
+        expect(job).toContain("uses: actions/setup-node");
+        expect(job).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
+        expect(job).not.toContain("cache-tools: 'true'");
+      } else {
+        expect(job).toContain("uses: ./.github/actions/setup-workspace");
+        expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
+        expect(job).toContain("cache-tools: 'true'");
+        expect(job).not.toContain("uses: actions/setup-node");
+      }
       expect(job).not.toContain("run: pnpm install --frozen-lockfile");
-      expect(job).not.toContain("uses: actions/setup-node");
       expect(job).not.toContain("--ignore-scripts");
     }
     const linux = betaPlatformBuild(workflow, "linux_x64");
@@ -2393,7 +2403,13 @@ process.stdin.on("end", () => {
       expect(job).toContain("uses: ./.github/actions/setup-workspace");
       expect(job).not.toContain("uses: ./.github/actions/workspace-product");
       expect(job.indexOf("[restore] Shared JavaScript")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
-      expect(job).toContain(target === "win_x64" ? '"tools-pack", "win", "package"' : "exec tools-pack mac package");
+      expect(job).toContain(
+        target === "win_x64"
+          ? '"tools-pack", "win", "package"'
+          : target === "mac_x64"
+            ? '"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package'
+            : "exec tools-pack mac package",
+      );
       expect(job).not.toContain("uses: actions/cache/");
       expect(job).not.toContain("tools_pack_cache_key");
       expect(job).not.toContain("gh cache delete");

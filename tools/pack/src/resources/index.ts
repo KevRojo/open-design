@@ -131,7 +131,11 @@ export async function packBundledDshRuntime({
   await mkdir(destination, { recursive: true });
 
   const packageManagerEnv = { ...process.env };
-  packageManagerEnv.npm_execpath ||= createRequire(import.meta.url).resolve("pnpm/bin/pnpm.cjs");
+  packageManagerEnv.npm_execpath ||= join(
+    dirname(createRequire(import.meta.url).resolve("pnpm")),
+    "bin",
+    "pnpm.cjs",
+  );
   const invocation = createPackageManagerInvocation(
     ["-C", packageRoot, "pack", "--pack-destination", destination],
     packageManagerEnv,

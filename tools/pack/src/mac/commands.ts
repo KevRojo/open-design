@@ -1,5 +1,6 @@
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 import { createPackageManagerInvocation } from "@open-design/platform";
 
@@ -59,7 +60,11 @@ export async function runPnpm(
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<void> {
   const env = { ...process.env, ...extraEnv };
-  env.npm_execpath ||= createRequire(import.meta.url).resolve("pnpm/bin/pnpm.cjs");
+  env.npm_execpath ||= join(
+    dirname(createRequire(import.meta.url).resolve("pnpm")),
+    "bin",
+    "pnpm.cjs",
+  );
   const invocation = createPackageManagerInvocation(args, env);
   await execFileAsync(invocation.command, invocation.args, {
     cwd: config.workspaceRoot,
