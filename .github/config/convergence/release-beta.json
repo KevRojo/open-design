@@ -80,6 +80,24 @@
         "apps/packaged/package.json"
       ]
     },
+    "platform-executor": {
+      "paths": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "scripts/postinstall.mjs",
+        "packages/",
+        "tools/pack/",
+        "tools/release/",
+        ".github/actions/setup-workspace/"
+      ],
+      "exclude": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/vitest.config.ts",
+        "**/tsconfig.tests.json"
+      ]
+    },
     "daemon-dependencies": {
       "paths": [
         "packages/agui-adapter/",
@@ -187,6 +205,9 @@
       "resource://source-shell",
       "resource://packaged-execution"
     ],
+    "platform-executor": [
+      "resource://platform-executor"
+    ],
     "daemon-tests": [
       "resource://test-environment",
       "resource://daemon-tests",
@@ -272,6 +293,20 @@
           "success": {
             "[build] mac_x64 workload": [
               "[build] Source web"
+            ]
+          }
+        },
+        "source_mac_x64_executor": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://platform-executor"
+          ],
+          "runnerClass": "source_mac_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] mac_x64 workload": [
+              "[build] Release executor"
             ]
           }
         },
@@ -401,6 +436,13 @@
               "workload": "source_mac_x64_web",
               "request": {
                 "unit": "web"
+              },
+              "product": "bundle"
+            },
+            "executor": {
+              "workload": "source_mac_x64_executor",
+              "request": {
+                "unit": "executor"
               },
               "product": "bundle"
             }

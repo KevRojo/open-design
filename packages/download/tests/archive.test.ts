@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -42,4 +42,16 @@ it("reproduces identical archive bytes despite source mtimes and creation order"
     archives.push(readFileSync(archive));
   }
   expect(archives[0]).toEqual(archives[1]);
+});
+
+it.skipIf(process.platform === "win32")("preserves declared safe links without inheriting outside targets", () => {
+  const root = mkdtempSync(join(tmpdir(), "archive-links-")); roots.push(root);
+  const source = join(root, "source"), destination = join(root, "destination"), archive = join(root, "blob.tar.gz");
+  mkdirSync(source); mkdirSync(destination); writeFileSync(join(source, "target"), "value");
+  symlinkSync("target", join(source, "alias"));
+  createTarArchive(archive, [{ directory: source, entries: ["alias", "target"] }], { dereference: false, reproducible: true });
+  extractArchive(archive, destination, "tar.gz");
+  expect(lstatSync(join(destination, "alias")).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(join(destination, "alias"))).toBe("target");
+  expect(readFileSync(join(destination, "alias"), "utf8")).toBe("value");
 });

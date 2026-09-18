@@ -350,8 +350,14 @@ function resolveElectronVersion(workspaceRoot: string): string {
 }
 
 function resolveElectronDistPath(workspaceRoot: string): string {
-  const require = createRequire(join(workspaceRoot, "apps/desktop/package.json"));
-  const electronEntry = require.resolve("electron");
+  const workspaceRequire = createRequire(join(workspaceRoot, "apps/desktop/package.json"));
+  const toolRequire = createRequire(import.meta.url);
+  let electronEntry: string;
+  try {
+    electronEntry = workspaceRequire.resolve("electron");
+  } catch {
+    electronEntry = toolRequire.resolve("electron");
+  }
   return join(dirname(electronEntry), "dist");
 }
 

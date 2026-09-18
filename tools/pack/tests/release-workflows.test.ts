@@ -237,7 +237,7 @@ describe("release workflows", () => {
     expect(mac).toContain("OD_PACKAGED_E2E_MAC_UPDATE_BUILD_JSON_PATH: ${{ steps.mac_arm64_update_fixture.outputs.update_build_json_path }}");
     expect(mac).toContain("OD_PACKAGED_E2E_MAC_UPDATE_FIXTURE: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' && 'tools-serve' || '' }}");
     expect(mac).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
-    expect(macX64).toContain("exec tools-pack mac package");
+    expect(macX64).toContain('"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package');
     expect(macX64).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
     expect(buildMac).toContain("build_args+=(--require-vela-cli)");
     expect(buildMac).toContain("update_args+=(--require-vela-cli)");

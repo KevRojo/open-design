@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync, realpathSync, statSync } from "node:fs";
-import { join, resolve, win32 } from "node:path";
+import { lstatSync, readlinkSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, win32 } from "node:path";
 
 export type ArchiveFormat = "tar.gz" | "zip";
 
@@ -50,19 +50,19 @@ export function readTarEntry(archive: string, entry: string): string {
 }
 
 /** Dereference producer-owned links so consumers do not inherit pnpm symlinks. */
-export function createTarArchive(archive: string, sources: { directory: string; entries: string[] }[], options: { reproducible?: boolean } = {}): void {
+export function createTarArchive(archive: string, sources: { directory: string; entries: string[] }[], options: { dereference?: boolean; reproducible?: boolean } = {}): void {
   const args = sources.flatMap(({ directory, entries }) => {
     entries.forEach(validateEntry);
     return ["-C", directory, ...entries];
   });
   const executable = archiveExecutable();
   if (!options.reproducible) {
-    run(executable, ["-czhf", archive, ...args]);
+    run(executable, [options.dereference === false ? "-czf" : "-czhf", archive, ...args]);
     return;
   }
   const version = run(executable, ["--version"]);
   if (version.includes("GNU tar")) {
-    run(executable, ["--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-czhf", archive, ...args]);
+    run(executable, ["--format=gnu", "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", options.dereference === false ? "-czf" : "-czhf", archive, ...args]);
     return;
   }
   if (!version.includes("bsdtar")) throw new Error("reproducible archives require GNU tar or bsdtar");
@@ -76,9 +76,16 @@ export function createTarArchive(archive: string, sources: { directory: string; 
     if (names.has(entry)) throw new Error(`duplicate archive entry: ${entry}`);
     names.add(entry);
     const path = resolve(directory, entry);
-    const stat = statSync(path);
+    const stat = options.dereference === false ? lstatSync(path) : statSync(path);
     const mode = (stat.mode & 0o777).toString(8);
-    if (stat.isDirectory()) {
+    if (stat.isSymbolicLink()) {
+      const target = readlinkSync(path);
+      const targetPath = relative(resolve(directory), resolve(dirname(path), target));
+      if (!target || target.startsWith("/") || target.includes("\\") || targetPath === ".." || targetPath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(targetPath)) {
+        throw new Error(`unsafe archive link: ${entry}`);
+      }
+      manifest.push(`${escape(entry)} type=link mode=${mode} link=${escape(target)}`);
+    } else if (stat.isDirectory()) {
       const real = realpathSync(path);
       if (ancestors.has(real)) throw new Error(`archive directory cycle: ${entry}`);
       manifest.push(`${escape(entry)} type=dir mode=${mode}`);

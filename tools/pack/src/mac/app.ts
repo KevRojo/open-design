@@ -193,9 +193,15 @@ export async function copyMacPrebundleRuntimeDependencies(
   appRoot: string,
 ): Promise<void> {
   const daemonRequire = createRequire(join(config.workspaceRoot, "apps", "daemon", "package.json"));
-  const chokidarRequire = createRequire(daemonRequire.resolve("chokidar/package.json"));
+  const toolRequire = createRequire(import.meta.url);
+  let copiedDependencyRequire: NodeRequire;
+  try {
+    copiedDependencyRequire = createRequire(daemonRequire.resolve("chokidar/package.json"));
+  } catch {
+    copiedDependencyRequire = toolRequire;
+  }
   for (const [packageName, expectedVersion] of Object.entries(MAC_PREBUNDLE_COPIED_RUNTIME_DEPENDENCIES)) {
-    const sourceManifestPath = chokidarRequire.resolve(`${packageName}/package.json`);
+    const sourceManifestPath = copiedDependencyRequire.resolve(`${packageName}/package.json`);
     const sourceRoot = dirname(sourceManifestPath);
     const sourceManifest = JSON.parse(await readFile(sourceManifestPath, "utf8")) as { version?: unknown };
     if (sourceManifest.version !== expectedVersion) {

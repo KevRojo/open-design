@@ -904,7 +904,7 @@ jobs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_x64 workload"
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_x64 && needs.plan.outputs.contribution == 'true' && fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' }}
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.plan.result == 'success' && inputs.enable_mac_x64 && needs.plan.outputs.contribution == 'true' && (fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' || fromJSON(needs.plan.outputs.requests).source_mac_x64.executor.operation == 'build') }}
     runs-on: macos-15-intel
     defaults:
       run:
@@ -932,11 +932,23 @@ jobs:
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
+        if: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' }}
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm --filter @open-design/tools-pack workspace:dev build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+      - name: "[build] Release executor"
+        id: release_executor
+        if: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.executor.operation == 'build' }}
+        shell: bash
+        env:
+          SOURCE_OUTPUT: ${{ runner.temp }}/source-products/executor/product/workspace.tar.gz
+        run: |
+          set -euo pipefail
+          pnpm --filter @open-design/tools-pack build
+          pnpm --filter @open-design/tools-release build
+          pnpm --filter @open-design/tools-pack executor:dev export --output "$SOURCE_OUTPUT" --json
       - name: '[cache] Publish workload results'
         id: workload_results
         if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
@@ -949,7 +961,7 @@ jobs:
           batches: '["source_mac_x64"]'
           current-job: '[build] mac_x64 workload'
           step-results: |
-            {"[build] Source web":"${{ steps.source_web.outcome }}"}
+            {"[build] Source web":"${{ steps.source_web.outcome }}","[build] Release executor":"${{ steps.release_executor.outcome }}"}
           local-products-root: ${{ runner.temp }}/source-products
           local-product-pattern: '**/workspace.tar.gz'
         env:
@@ -978,6 +990,7 @@ jobs:
         shell: bash
     env:
       RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      OD_TOOLS_PACK_WORKSPACE_ROOT: ${{ github.workspace }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -991,22 +1004,26 @@ jobs:
           SOURCE_REQUESTS: ${{ needs.source_mac_x64.result == 'success' && needs.source_mac_x64.outputs.requests || needs.source_mac_x64.result == 'skipped' && needs.plan.outputs.requests || 'null' }}
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.plan.outputs.common_count != '0' && needs.common.outputs.sources || needs.plan.outputs.common_count == '0' && needs.plan.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.plan.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
-      - name: "[prepare] Workspace source tools"
-        uses: ./.github/actions/setup-workspace
+      - name: "[restore] Release executor"
+        shell: bash
+        run: >-
+          python3 .github/scripts/release/executor.py restore
+          --url "$SOURCE_EXECUTOR_URL" --sha256 "$SOURCE_EXECUTOR_SHA256"
+          --output "$RUNNER_TEMP/release-executor"
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
         with:
-          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          cache-tools: 'true'
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          node-version: '24'
+          package-manager-cache: false
       - name: "[restore] Shared JavaScript"
         shell: bash
-        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+        run: node "$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" workspace import javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
         shell: bash
         env:
           SOURCE_OUTPUT: ""
-        run: pnpm exec tools-pack workspace ${{ (needs.plan.outputs.contribution == 'true') && 'import' || 'build' }} web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+        run: node "$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" workspace import web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
       - name: Prepare mac_x64 signing certificate
         if: ${{ (inputs.mac_x64_sign_mode != 'no') }}
         env:
@@ -1036,7 +1053,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/tools-pack"
           : > "$RUNNER_TEMP/release-build/mac_x64/build.log"
           build_args=(
-            exec tools-pack mac package
+            "$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package
             --dir "$RUNNER_TEMP/tools-pack"
             --cache-dir "$RUNNER_TEMP/tools-pack-cache"
             --namespace release-beta-x64
@@ -1053,13 +1070,18 @@ jobs:
             notarize) build_args+=(--signed --notarize) ;;
             *) echo "unsupported mac_x64_sign_mode: ${{ inputs.mac_x64_sign_mode }}" >&2; exit 1 ;;
           esac
-          if build_output="$(pnpm "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2))"; then
+          if build_output="$(node "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2))"; then
             printf '%s\n' "$build_output" | tee "$RUNNER_TEMP/release-build/mac_x64/build.json"
           else
             build_status=$?
             printf '%s\n' "$build_output"
             exit "$build_status"
           fi
+      - name: "[prepare] Full smoke dependencies"
+        if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: Smoke beta mac_x64 packaged runtime
         if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
         working-directory: e2e
@@ -1090,7 +1112,7 @@ jobs:
           RELEASE_TARGET: mac_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           REPORT_TITLE: mac_x64 beta build
-        run: pnpm exec tools-release write-report
+        run: node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" write-report
       - name: Publish mac_x64 report summary
         if: ${{ !cancelled() && steps.report_mac_x64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
@@ -1125,7 +1147,7 @@ jobs:
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_TARGET: mac_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
-        run: pnpm exec tools-release publish-platform
+        run: node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" publish-platform
       - name: Read mac_x64 platform outputs
         id: mac_x64_platform_outputs
         if: ${{ inputs.publish }}

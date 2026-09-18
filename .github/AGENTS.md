@@ -105,21 +105,19 @@ One platform may retain multiple independently successful products in one artifa
 The collector and trusted writer both check each workload's build and retention
 steps and its declared artifact subdirectory; only those selected products enter
 the immutable cache. Do not equate batch success with every member's success or
-introduce a composite action per cache identity. Runtime dependencies and pnpm
-store preparation continue through `setup-workspace` and its existing trust policy.
-Release source/native consumers may opt into `cache-tools` there: installed
-dependencies and the postinstall-declared tool build closure have separate
-Actions cache keys. Neither is a Plan result or a test receipt. Dependency
-snapshots contain only node_modules, never business dist/Next outputs or signing
-material; only an exact hit skips installation, and install-time native validation
-still runs. Tool outputs are saved before business products are imported.
-On Windows, never restore or save the installed node_modules snapshot: pnpm's
-junction tree does not reliably survive the archive round trip. Restore its
-content store and run the dependency-only frozen install instead; tool dist
-caching remains independent. Packaging callers validate the CLI can load before
-importing business products.
-Scope these executable caches by OS/arch, actual Node version, pnpm and preparation
-inputs; do not use prefix restore keys for them. Existing callers remain unchanged.
+introduce a composite action per cache identity. Source producers prepare
+dependencies through `setup-workspace`; package-manager stores and other
+machine-level downloads remain Actions-cache concerns. A native consumer must not
+repeat that workspace preparation merely to obtain source-derived packaging code.
+Model the platform/architecture executor as its own Plan product, restore it before
+business products, and invoke its declared pack/release entries against the
+checked-out source tree. The executor contains the exact Node tools, Electron
+runtime, platform binaries and built tool closure required by that host; it contains
+no signing material and no version-bound product state. A failed or invalid
+executor restore fails visibly and never falls back to an undeclared build.
+Platform migrations may land independently, but a migrated consumer must remove
+its default `cache-tools` workspace setup. Full diagnostic smoke modes may still
+prepare their separate test harness explicitly.
 
 Release graphs separate delivery, source validation, and reusable-result publication.
 Beta declares its input suites and execution rows in

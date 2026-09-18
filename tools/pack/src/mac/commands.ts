@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
+import { createRequire } from "node:module";
 
 import { createPackageManagerInvocation } from "@open-design/platform";
 
@@ -57,10 +58,12 @@ export async function runPnpm(
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<void> {
-  const invocation = createPackageManagerInvocation(args, process.env);
+  const env = { ...process.env, ...extraEnv };
+  env.npm_execpath ||= createRequire(import.meta.url).resolve("pnpm/bin/pnpm.cjs");
+  const invocation = createPackageManagerInvocation(args, env);
   await execFileAsync(invocation.command, invocation.args, {
     cwd: config.workspaceRoot,
-    env: { ...process.env, ...extraEnv },
+    env,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 }
@@ -73,5 +76,6 @@ export async function runNpmInstall(appRoot: string): Promise<void> {
 }
 
 export async function runEsbuild(config: ToolPackConfig, args: string[]): Promise<void> {
-  await runPnpm(config, ["--filter", "@open-design/packaged", "exec", "esbuild", ...args]);
+  const esbuildCli = createRequire(import.meta.url).resolve("esbuild/bin/esbuild");
+  await execFileAsync(process.execPath, [esbuildCli, ...args], { cwd: config.workspaceRoot, env: process.env });
 }

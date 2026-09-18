@@ -44,12 +44,12 @@ describe("release executor product", () => {
     expect(JSON.parse(readTarEntry(archive, "manifest.json"))).toEqual(result.manifest);
   });
 
-  it("rejects a deploy tree with links outside command shims", async () => {
+  it("rejects a deploy tree with links outside the product root", async () => {
     const root = await fixture();
     const runDeploy = async (_packageName: string, destination: string) => {
       await mkdir(join(destination, "dist"), { recursive: true });
       await writeFile(join(destination, "dist", "index.mjs"), "export {};\n");
-      await symlink(join(destination, "dist", "index.mjs"), join(destination, "unsafe-link"));
+      await symlink(process.execPath, join(destination, "unsafe-link"));
     };
     const copyRelease = async (destination: string) => {
       await mkdir(join(destination, "dist"), { recursive: true });
@@ -59,7 +59,7 @@ describe("release executor product", () => {
       copyRelease,
       output: join(root, "workspace.tar.gz"),
       runDeploy,
-    })).rejects.toThrow("contains a symbolic link");
+    })).rejects.toThrow("link escapes its root");
   });
 
   it("requires the current platform execution class", async () => {

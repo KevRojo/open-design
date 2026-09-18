@@ -19,4 +19,11 @@ function resolveToolPackRoot(startDir: string): string {
   }
 }
 
-export const WORKSPACE_ROOT = resolve(resolveToolPackRoot(dirname(fileURLToPath(import.meta.url))), "../..");
+function resolveWorkspaceRoot(): string {
+  const configured = process.env.OD_TOOLS_PACK_WORKSPACE_ROOT?.trim();
+  if (configured != null && configured.length > 0) return resolve(configured);
+  return resolve(resolveToolPackRoot(dirname(fileURLToPath(import.meta.url))), "../..");
+}
+
+export const TOOL_PACK_ROOT = resolveToolPackRoot(dirname(fileURLToPath(import.meta.url)));
+export const WORKSPACE_ROOT = resolveWorkspaceRoot();

@@ -1,6 +1,6 @@
-import { cp, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { createTarArchive } from "@open-design/download";
 
@@ -39,12 +39,42 @@ async function removeCommandLinks(root: string): Promise<void> {
   }
 }
 
-async function assertPortableTree(root: string): Promise<void> {
+async function pruneForeignPlatformBinaries(root: string): Promise<void> {
+  const modules = join(root, "node_modules");
+  const appBuilder = join(modules, "app-builder-bin");
+  const sevenZip = join(modules, "7zip-bin");
+  const platformDirectory = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "win" : "linux";
+  for (const directory of ["linux", "mac", "win"]) {
+    if (directory !== platformDirectory) {
+      await rm(join(appBuilder, directory), { force: true, recursive: true });
+      await rm(join(sevenZip, directory), { force: true, recursive: true });
+    }
+  }
+  if (process.platform === "darwin") {
+    const appBuilderBinary = process.arch === "arm64" ? "app-builder_arm64" : "app-builder_amd64";
+    for (const entry of await readdir(join(appBuilder, "mac")).catch(() => [])) {
+      if (entry !== appBuilderBinary) await rm(join(appBuilder, "mac", entry), { force: true, recursive: true });
+    }
+    const sevenZipBinary = process.arch === "arm64" ? "arm64" : "x64";
+    for (const entry of await readdir(join(sevenZip, "mac")).catch(() => [])) {
+      if (entry !== sevenZipBinary) await rm(join(sevenZip, "mac", entry), { force: true, recursive: true });
+    }
+  }
+}
+
+async function assertPortableTree(root: string, boundary = root): Promise<void> {
   for (const entry of await readdir(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
     const metadata = await lstat(path);
-    if (metadata.isSymbolicLink()) throw new Error(`release executor contains a symbolic link: ${path}`);
-    if (metadata.isDirectory()) await assertPortableTree(path);
+    if (metadata.isSymbolicLink()) {
+      const canonical = await realpath(path);
+      const fromBoundary = relative(await realpath(boundary), canonical);
+      if (fromBoundary === ".." || fromBoundary.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(fromBoundary)) {
+        throw new Error(`release executor link escapes its root: ${path}`);
+      }
+      continue;
+    }
+    if (metadata.isDirectory()) await assertPortableTree(path, boundary);
     else if (!metadata.isFile()) throw new Error(`release executor contains a special file: ${path}`);
   }
 }
@@ -57,10 +87,29 @@ async function defaultDeploy(packageName: string, destination: string, includeOp
     ...(includeOptional ? [] : ["--no-optional"]),
     "deploy",
     "--legacy",
+    "--offline",
     "--ignore-scripts",
     "--config.node-linker=hoisted",
     destination,
   ]);
+  const electronRoot = join(destination, "node_modules", "electron");
+  const electronBinary = process.platform === "darwin"
+    ? join(electronRoot, "dist", "Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? join(electronRoot, "dist", "electron.exe")
+      : join(electronRoot, "dist", "electron");
+  if (!(await stat(electronBinary).catch(() => null))?.isFile()) {
+    await execFileAsync(process.execPath, [join(electronRoot, "install.js")], { cwd: electronRoot, env: process.env });
+  }
+  for (const entry of [
+    electronBinary,
+    join(destination, "node_modules", "esbuild", "bin", "esbuild"),
+    join(destination, "node_modules", "pnpm", "bin", "pnpm.cjs"),
+  ]) {
+    if (!(await stat(entry).catch(() => null))?.isFile()) {
+      throw new Error(`release executor dependency is missing: ${entry}`);
+    }
+  }
 }
 
 async function defaultCopyRelease(destination: string): Promise<void> {
@@ -107,6 +156,7 @@ export async function exportReleaseExecutorProduct(options: ReleaseExecutorExpor
     await runDeploy("@open-design/tools-pack", join(stage, "pack"), true);
     await copyRelease(join(stage, "release"));
     await removeCommandLinks(stage);
+    await pruneForeignPlatformBinaries(join(stage, "pack"));
     await assertPortableTree(stage);
     for (const entry of Object.values(manifest.entries)) {
       if (!(await stat(join(stage, entry)).catch(() => null))?.isFile()) {
@@ -115,6 +165,7 @@ export async function exportReleaseExecutorProduct(options: ReleaseExecutorExpor
     }
     await writeFile(join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     createTarArchive(output, [{ directory: stage, entries: ["manifest.json", "pack", "release"] }], {
+      dereference: false,
       reproducible: true,
     });
     return { archive: output, bytes: (await stat(output)).size, manifest };
