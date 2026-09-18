@@ -87,7 +87,7 @@ async function defaultDeploy(packageName: string, destination: string, includeOp
     ...(includeOptional ? [] : ["--no-optional"]),
     "deploy",
     "--legacy",
-    "--offline",
+    "--prefer-offline",
     "--ignore-scripts",
     "--config.node-linker=hoisted",
     destination,

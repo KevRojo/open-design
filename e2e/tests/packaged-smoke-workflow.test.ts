@@ -2423,6 +2423,9 @@ process.stdin.on("end", () => {
       expect(source).toContain("pnpm --filter @open-design/tools-pack workspace:dev build web");
       expect(source).not.toContain("cache-tools: 'true'");
       expect(source).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
+      if (target === "mac_x64") {
+        expect(source).toContain("if: ${{ !cancelled() && needs.plan.outputs.contribution == 'true' }}");
+      }
       expect(source).toContain("uses: ./.github/actions/convergence");
       expect(source).toContain("local-products-root:");
       expect(source).toContain("local-product-pattern: '**/workspace.tar.gz'");

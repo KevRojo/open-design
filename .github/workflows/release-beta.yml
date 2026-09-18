@@ -951,7 +951,7 @@ jobs:
           pnpm --filter @open-design/tools-pack executor:dev export --output "$SOURCE_OUTPUT" --json
       - name: '[cache] Publish workload results'
         id: workload_results
-        if: ${{ success() && needs.plan.outputs.contribution == 'true' }}
+        if: ${{ !cancelled() && needs.plan.outputs.contribution == 'true' }}
         uses: ./.github/actions/convergence
         with:
           config: .github/config/convergence/release-beta.json
