@@ -523,7 +523,7 @@ jobs:
             --workflow release-beta --all-workloads --runner-plan-json "$runners" \
             --execution-inputs-json "$EXECUTION_INPUTS" --mode "$PLAN_MODE" --pending "$RUNNER_TEMP/pending-convergence.json"
       - name: "[retain] Frozen Plan witness"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: beta-convergence-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
