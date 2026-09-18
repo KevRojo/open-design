@@ -1336,6 +1336,11 @@ def producer_context(payload: dict[str, Any]) -> dict[str, Any]:
         source = object_value(payload.get("merge_group"), "merge_group event")
         head_sha = require_string(source.get("head_sha"), "merge_group.head_sha")
         base_sha = require_string(source.get("base_sha"), "merge_group.base_sha")
+    elif event == "push":
+        head_sha = require_string(payload.get("after"), "push.after")
+        base_sha = require_string(payload.get("before"), "push.before")
+        if head_sha != subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip():
+            raise ConfigError("push source checkout differs from the event revision")
     elif event == "workflow_dispatch":
         head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         base_sha = head_sha
@@ -1593,8 +1598,10 @@ def validate_admitted_plan(
 
 
 def admit_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
-    if args.isolated:
+    if getattr(args, "isolated", False):
         return admit_isolated_command(args, contract)
+    if getattr(args, "release_local", False):
+        return admit_release_local_command(args, contract)
     payload = event_payload()
     context = workflow_run_context(payload)
     if context["head_repository"] != context["repository"]:
@@ -1905,7 +1912,12 @@ def self_check() -> None:
             raise ConfigError("convergence self-check produced nondeterministic product archives")
 
 
-def local_execution_evidence(args: argparse.Namespace, context: dict[str, Any]) -> dict[str, Any] | None:
+def local_execution_evidence(
+    args: argparse.Namespace,
+    context: dict[str, Any],
+    *,
+    formal_release: bool = False,
+) -> dict[str, Any] | None:
     """Trusted release runners may attest completed steps before their job ends.
 
     CI never accepts producer assertions. This is an execution location option,
@@ -1914,11 +1926,13 @@ def local_execution_evidence(args: argparse.Namespace, context: dict[str, Any]) 
     job = getattr(args, "current_job", "")
     if not job:
         return None
-    if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
-            or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
-            or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"
-            or os.environ.get("GITHUB_WORKFLOW") != "release-beta"
-            or os.environ.get("GITHUB_SHA") != context["provenance"]["headSha"]):
+    if formal_release:
+        require_release_local_environment()
+    elif (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+          or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
+          or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"
+          or os.environ.get("GITHUB_WORKFLOW") != "release-beta"
+          or os.environ.get("GITHUB_SHA") != context["provenance"]["headSha"]):
         raise ConfigError("same-job evidence requires the authorized release source checkout")
     steps = object_value(json.loads(os.environ.get("CONVERGENCE_STEP_RESULTS", "{}")), "local step results")
     if not steps or any(value not in {"success", "failure", "cancelled", "skipped"} for value in steps.values()):
@@ -1949,6 +1963,36 @@ def require_isolated_candidate(candidate: dict[str, Any]) -> None:
         prepare_publication(path, Path(directory) / "receipts", require_urls=False)
 
 
+def require_release_local_environment() -> None:
+    if (os.environ.get("GITHUB_EVENT_NAME") not in {"push", "workflow_dispatch"}
+            or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
+            or re.fullmatch(r"refs/heads/release/v\d+\.\d+\.\d+", os.environ.get("GITHUB_REF", "")) is None):
+        raise ConfigError("release-local publication requires a trusted release branch run")
+
+
+def require_release_local_candidate(candidate: dict[str, Any]) -> None:
+    """Authorize same-run publication for formal release workflows only."""
+    require_release_local_environment()
+    context = producer_context(event_payload())
+    authorized_policies = {
+        "release-prerelease": "prerelease-v1",
+        "release-stable": "stable-v1",
+    }
+    if (candidate.get("workflow") not in authorized_policies
+            or candidate.get("policy") != authorized_policies[candidate["workflow"]]
+            or candidate.get("repositoryId") != context["repositoryId"]
+            or candidate.get("repository") != context["repository"]):
+        raise ConfigError("release-local candidate repository/workflow/policy differs")
+    provenance = candidate.get("provenance", {})
+    for field in ("event", "runId", "runAttempt", "headSha", "baseSha", "treeSha"):
+        if provenance.get(field) != context["provenance"][field]:
+            raise ConfigError(f"release-local candidate {field} differs from current run")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "candidate.json"
+        write_json_atomic(path, candidate)
+        prepare_publication(path, Path(directory) / "receipts", require_urls=False)
+
+
 def admit_isolated_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
     entries = handoff_contract.candidate_entry_dirs(args.handoff_root, "convergence")
     if len(entries) != 1:
@@ -1960,6 +2004,23 @@ def admit_isolated_command(args: argparse.Namespace, contract: ConvergenceContra
         raise ConfigError("isolated policy differs from declaration")
     root = args.root.resolve() if args.root else repository_root(__file__)
     local_steps = local_execution_evidence(args, producer_context(event_payload()))
+    validate_admitted_plan(candidate, contract, root, candidate["provenance"]["treeSha"], local_steps=local_steps)
+    append_outputs({"candidate": entry["candidate_path"], "publish": "true"})
+    return 0
+
+
+def admit_release_local_command(args: argparse.Namespace, contract: ConvergenceContract) -> int:
+    entries = handoff_contract.candidate_entry_dirs(args.handoff_root, "convergence")
+    if len(entries) != 1:
+        raise ConfigError("release-local publication requires exactly one successful handoff")
+    entry = handoff_contract.validate_convergence(entries[0])
+    candidate = load_json(Path(entry["candidate_path"]))
+    require_release_local_candidate(candidate)
+    if contract.workflow(candidate["workflow"]).policy != candidate["policy"]:
+        raise ConfigError("release-local policy differs from declaration")
+    root = args.root.resolve() if args.root else repository_root(__file__)
+    context = producer_context(event_payload())
+    local_steps = local_execution_evidence(args, context, formal_release=True)
     validate_admitted_plan(candidate, contract, root, candidate["provenance"]["treeSha"], local_steps=local_steps)
     append_outputs({"candidate": entry["candidate_path"], "publish": "true"})
     return 0
@@ -1985,8 +2046,10 @@ def contribute_command(args: argparse.Namespace, contract: ConvergenceContract) 
 
 
 def publish_command(args: argparse.Namespace) -> int:
-    if args.isolated:
+    if getattr(args, "isolated", False):
         require_isolated_candidate(load_json(args.candidate))
+    if getattr(args, "release_local", False):
+        require_release_local_candidate(load_json(args.candidate))
     storage = storage_config(required=True)
     origin = public_origin(storage["public_origin"])
     client = R2Client(
@@ -2153,7 +2216,9 @@ def parse_args() -> argparse.Namespace:
     batches.add_argument("--output-dir", type=Path, required=True)
     admit = sub.add_parser("admit")
     admit.add_argument("--handoff-root", type=Path, required=True)
-    admit.add_argument("--isolated", action="store_true")
+    admit_mode = admit.add_mutually_exclusive_group()
+    admit_mode.add_argument("--isolated", action="store_true")
+    admit_mode.add_argument("--release-local", action="store_true")
     admit.add_argument("--current-job", default="")
     publication = sub.add_parser("prepare-publication")
     publication.add_argument("--candidate", type=Path, required=True)
@@ -2168,7 +2233,9 @@ def parse_args() -> argparse.Namespace:
     publish.add_argument("--output-dir", type=Path, required=True)
     publish.add_argument("--products-root", type=Path, required=True)
     publish.add_argument("--timeout", type=float, default=15.0)
-    publish.add_argument("--isolated", action="store_true")
+    publish_mode = publish.add_mutually_exclusive_group()
+    publish_mode.add_argument("--isolated", action="store_true")
+    publish_mode.add_argument("--release-local", action="store_true")
     publish.add_argument("--pending", type=Path, help="project consumer requests after trusted publication")
     publish.add_argument("--local-products-root", type=lambda value: Path(value) if value else None,
                          help="current runner products instead of transported artifacts")

@@ -2390,9 +2390,10 @@ process.stdin.on("end", () => {
     expect(publicationIds).toHaveLength(8);
     expect(new Set(publicationIds).size).toBe(publicationIds.length);
     const action = await readFile(join(workspaceRoot, ".github/actions/convergence/action.yml"), "utf8");
-    for (const command of ["handoff", "admit --isolated", "publish --isolated"]) {
-      expect(action).toContain(`--config "$CONFIG" ${command}`);
-    }
+    expect(action).toContain('--config "$CONFIG" handoff');
+    expect(action).toContain('--config "$CONFIG" admit');
+    expect(action).toContain('--config "$CONFIG" publish');
+    expect(action).toContain("inputs.formal-release == 'true' && '--release-local' || '--isolated'");
     expect(action).toContain('CONVERGENCE_STEP_RESULTS: ${{ inputs.step-results }}');
     expect(action).toContain('--local-products-root "$LOCAL_PRODUCTS"');
     expect(action).not.toContain("pnpm");

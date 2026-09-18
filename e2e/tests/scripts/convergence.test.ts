@@ -676,6 +676,35 @@ with patch.dict(os.environ, {"GITHUB_EVENT_NAME":"workflow_dispatch", "GITHUB_RE
     expect(result.status, result.stderr).toBe(0);
   });
 
+  test("admits formal release-local publication only on release branches and named policies", () => {
+    const fixture = createRepository();
+    const result = spawnSync("python3", ["-c", `
+import copy, os, sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+import convergence as c
+release = {"GITHUB_EVENT_NAME":"workflow_dispatch", "GITHUB_REPOSITORY":"nexu-io/open-design", "GITHUB_REF":"refs/heads/release/v0.22.3", "GITHUB_REPOSITORY_ID":"42", "GITHUB_RUN_ID":"12", "GITHUB_RUN_ATTEMPT":"1"}
+with patch.dict(os.environ, release, clear=False):
+    with patch("convergence.event_payload", return_value={"repository":{"id":42}}):
+        context = c.producer_context(c.event_payload())
+        for workflow, policy in (("release-prerelease", "prerelease-v1"), ("release-stable", "stable-v1")):
+            candidate = {**context, "workflow":workflow, "policy":policy}
+            with patch("convergence.prepare_publication") as validation:
+                c.require_release_local_candidate(candidate)
+                validation.assert_called_once()
+                forged = copy.deepcopy(candidate)
+                forged["policy"] = "beta-isolated-v1"
+                try: c.require_release_local_candidate(forged)
+                except c.ConfigError: pass
+                else: raise AssertionError("accepted a non-formal policy")
+        with patch.dict(os.environ, {"GITHUB_REF":"refs/heads/main"}):
+            try: c.require_release_local_candidate(candidate)
+            except c.ConfigError: pass
+            else: raise AssertionError("accepted a non-release branch")
+`, path.dirname(convergenceScript)], { cwd: fixture.root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test("shares only explicit identical recipes from declared producers, preserving isolation otherwise", () => {
     const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `

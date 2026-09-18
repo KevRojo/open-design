@@ -31,6 +31,9 @@ inputs:
   local-product-pattern:
     default: ''
     description: Local file selection, matching the original transport contract
+  formal-release:
+    default: 'false'
+    description: Admit a release/vX.Y.Z prerelease or stable producer instead of the task-isolated beta producer
 outputs:
   requests:
     value: ${{ steps.publish.outputs.requests }}
@@ -77,7 +80,8 @@ runs:
         CURRENT_JOB: ${{ inputs.current-job }}
         CONVERGENCE_STEP_RESULTS: ${{ inputs.step-results }}
       run: >-
-        python3 .github/scripts/convergence.py --config "$CONFIG" admit --isolated
+        python3 .github/scripts/convergence.py --config "$CONFIG" admit
+        ${{ inputs.formal-release == 'true' && '--release-local' || '--isolated' }}
         --handoff-root "$RUNNER_TEMP/convergence/$LANE/handoff" --current-job "$CURRENT_JOB"
     - name: '[collect] Remote products'
       id: products
@@ -100,7 +104,8 @@ runs:
         LOCAL_PRODUCTS: ${{ inputs.local-products-root }}
         LOCAL_PATTERN: ${{ inputs.local-product-pattern }}
       run: >-
-        python3 .github/scripts/convergence.py --config "$CONFIG" publish --isolated
+        python3 .github/scripts/convergence.py --config "$CONFIG" publish
+        ${{ inputs.formal-release == 'true' && '--release-local' || '--isolated' }}
         --candidate "$CANDIDATE" --products-root "$RUNNER_TEMP/convergence/$LANE/products"
         --local-products-root "$LOCAL_PRODUCTS" --local-product-pattern "$LOCAL_PATTERN"
         --output-dir "$RUNNER_TEMP/convergence/$LANE/publication"
