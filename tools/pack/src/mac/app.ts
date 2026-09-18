@@ -1,9 +1,11 @@
 import { finalizeRuntimeManifest } from "../resources/runtime-manifest.js";
-import { cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, relative } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, relative } from "node:path";
 
 import { rebuild, type RebuildOptions } from "@electron/rebuild";
+import { createTarArchive, extractArchive } from "@open-design/download";
 
 import type { ToolPackConfig } from "../config/index.js";
 import {
@@ -15,6 +17,7 @@ import {
   MAC_PREBUNDLED_DAEMON_CLI_RELATIVE_PATH,
   MAC_PREBUNDLED_DAEMON_SIDECAR_RELATIVE_PATH,
   MAC_PREBUNDLED_WEB_SIDECAR_RELATIVE_PATH,
+  MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES,
   assertMacPrebundleMetafile,
   renderMacPackagedMainEntry,
   shouldInstallInternalPackageForMacPrebundle,
@@ -27,7 +30,7 @@ import {
 import { copyBundledResourceTrees, packBundledDshRuntime } from "../resources/index.js";
 import { copyOptionalVelaCliBinary } from "../vela-cli.js";
 import { electronBuilderVersionForAppVersion } from "../versioning/index.js";
-import { runEsbuild, runNpmInstall, runPnpm } from "./commands.js";
+import { execFileAsync, runEsbuild, runNpmInstall, runNpmPrune } from "./commands.js";
 import {
   ELECTRON_BUILDER_BUILD_DEPENDENCIES_FROM_SOURCE,
   ELECTRON_REBUILD_MODE,
@@ -55,6 +58,19 @@ async function buildPrebundledStandaloneRuntime(
   config: ToolPackConfig,
   paths: MacPaths,
 ): Promise<void> {
+  const resolverNodeModules = join(config.roots.output.namespaceRoot, "prebundle-resolver", "node_modules");
+  await rm(dirname(resolverNodeModules), { force: true, recursive: true });
+  await mkdir(join(resolverNodeModules, "@open-design"), { recursive: true });
+  for (const packageInfo of INTERNAL_PACKAGES) {
+    await symlink(
+      join(config.workspaceRoot, packageInfo.directory),
+      join(resolverNodeModules, "@open-design", packageInfo.name.slice("@open-design/".length)),
+      "dir",
+    );
+  }
+  const resolverEnvironment = {
+    NODE_PATH: [resolverNodeModules, join(paths.assembledAppRoot, "node_modules")].join(delimiter),
+  };
   await mkdir(paths.assembledPrebundledRoot, { recursive: true });
   await mkdir(dirname(paths.packagedMainPrebundleMetaPath), { recursive: true });
   await runEsbuild(config, [
@@ -66,7 +82,7 @@ async function buildPrebundledStandaloneRuntime(
     ...MAC_PREBUNDLE_POLICIES.packagedMain.externals.map((dependency) => `--external:${dependency}`),
     `--outfile=${paths.packagedMainPrebundlePath}`,
     `--metafile=${paths.packagedMainPrebundleMetaPath}`,
-  ]);
+  ], resolverEnvironment);
   await assertMacPrebundleMetafile({
     metafilePath: paths.packagedMainPrebundleMetaPath,
     policyName: "packagedMain",
@@ -80,7 +96,7 @@ async function buildPrebundledStandaloneRuntime(
     ...MAC_PREBUNDLE_POLICIES.webSidecar.externals.map((dependency) => `--external:${dependency}`),
     `--outfile=${paths.webSidecarPrebundlePath}`,
     `--metafile=${paths.webSidecarPrebundleMetaPath}`,
-  ]);
+  ], resolverEnvironment);
   await assertMacPrebundleMetafile({
     metafilePath: paths.webSidecarPrebundleMetaPath,
     policyName: "webSidecar",
@@ -129,7 +145,7 @@ async function buildPrebundledStandaloneRuntime(
     "--chunk-names=chunks/[name]-[hash]",
     "--out-extension:.js=.mjs",
     `--metafile=${paths.daemonPrebundleMetaPath}`,
-  ]);
+  ], resolverEnvironment);
   await assertMacPrebundleMetafile({
     metafilePath: paths.daemonPrebundleMetaPath,
     policyName: "daemonSidecar",
@@ -285,34 +301,91 @@ export async function collectWorkspaceTarballs(
   await rm(paths.tarballsRoot, { force: true, recursive: true });
   await mkdir(paths.tarballsRoot, { recursive: true });
   const packedTarballs: PackedTarballInfo[] = [];
+  const versions = await workspacePackageVersions(config);
 
   for (const packageInfo of INTERNAL_PACKAGES) {
-    if (
-      !shouldInstallInternalPackageForMacPrebundle({
-        packageName: packageInfo.name,
-        webOutputMode: config.webOutputMode,
-      })
-    ) {
+    const installedAtRuntime = shouldInstallInternalPackageForMacPrebundle({
+      packageName: packageInfo.name,
+      webOutputMode: config.webOutputMode,
+    });
+    if (!installedAtRuntime && !MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
+      packageInfo.name as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
+    )) {
       continue;
     }
 
-    const beforeEntries = new Set(await readdir(paths.tarballsRoot));
-    await runPnpm(config, [
-      "-C",
-      packageInfo.directory,
-      "pack",
-      "--pack-destination",
-      paths.tarballsRoot,
-    ]);
-    const afterEntries = await readdir(paths.tarballsRoot);
-    const newEntries = afterEntries.filter((entry) => !beforeEntries.has(entry));
-    if (newEntries.length !== 1 || newEntries[0] == null) {
-      throw new Error(`expected one tarball for ${packageInfo.name}, got ${newEntries.length}`);
-    }
-    packedTarballs.push({ fileName: newEntries[0], packageName: packageInfo.name });
+    const fileName = await packWorkspacePackage(config, paths.tarballsRoot, packageInfo, versions);
+    packedTarballs.push({ fileName, packageName: packageInfo.name });
   }
 
   return packedTarballs;
+}
+
+async function workspacePackageVersions(config: ToolPackConfig): Promise<Map<string, string>> {
+  return new Map(await Promise.all(INTERNAL_PACKAGES.map(async (entry) => {
+    const manifest = JSON.parse(await readFile(join(config.workspaceRoot, entry.directory, "package.json"), "utf8")) as {
+      name?: unknown;
+      version?: unknown;
+    };
+    if (manifest.name !== entry.name || typeof manifest.version !== "string") {
+      throw new Error(`invalid workspace package manifest: ${entry.directory}`);
+    }
+    return [entry.name, manifest.version] as const;
+  })));
+}
+
+function rewriteWorkspaceDependencies(manifest: Record<string, unknown>, versions: Map<string, string>): void {
+  for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"] as const) {
+    const dependencies = manifest[field];
+    if (dependencies == null || typeof dependencies !== "object" || Array.isArray(dependencies)) continue;
+    for (const [name, raw] of Object.entries(dependencies as Record<string, unknown>)) {
+      if (typeof raw !== "string" || !raw.startsWith("workspace:")) continue;
+      const version = versions.get(name);
+      if (version == null) throw new Error(`workspace package version is unavailable: ${name}`);
+      const selector = raw.slice("workspace:".length);
+      (dependencies as Record<string, unknown>)[name] = selector === "*"
+        ? version
+        : selector === "^"
+          ? `^${version}`
+          : selector === "~"
+            ? `~${version}`
+            : selector;
+    }
+  }
+}
+
+async function packWorkspacePackage(
+  config: ToolPackConfig,
+  destination: string,
+  packageInfo: (typeof INTERNAL_PACKAGES)[number],
+  versions: Map<string, string>,
+): Promise<string> {
+  const temporary = await mkdtemp(join(tmpdir(), "open-design-package-tarball-"));
+  try {
+    await execFileAsync("npm", [
+      "pack",
+      join(config.workspaceRoot, packageInfo.directory),
+      "--pack-destination",
+      temporary,
+      "--ignore-scripts",
+      "--silent",
+    ]);
+    const archives = (await readdir(temporary)).filter((entry) => entry.endsWith(".tgz"));
+    if (archives.length !== 1 || archives[0] == null) {
+      throw new Error(`expected one source tarball for ${packageInfo.name}, got ${archives.length}`);
+    }
+    const stage = join(temporary, "stage");
+    await mkdir(stage);
+    extractArchive(join(temporary, archives[0]), stage, "tar.gz");
+    const manifestPath = join(stage, "package", "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    rewriteWorkspaceDependencies(manifest, versions);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    createTarArchive(join(destination, archives[0]), [{ directory: stage, entries: ["package"] }], { reproducible: true });
+    return archives[0];
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
 }
 
 export async function writeAssembledApp(
@@ -371,9 +444,14 @@ export async function writeAssembledApp(
     )}\n`,
     "utf8",
   );
-  if (usePrebundledStandaloneWeb) {
-    await buildPrebundledStandaloneRuntime(config, paths);
-  }
+  const resolverTarballs = packedTarballs
+    .filter((entry) => MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES.includes(
+      entry.packageName as (typeof MAC_STANDALONE_PREBUNDLE_RESOLVER_PACKAGES)[number],
+    ))
+    .map((entry) => join(paths.tarballsRoot, entry.fileName));
+  await runNpmInstall(paths.assembledAppRoot, resolverTarballs);
+  if (usePrebundledStandaloneWeb) await buildPrebundledStandaloneRuntime(config, paths);
+  if (resolverTarballs.length > 0) await runNpmPrune(paths.assembledAppRoot);
   await writeFile(
     paths.assembledMainEntryPath,
     renderMacPackagedMainEntry(usePrebundledStandaloneWeb),
@@ -388,7 +466,6 @@ export async function writeAssembledApp(
     }),
     "utf8",
   );
-  await runNpmInstall(paths.assembledAppRoot);
   if (usePrebundledStandaloneWeb) {
     await copyMacPrebundleRuntimeDependencies(config, paths.assembledAppRoot);
   }

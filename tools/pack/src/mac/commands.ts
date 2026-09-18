@@ -68,14 +68,21 @@ export async function runPnpm(
   });
 }
 
-export async function runNpmInstall(appRoot: string): Promise<void> {
-  await execFileAsync("npm", ["install", "--omit=dev", "--no-package-lock"], {
+export async function runNpmInstall(appRoot: string, packages: string[] = []): Promise<void> {
+  await execFileAsync("npm", ["install", "--omit=dev", "--no-package-lock", "--no-save", ...packages], {
     cwd: appRoot,
     env: process.env,
   });
 }
 
-export async function runEsbuild(config: ToolPackConfig, args: string[]): Promise<void> {
+export async function runNpmPrune(appRoot: string): Promise<void> {
+  await execFileAsync("npm", ["prune", "--omit=dev", "--no-package-lock"], { cwd: appRoot, env: process.env });
+}
+
+export async function runEsbuild(config: ToolPackConfig, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promise<void> {
   const esbuildCli = createRequire(import.meta.url).resolve("esbuild/bin/esbuild");
-  await execFileAsync(process.execPath, [esbuildCli, ...args], { cwd: config.workspaceRoot, env: process.env });
+  await execFileAsync(process.execPath, [esbuildCli, ...args], {
+    cwd: config.workspaceRoot,
+    env: { ...process.env, ...extraEnv },
+  });
 }
