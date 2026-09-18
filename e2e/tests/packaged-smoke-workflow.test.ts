@@ -2299,10 +2299,10 @@ process.stdin.on("end", () => {
     expect(beta).not.toContain("uses: ./.github/workflows/release-prerelease.yml");
   });
 
-  it("[P1] keeps beta mac compression explicit and uploads identical mac sourcemaps once", async () => {
+  it("[P1] defaults beta mac compression to the measured fast path and uploads identical mac sourcemaps once", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     expect(workflow.match(/^      mac_compression:$/gm)).toHaveLength(2);
-    expect(workflow.match(/^        default: normal$/gm)?.length).toBeGreaterThanOrEqual(2);
+    expect(workflow.match(/^        default: store$/gm)).toHaveLength(2);
     expect(workflow.match(/--mac-compression "\$\{\{ inputs\.mac_compression \}\}"/g)).toHaveLength(3);
     expect(workflow).not.toContain("--mac-compression normal");
 

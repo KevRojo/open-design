@@ -53,13 +53,13 @@ on:
         type: string
         default: ""
       mac_compression:
-        description: "macOS artifact compression used by both architectures. Store is the low-CPU experiment."
+        description: "macOS artifact compression used by both architectures. Store is the beta fast path."
         required: true
         type: choice
         options:
           - normal
           - store
-        default: normal
+        default: store
       mac_arm64_sign_mode:
         description: "macOS arm64 signing mode."
         required: true
@@ -218,7 +218,7 @@ on:
       mac_compression:
         required: false
         type: string
-        default: normal
+        default: store
       mac_arm64_sign_mode:
         required: false
         type: string
