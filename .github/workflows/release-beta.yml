@@ -527,10 +527,7 @@ jobs:
       sources: ${{ steps.workload_results.outputs.sources }}
     needs: release_prepare
     if: ${{ needs.release_prepare.outputs.contribution == 'true' && needs.release_prepare.outputs.common_count != '0' }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.release_prepare.outputs.common_matrix) }}
+    runs-on: ${{ fromJSON(needs.release_prepare.outputs.common_matrix).include[0].runner || 'ubuntu-latest' }}
     env:
       OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]'
     steps:
@@ -583,7 +580,7 @@ jobs:
           id: beta-common-results
           products: manifest
           batches: '["source_javascript"]'
-          current-job: '${{ matrix.name }}'
+          current-job: '[build] Shared JavaScript'
           step-results: |
             {"[build] Source packages":"${{ steps.source_packages.outcome }}","[build] Source daemon":"${{ steps.source_daemon.outcome }}","[build] Source shell":"${{ steps.source_shell.outcome }}"}
           local-products-root: ${{ runner.temp }}/source-products

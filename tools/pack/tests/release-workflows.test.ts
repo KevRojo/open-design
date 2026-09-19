@@ -211,7 +211,10 @@ describe("release workflows", () => {
     }).resources["platform-mac-runtime"].paths;
     const convergence = JSON.parse(convergenceConfig) as {
       resources: { "daemon-runtime-dependencies": { json: string; omit: string[] } };
-      workflows: { "release-beta": { workloads: { source_mac_x64_runtime: { inputs: string[] } } } };
+      workflows: { "release-beta": {
+        workloads: { source_mac_x64_runtime: { inputs: string[] } };
+        matrices: { common: Array<{ name: string }> };
+      } };
     };
 
     expect(macX64Producer).toContain(
@@ -244,6 +247,9 @@ describe("release workflows", () => {
     });
     expect(convergence.workflows["release-beta"].workloads.source_mac_x64_runtime.inputs)
       .toContain("resource://daemon-runtime-dependencies");
+    expect(convergence.workflows["release-beta"].matrices.common).toEqual([
+      expect.objectContaining({ name: "[build] Shared JavaScript" }),
+    ]);
   });
 
   it("requires Vela CLI for every beta desktop packaging target", async () => {
