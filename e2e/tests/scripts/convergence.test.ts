@@ -239,17 +239,13 @@ import convergence as c
 contract = c.ConvergenceContract(Path(sys.argv[2]) / ".github/config/convergence/release-beta.json")
 w = contract.workflow("release-beta")
 ids = [key for key in w.workloads if key.startswith("test_")]
-targets = [row["target"] for row in w.matrices["build"]]
 runners = {x.runner_class: ["test-runner"] for x in w.workloads.values()}
-for mask in range(16):
-    inputs = {"enable_" + target: bool(mask & (1 << i)) for i, target in enumerate(targets)}
+for mask in range(1 << len(ids)):
     run = {key: False for key in w.workloads}
     run.update({key: bool(mask & (1 << i)) for i, key in enumerate(ids)})
-    projected = c.project_matrices(w, run, runners, inputs)
-    builds = json.loads(projected["build_matrix"])["include"]
+    projected = c.project_matrices(w, run, runners, {})
     tests = json.loads(projected["test_matrix"])["include"]
-    assert [r["target"] for r in builds] == [t for t in targets if inputs["enable_" + t]]
-    assert len(builds) == int(projected["build_count"])
+    assert "build_matrix" not in projected
     assert len(tests) == int(projected["test_count"])
     assert sorted(r["name"] for r in tests) == sorted(name for key in ids if run[key] for name in w.workloads[key].success)
     assert all(r["runner"] == ["test-runner"] for r in tests)
@@ -259,12 +255,8 @@ for mask in range(16):
         assert {row["name"] for row in shards} == (set(w.workloads[identity].success) if run[identity] else set())
     assert projected["common_count"] == "0"
     for key in w.matrices["common"][0]["workloads"]:
-        partial = c.project_matrices(w, {**run, key: True}, runners, inputs)
+        partial = c.project_matrices(w, {**run, key: True}, runners, {})
         assert partial["common_count"] == "1"
-for bad in ({}, {"enable_" + t: "true" for t in targets}):
-    try: c.project_matrices(w, {key: True for key in ids}, runners, bad)
-    except c.ConfigError: pass
-    else: raise AssertionError("accepted missing/nonboolean platform selection")
 raw = json.loads((Path(sys.argv[2]) / ".github/config/convergence/release-beta.json").read_text())["workflows"]["release-beta"]
 for mutation in ("duplicate", "unknown", "runner", "missing-shard"):
     value = copy.deepcopy(raw)
@@ -316,6 +308,7 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     baseline = keys()
     cases = {
       ".github/workflows/release-beta.yml": set(),
+      ".github/scripts/release/test_unit.py": {"test_web_workspace_tests", "test_daemon_unit_tests", "test_functional_e2e"},
       "apps/daemon/src/plan-witness.ts": {"test_daemon_unit_tests", "test_functional_e2e", "source_js_daemon"},
       "apps/daemon/tests/plan-witness.test.ts": {"test_daemon_unit_tests"},
       "apps/web/src/plan-witness.ts": {"test_web_workspace_tests", "test_functional_e2e"},
@@ -333,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
     git("read-tree", baseline_tree)
     changed = copy.deepcopy(contract)
     row = next(r for r in changed.workflow("release-beta").matrices["test"] if r["kind"] == "daemon")
-    row["command"] += " --bail=1"
+    row["shard"] = 4
     assert {key for key, value in keys(changed).items() if value != baseline[key]} == {"test_daemon_unit_tests"}
 `, path.dirname(convergenceScript), fixture.root, repoRoot], { encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);

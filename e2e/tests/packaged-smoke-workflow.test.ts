@@ -2387,7 +2387,7 @@ process.stdin.on("end", () => {
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publicationIds = [...workflow.matchAll(/^          id: (beta-[^\n]+)$/gm)].map((match) => match[1]!);
-    expect(publicationIds).toHaveLength(9);
+    expect(publicationIds).toHaveLength(5);
     expect(new Set(publicationIds).size).toBe(publicationIds.length);
     const action = await readFile(join(workspaceRoot, ".github/actions/convergence/action.yml"), "utf8");
     expect(action).toContain('--config "$CONFIG" handoff');
@@ -2424,13 +2424,13 @@ process.stdin.on("end", () => {
       const source = workflowJob(workflow, `source_${target}`);
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
       expect(source).toContain(target === "mac_x64"
-        ? "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
+          ? "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
         : "install-profile: source-web");
       expect(source).toContain("pnpm --filter @open-design/tools-pack workspace:dev build web");
       expect(source).not.toContain("cache-tools: 'true'");
       expect(source).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
       if (target === "mac_x64") {
-        expect(source).toContain("if: ${{ !cancelled() && needs.plan.outputs.contribution == 'true' }}");
+        expect(source).toContain("if: ${{ !cancelled() && needs.release_prepare.outputs.contribution == 'true' }}");
       }
       expect(source).toContain("uses: ./.github/actions/convergence");
       expect(source).toContain("local-products-root:");
@@ -2440,7 +2440,7 @@ process.stdin.on("end", () => {
       expect(workflow).not.toContain(`\n  cache_${target}:`);
       for (const unit of ["web"]) {
         expect(job).toContain(`[build] Source ${unit}`);
-        expect(job).toContain("needs.plan.outputs.requests");
+        expect(job).toContain("needs.release_prepare.outputs.requests");
         expect(config.workflows["release-beta"].workloads[`source_${target}_${unit}`]).toMatchObject({
           inputs: [`suite://source-${unit}`], products: "manifest", runnerClass: `source_${target}`,
           success: { [`[build] ${target} workload`]: [`[build] Source ${unit}`] }, successBoundary: "steps",
@@ -2462,34 +2462,32 @@ process.stdin.on("end", () => {
 
   });
 
-  it("[P1] consumes shared JavaScript, native build and test matrices from configuration", async () => {
+  it("[P1] consumes shared JavaScript and one test matrix from configuration", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     const { workloads, matrices } = config.workflows["release-beta"];
-    expect(matrices.build.map((row: { target: string }) => row.target)).toEqual(["mac_arm64", "mac_x64", "win_x64", "linux_x64"]);
+    expect(matrices.build).toBeUndefined();
     expect(matrices.test).toHaveLength(14);
     for (const row of matrices.test) expect(Object.keys(workloads[row.workload].success)).toContain(row.name);
-    // Install-time tool preparation is not the app build dependency closure.
+    // The matrix declares execution identity and parameters, not shell programs.
     for (const row of matrices.test) {
-      expect(row.prepareShared).toContain('tools-pack workspace import javascript --sources "$WORKSPACE_SOURCES"');
-      expect(row.prepare.split("\n")[0]).toContain(
-        row.kind === "web" ? "--filter '@open-design/web^...'" : "--filter '@open-design/daemon^...'",
-      );
-      expect(row.prepare.split("\n")[0]).toContain("--if-present run build");
-      if (row.kind !== "daemon" && row.kind !== "web") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/desktop^...'");
-      if (row.kind === "ui" || row.kind === "e2e") expect(row.prepare.split("\n")[0]).toContain("--filter '@open-design/web^...'");
+      expect(row).not.toHaveProperty("prepare");
+      expect(row).not.toHaveProperty("prepareShared");
+      expect(row).not.toHaveProperty("command");
+      expect(["web", "daemon", "e2e", "verify", "ui"]).toContain(row.kind);
     }
     expect(matrices.common).toHaveLength(1);
     expect(matrices.common[0].workloads).toEqual(["source_js_packages", "source_js_daemon", "source_js_shell"]);
-    expect(workflow.match(/    strategy:/g)).toHaveLength(6);
+    expect(workflow.match(/    strategy:/g)).toHaveLength(2);
     expect(workflow).toContain("  build_linux_x64:");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
-    expect(workflow).toContain('run: ${{ matrix.command }}');
-    expect(workflow).toContain("run: ${{ (needs.plan.outputs.contribution == 'true') && matrix.prepareShared || matrix.prepare }}");
+    expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py prepare");
+    expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py run");
+    expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py extra");
     expect(workflow).toContain('OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}');
     expect(workflow).toContain("OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}");
     expect(workflow).toContain('test_matrix: ${{ steps.plan.outputs.test_matrix }}');
-    expect(workflow).toContain('build_matrix: ${{ steps.plan.outputs.build_matrix }}');
+    expect(workflow).not.toContain('build_matrix: ${{ steps.plan.outputs.build_matrix }}');
     expect(workflow).toContain('--execution-inputs-json "$EXECUTION_INPUTS"');
     expect(workflow).toContain('name: Run UI critical extras');
     expect(workflow).toContain('name: Preserve project-runtime domain artifact');
@@ -2500,40 +2498,35 @@ process.stdin.on("end", () => {
     const publish = workflowJob(workflow, "publish");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
     expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
-    for (const id of ["test_web_workspace_tests", "test_e2e_vitest", "test_verify", "test_daemon_unit_tests", "test_functional_e2e"]) {
-      const tests = workflowJob(workflow, id);
-      expect(tests).toContain(`fromJSON(needs.plan.outputs.run).${id}`);
-      expect(tests).toContain(`fromJSON(needs.plan.outputs.${id}_matrix)`);
-      expect(tests).toContain("fail-fast: false");
-      expect(tests).toContain("name: ${{ matrix.name || '[test]");
-      expect(tests).toContain("runs-on: ${{ matrix.runner }}");
-      if (["test_e2e_vitest", "test_verify"].includes(id)) {
-        expect(tests).toContain("uses: ./.github/actions/convergence");
-        expect(tests).toContain("steps.run_test.outcome");
-        expect(workflow).not.toContain(`\n  cache_${id}:`);
-      } else {
-        const cache = workflowJob(workflow, `cache_${id}`);
-        expect(cache).toContain(`needs: [plan, ${id}]`);
-        expect(cache).toContain(`needs.${id}.result == 'success'`);
-        expect(cache).toContain("uses: ./.github/actions/convergence");
-        expect(cache).not.toContain("current-job:");
-        expect(cache).not.toContain("build_mac");
-      }
-    }
-    const plan = workflowJob(workflow, "plan");
+    const tests = workflowJob(workflow, "test");
+    expect(tests).toContain("matrix: ${{ fromJSON(needs.release_prepare.outputs.test_matrix) }}");
+    expect(tests).toContain("needs.release_prepare.outputs.test_count != '0'");
+    expect(tests).toContain("fail-fast: false");
+    expect(tests).toContain("name: ${{ matrix.name }}");
+    expect(tests).toContain("runs-on: ${{ matrix.runner }}");
+    const cache = workflowJob(workflow, "cache_test");
+    expect(cache).toContain("needs: [release_prepare, test]");
+    expect(cache).toContain("needs.test.result == 'failure'");
+    expect(cache).toContain("uses: ./.github/actions/convergence");
+    expect(cache).toContain("products: none");
+    expect(cache).not.toContain("workloads:");
+    expect(cache).not.toContain("current-job:");
+    expect(workflow).not.toContain("\n  plan:");
     const releasePrepare = workflowJob(workflow, "release_prepare");
-    expect(plan).toContain("steps.identity.outputs.commit == github.sha");
-    expect(plan).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json"');
-    expect(plan).toContain("--all-workloads");
-    expect(plan).toContain("contributions: ${{ steps.plan.outputs.contributions }}");
-    expect(plan).toContain("steps.identity.outputs.commit != github.sha");
-    expect(plan).not.toContain("fetch-depth: 0");
-    expect(plan).not.toContain("setup-workspace");
-    expect(plan).not.toContain("pnpm");
-    expect(plan).not.toContain("tools-release");
+    expect(releasePrepare).toContain("steps.identity.outputs.commit == github.sha");
+    expect(releasePrepare).toContain('--root . --config "$CONTROL_ROOT/.github/config/convergence/release-beta.json"');
+    expect(releasePrepare).toContain("--all-workloads");
+    expect(releasePrepare).toContain("contributions: ${{ steps.plan.outputs.contributions }}");
+    expect(releasePrepare).toContain("steps.identity.outputs.commit != github.sha");
+    expect(releasePrepare).not.toContain("fetch-depth: 0");
+    expect(releasePrepare.indexOf("[plan] Frozen source test results")).toBeLessThan(releasePrepare.indexOf("Setup release control"));
     expect(releasePrepare).toContain("OPEN_DESIGN_RELEASE_TAG_REMOTE: origin");
     expect(releasePrepare).toContain("pnpm exec tools-release prepare beta");
-    expect(workflowJob(workflow, "source_mac_arm64")).not.toContain("- release_prepare");
+    expect(releasePrepare.indexOf("pnpm exec tools-release prepare beta")).toBeLessThan(
+      releasePrepare.indexOf("pnpm exec tools-release prepare-release-note"),
+    );
+    expect(releasePrepare).toContain("if: ${{ inputs.publish }}\n        env:\n          RELEASE_CHANNEL: beta");
+    expect(workflowJob(workflow, "source_mac_arm64")).toContain("- release_prepare");
     expect(workflowJob(workflow, "build_mac_arm64")).toContain("- release_prepare");
     expect(workflow).not.toContain("  plan_tests:");
     expect(workflow).not.toContain("  test_results:");
@@ -2545,7 +2538,7 @@ process.stdin.on("end", () => {
       const job = workflow.slice(workflow.indexOf(`\n  smoke_${target}:`)).split(/\n  [a-z_0-9]+:/)[1];
       expect(job).toContain("always() && !cancelled()");
       expect(job).toContain(`inputs.${target}_smoke_mode == 'core'`);
-      expect(job).toContain("ref: ${{ needs.plan.outputs.commit }}");
+      expect(job).toContain("ref: ${{ needs.release_prepare.outputs.commit }}");
       expect(job).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
       expect(job).toContain("tools-release artifact resolve");
       expect(job).toContain("tools-pack stage-artifact");
@@ -2685,7 +2678,7 @@ process.stdin.on("end", () => {
 
     const releaseCommitEnv = "RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}";
     // Beta is the working reference that already populates the commit.
-    expect(betaWorkflow).toContain("RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}");
+    expect(betaWorkflow).toContain("RELEASE_COMMIT: ${{ needs.release_prepare.outputs.commit }}");
 
     const jobBounds: Array<[string, string]> = [
       ["  build_mac:", "  build_mac_intel:"],
@@ -2920,7 +2913,6 @@ process.stdin.on("end", () => {
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(notifyDailyFeishuWorkflowPath, "utf8"),
     ]);
-    const planJob = workflowJob(betaWorkflow, "plan");
     const metadataJob = workflowJob(betaWorkflow, "release_prepare");
     const publisherGuard = sectionBetween(
       metadataJob,
@@ -2943,8 +2935,8 @@ process.stdin.on("end", () => {
     expect(publisherGuard).toContain("publish=false");
     expect(betaWorkflow).not.toContain("recover_foreign_beta");
     expect(betaWorkflow).not.toContain("OPEN_DESIGN_RECOVER_FOREIGN_BETA");
-    expect(planJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
-    expect(planJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
+    expect(metadataJob).toContain("branch: ${{ steps.identity.outputs.branch }}");
+    expect(metadataJob).toContain("commit: ${{ steps.identity.outputs.commit }}");
     expect(metadataJob).toContain(`promote: \${{ inputs.promote || !contains(toJSON(inputs), '"promote":') }}`);
     expect(betaWorkflow).toContain("value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}");
     expect(betaWorkflow).toContain("value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}");

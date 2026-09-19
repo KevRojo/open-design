@@ -186,7 +186,8 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts/postinstall.mjs",
-        ".github/actions/setup-workspace/"
+        ".github/actions/setup-workspace/",
+        ".github/scripts/release/test_unit.py"
       ],
       "exclude": []
     },
@@ -579,198 +580,121 @@
         }
       },
       "matrices": {
-        "build": [
+        "test": [
           {
-            "target": "mac_arm64",
-            "name": "[build] macOS arm64",
-            "enabledInput": "enable_mac_arm64",
-            "runner": "macos-14",
-            "shell": "bash"
+            "workload": "test_web_workspace_tests",
+            "kind": "web",
+            "name": "[test] beta Web workspace tests (1/2)",
+            "timeout": 20,
+            "postinstall": "[\"tools/pack\"]",
+            "shard": 1
           },
           {
-            "target": "mac_x64",
-            "name": "[build] macOS x64",
-            "enabledInput": "enable_mac_x64",
-            "runner": "macos-15-intel",
-            "shell": "bash"
+            "workload": "test_web_workspace_tests",
+            "kind": "web",
+            "name": "[test] beta Web workspace tests (2/2)",
+            "timeout": 20,
+            "postinstall": "[\"tools/pack\"]",
+            "shard": 2
           },
           {
-            "target": "win_x64",
-            "name": "[build] Windows x64",
-            "enabledInput": "enable_win_x64",
-            "runner": "windows-latest",
-            "shell": "pwsh"
-          },
-          {
-            "target": "linux_x64",
-            "name": "[build] Linux x64",
-            "enabledInput": "enable_linux_x64",
-            "runner": "ubuntu-latest",
-            "shell": "bash"
-          }
-        ],
-      "test": [
-        {
-          "workload": "test_web_workspace_tests",
-          "kind": "web",
-          "name": "[test] beta Web workspace tests (1/2)",
-          "timeout": 20,
-          "prepare": "pnpm --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/web build:sidecar",
-          "command": "pnpm --filter @open-design/web exec vitest run -c vitest.config.ts --maxWorkers=2 --shard=1/2",
-          "postinstall": "[\"tools/pack\"]",
-          "shard": 1,
-          "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
-        },
-        {
-          "workload": "test_web_workspace_tests",
-          "kind": "web",
-          "name": "[test] beta Web workspace tests (2/2)",
-          "timeout": 20,
-          "prepare": "pnpm --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/web build:sidecar",
-          "command": "pnpm --filter @open-design/web exec vitest run -c vitest.config.ts --maxWorkers=2 --shard=2/2",
-          "postinstall": "[\"tools/pack\"]",
-          "shard": 2,
-          "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
-        },
-        {
             "workload": "test_e2e_vitest",
             "kind": "e2e",
             "name": "[test] beta E2E Vitest",
             "timeout": 20,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm --filter @open-design/e2e test",
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
           },
           {
             "workload": "test_verify",
             "kind": "verify",
             "name": "[test] beta Verify build (typecheck + tests)",
             "timeout": 360,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build",
-            "command": "pnpm -r --workspace-concurrency=4 --if-present run typecheck\npnpm guard",
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
+            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
           },
           {
             "workload": "test_daemon_unit_tests",
             "kind": "daemon",
             "name": "[test] beta Daemon tests (1/4)",
             "timeout": 15,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=1/4",
             "postinstall": "[\"tools/pack\"]",
             "shard": 1,
-            "debug": "1",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
+            "debug": "1"
           },
           {
             "workload": "test_daemon_unit_tests",
             "kind": "daemon",
             "name": "[test] beta Daemon tests (2/4)",
             "timeout": 15,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=2/4",
             "postinstall": "[\"tools/pack\"]",
             "shard": 2,
-            "debug": "1",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
+            "debug": "1"
           },
           {
             "workload": "test_daemon_unit_tests",
             "kind": "daemon",
             "name": "[test] beta Daemon tests (3/4)",
             "timeout": 15,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=3/4",
             "postinstall": "[\"tools/pack\"]",
             "shard": 3,
-            "debug": "1",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
+            "debug": "1"
           },
           {
             "workload": "test_daemon_unit_tests",
             "kind": "daemon",
             "name": "[test] beta Daemon tests (4/4)",
             "timeout": 15,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build",
-            "command": "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts --shard=4/4",
             "postinstall": "[\"tools/pack\"]",
             "shard": 4,
-            "debug": "1",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json"
+            "debug": "1"
           },
           {
             "workload": "test_functional_e2e",
             "kind": "ui",
             "name": "[test] beta UI P0 (entry-settings)",
             "timeout": 45,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group entry-settings",
             "postinstall": "[\"tools/dev\",\"tools/pack\"]",
-            "group": "entry-settings",
-            "extra": "",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "group": "entry-settings"
           },
           {
             "workload": "test_functional_e2e",
             "kind": "ui",
             "name": "[test] beta UI P0 (project-workspace)",
             "timeout": 45,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-workspace",
             "postinstall": "[\"tools/dev\",\"tools/pack\"]",
-            "group": "project-workspace",
-            "extra": "",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "group": "project-workspace"
           },
           {
             "workload": "test_functional_e2e",
             "kind": "ui",
             "name": "[test] beta UI P0 (project-workspace-editor)",
             "timeout": 45,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-workspace-editor",
             "postinstall": "[\"tools/dev\",\"tools/pack\"]",
-            "group": "project-workspace-editor",
-            "extra": "",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "group": "project-workspace-editor"
           },
           {
             "workload": "test_functional_e2e",
             "kind": "ui",
             "name": "[test] beta UI P0 (project-collab)",
             "timeout": 45,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-collab",
             "postinstall": "[\"tools/dev\",\"tools/pack\"]",
-            "group": "project-collab",
-            "extra": "",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "group": "project-collab"
           },
           {
             "workload": "test_functional_e2e",
             "kind": "ui",
             "name": "[test] beta UI P0 (project-runtime)",
             "timeout": 45,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group project-runtime",
             "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-runtime",
-            "extra": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group critical-extras",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "extra": true
           },
           {
             "workload": "test_functional_e2e",
             "kind": "ui",
             "name": "[test] beta UI P0 (workspace-restoration)",
             "timeout": 45,
-            "prepare": "pnpm --filter '@open-design/daemon^...' --filter '@open-design/desktop^...' --filter '@open-design/web^...' --workspace-concurrency=4 --if-present run build\npnpm --filter @open-design/daemon build\npnpm --filter @open-design/desktop build\npnpm --filter @open-design/web build:sidecar",
-            "command": "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group workspace-restoration",
             "postinstall": "[\"tools/dev\",\"tools/pack\"]",
-            "group": "workspace-restoration",
-            "extra": "",
-            "prepareShared": "pnpm exec tools-pack workspace import javascript --sources \"$WORKSPACE_SOURCES\" --scratch \"$RUNNER_TEMP/shared-javascript\" --json\npnpm --filter @open-design/web build:sidecar"
+            "group": "workspace-restoration"
           }
         ],
         "common": [
