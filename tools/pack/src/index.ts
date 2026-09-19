@@ -1,5 +1,6 @@
 import { cac } from "cac";
 import type { CAC } from "cac";
+import { emitBuildRecord } from "./build-record.js";
 
 import { resolveToolPackConfig, type ToolPackCliOptions, type ToolPackPlatform } from "./config/index.js";
 import {
@@ -91,6 +92,7 @@ const TO_HELP_BY_PLATFORM: Record<ToolPackPlatform, string> = {
 function addBuildOptions(command: CacCommand, platform: ToolPackPlatform) {
   return command
     .option("--app-version <version>", "override packaged app version for release artifacts")
+    .option("--build-json <path>", "write a successful build/package result to this JSON path")
     .option("--portable", "do not bake local tools-pack runtime roots into the packaged config")
     .option("--require-vela-cli", "fail packaging when the bundled Vela CLI cannot be resolved")
     .option("--signed", "build a signed mac artifact")
@@ -151,11 +153,11 @@ addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging c
     const config = resolveToolPackConfig("mac", options);
     switch (action) {
       case "build":
-        printJson(await packMac(config));
+        emitBuildRecord(await packMac(config), options.buildJson);
         return;
       case "package":
         if (options.macRuntimeProduct != null) await validateMacRuntimeProductRoot(config, options.macRuntimeProduct);
-        printJson(await packageMac(config, options.macRuntimeProduct));
+        emitBuildRecord(await packageMac(config, options.macRuntimeProduct), options.buildJson);
         return;
       case "runtime-export":
         if (options.output == null) throw new Error("mac runtime-export requires --output");
@@ -211,10 +213,10 @@ addWinLifecycleOptions(
   const config = resolveToolPackConfig("win", options);
   switch (action) {
     case "build":
-      printJson(await packWin(config));
+      emitBuildRecord(await packWin(config), options.buildJson);
       return;
     case "package":
-      printJson(await packageWin(config));
+      emitBuildRecord(await packageWin(config), options.buildJson);
       return;
     case "install":
       printJson(await installPackedWinApp(config));
@@ -273,7 +275,7 @@ addBuildOptions(addSharedOptions(cli.command("linux <action>", "Linux packaging 
     const config = resolveToolPackConfig("linux", options);
     switch (action) {
       case "build":
-        printJson(await packLinux(config));
+        emitBuildRecord(await packLinux(config), options.buildJson);
         return;
       case "install": {
         const mode = resolveLinuxLifecycleMode(options, "install");

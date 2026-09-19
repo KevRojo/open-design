@@ -21,6 +21,7 @@ export type ToolPackVelaWebUrls = Partial<Record<ToolPackAmrProfile, string>>;
 export type ToolPackCliOptions = {
   appVersion?: string;
   archive?: string;
+  buildJson?: string;
   cacheDir?: string;
   containerized?: boolean;
   dir?: string;

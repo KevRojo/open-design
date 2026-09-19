@@ -741,6 +741,7 @@ jobs:
             --namespace release-beta
             --portable
             --app-version "${{ needs.release_prepare.outputs.beta_version }}"
+            --build-json "$RUNNER_TEMP/release-build/mac_arm64/build.json"
             --mac-compression "${{ inputs.mac_compression }}"
             --to "${{ inputs.mac_arm64_target }}"
             --json
@@ -752,13 +753,7 @@ jobs:
             notarize) build_args+=(--signed --notarize) ;;
             *) echo "unsupported mac_arm64_sign_mode: ${{ inputs.mac_arm64_sign_mode }}" >&2; exit 1 ;;
           esac
-          if build_output="$(pnpm "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_arm64/build.log" >&2))"; then
-            printf '%s\n' "$build_output" | tee "$RUNNER_TEMP/release-build/mac_arm64/build.json"
-          else
-            build_status=$?
-            printf '%s\n' "$build_output"
-            exit "$build_status"
-          fi
+          pnpm "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_arm64/build.log" >&2)
       - name: Upload mac_arm64 DMG for manual distribution
         if: ${{ 'mac_arm64' != 'linux_x64' && ((!cancelled() && !inputs.publish)) }}
         uses: actions/upload-artifact@v7
@@ -784,17 +779,17 @@ jobs:
           fi
           update_build_json_path="$RUNNER_TEMP/release-work/mac_arm64/mac-tools-pack-update-build.json"
           mkdir -p "$(dirname "$update_build_json_path")"
-          update_output="$(pnpm exec tools-pack mac build \
+          pnpm exec tools-pack mac build \
             --dir "$RUNNER_TEMP/release-work/mac_arm64/tools-pack-update-fixture" \
             --cache-dir "$RUNNER_TEMP/tools-pack-cache" \
             --namespace release-beta \
             --portable \
             --app-version "$update_version" \
+            --build-json "$update_build_json_path" \
             --mac-compression "${{ inputs.mac_compression }}" \
             --to dmg \
             --require-vela-cli \
-            --json)"
-          printf '%s\n' "$update_output" > "$update_build_json_path"
+            --json
           {
             echo "update_build_json_path=$update_build_json_path"
             echo "update_version=$update_version"
@@ -1068,6 +1063,7 @@ jobs:
             --namespace release-beta-x64
             --portable
             --app-version "${{ needs.release_prepare.outputs.beta_version }}"
+            --build-json "$RUNNER_TEMP/release-build/mac_x64/build.json"
             --mac-runtime-product "$RUNNER_TEMP/mac-runtime-product"
             --mac-compression "${{ inputs.mac_compression }}"
             --to "${{ inputs.mac_x64_target }}"
@@ -1080,13 +1076,7 @@ jobs:
             notarize) build_args+=(--signed --notarize) ;;
             *) echo "unsupported mac_x64_sign_mode: ${{ inputs.mac_x64_sign_mode }}" >&2; exit 1 ;;
           esac
-          if build_output="$(node "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2))"; then
-            printf '%s\n' "$build_output" | tee "$RUNNER_TEMP/release-build/mac_x64/build.json"
-          else
-            build_status=$?
-            printf '%s\n' "$build_output"
-            exit "$build_status"
-          fi
+          node "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2)
       - name: "[prepare] Full smoke dependencies"
         if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
         uses: ./.github/actions/setup-workspace
@@ -1307,12 +1297,11 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
           pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
-          $buildArgs = @("exec", "tools-pack", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.release_prepare.outputs.beta_version }}", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
+          $buildArgs = @("exec", "tools-pack", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.release_prepare.outputs.beta_version }}", "--build-json", "${{ runner.temp }}\release-build\win_x64\build.json", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
-          $buildOutput = pnpm.cmd @buildArgs
+          pnpm.cmd @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win build failed with exit code $LASTEXITCODE" }
-          $buildOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\build.json" -Encoding utf8
-          $build = $buildOutput | ConvertFrom-Json
+          $build = Get-Content -Raw "${{ runner.temp }}\release-build\win_x64\build.json" | ConvertFrom-Json
           pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.release_prepare.outputs.beta_version }}" --json
       - name: Upload win_x64 installer for manual distribution
         if: ${{ 'win_x64' != 'linux_x64' && ((!cancelled() && !inputs.publish)) }}
@@ -1332,12 +1321,11 @@ jobs:
           $match = [regex]::Match("${{ needs.release_prepare.outputs.beta_version }}", "^(?<base>\d+\.\d+\.\d+)-beta\.(?<number>\d+)$")
           if (-not $match.Success) { throw "full Windows smoke requires a counted beta version; got ${{ needs.release_prepare.outputs.beta_version }}" }
           $updateVersion = "{0}-beta.{1}" -f $match.Groups["base"].Value, ([int]$match.Groups["number"].Value + 1)
-          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\release-work\win_x64\tools-pack-update-fixture", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--app-version", $updateVersion, "--to", "nsis", "--require-vela-cli", "--json")
+          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\release-work\win_x64\tools-pack-update-fixture", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--app-version", $updateVersion, "--build-json", "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json", "--to", "nsis", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
-          $updateOutput = pnpm.cmd @buildArgs
+          pnpm.cmd @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win update fixture failed with exit code $LASTEXITCODE" }
-          $updateOutput | Set-Content -Path "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json" -Encoding utf8
-          $updateBuild = $updateOutput | ConvertFrom-Json
+          $updateBuild = Get-Content -Raw "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json" | ConvertFrom-Json
           pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $updateBuild.payloadPath --expected-version $updateVersion --json
       - name: Smoke beta win_x64 packaged runtime
         id: win_x64_smoke

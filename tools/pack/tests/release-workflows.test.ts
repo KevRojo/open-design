@@ -215,7 +215,7 @@ describe("release workflows", () => {
     };
 
     expect(macX64Producer).toContain(
-      "install-profile: ${{ fromJSON(needs.plan.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.plan.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
+      "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
     );
     expect(macX64Producer).toContain("[build] mac_x64 runtime");
     expect(macX64Producer).toContain("mac runtime-export");
@@ -260,11 +260,11 @@ describe("release workflows", () => {
       readFile(new URL("../../../apps/desktop/src/main/updater/payload.ts", import.meta.url), "utf8"),
       readFile(new URL("../../../scripts/install-unsafe-dmg.sh", import.meta.url), "utf8"),
     ]);
-    const mac = sectionBetween(beta, "      - name: Build beta mac_arm64", "      - name: Prepare mac_x64 signing certificate");
-    const macX64 = sectionBetween(beta, "      - name: Prepare mac_x64 signing certificate", "      - name: Build beta win_x64");
-    const win = sectionBetween(beta, "      - name: Build beta win_x64", "  publish:");
+    const mac = sectionBetween(beta, "  build_mac_arm64:", "  build_mac_x64:");
+    const macX64 = sectionBetween(beta, "  build_mac_x64:", "  build_win_x64:");
+    const win = sectionBetween(beta, "  build_win_x64:", "  build_linux_x64:");
     const linux = sectionBetween(beta, "      - name: Build beta linux_x64", "  publish:");
-    const betaMetadata = sectionBetween(beta, "  release_prepare:", "  plan:");
+    const betaMetadata = sectionBetween(beta, "  release_prepare:", "  common:");
     const betaPublish = sectionAfter(beta, "  publish:");
     const prereleaseMetadata = sectionBetween(prerelease, "  metadata:", "  dispatch_validation:");
     const prereleasePublish = sectionBetween(prerelease, "  publish:", "  cleanup_partial_release_assets:");
@@ -351,7 +351,7 @@ describe("release workflows", () => {
     expect(desktopUpdater).toContain('execFileAsync("xattr", ["-dr", attribute, input.destinationRoot])');
     expect(desktopUpdater).toContain("com.apple.macl");
     expect(installUnsafeDmg).toContain("com.apple.macl");
-    expect(win).toContain("-IncludeZip $${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}");
+    expect(win).toContain("WIN_INCLUDE_ZIP: ${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}");
     expect(prepareMac).not.toContain("required RELEASE_ASSET_SUFFIX");
     expect(prepareMac).toContain('RELEASE_ASSET_SUFFIX="${RELEASE_ASSET_SUFFIX:-}"');
     expect(prepareWin).toContain("[AllowEmptyString()]");
