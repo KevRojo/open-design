@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// Temporary release-beta web-test boundary probe; remove after the experiment.
 //
 // Regression test for "PostHog session replay is enabled but privacy-masked".
 //
