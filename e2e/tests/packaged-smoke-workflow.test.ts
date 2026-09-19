@@ -2463,7 +2463,7 @@ process.stdin.on("end", () => {
 
   });
 
-  it("[P1] consumes shared JavaScript and one test matrix from configuration", async () => {
+  it("[P1] runs shared JavaScript as one named job and tests as one matrix", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const config = JSON.parse(await readFile(join(workspaceRoot, ".github/config/convergence/release-beta.json"), "utf8"));
     const { workloads, matrices } = config.workflows["release-beta"];
@@ -2479,7 +2479,10 @@ process.stdin.on("end", () => {
     }
     expect(matrices.common).toHaveLength(1);
     expect(matrices.common[0].workloads).toEqual(["source_js_packages", "source_js_daemon", "source_js_shell"]);
-    expect(workflow.match(/    strategy:/g)).toHaveLength(2);
+    expect(workflow.match(/    strategy:/g)).toHaveLength(1);
+    const common = workflowJob(workflow, "common");
+    expect(common).toContain("runs-on: ${{ fromJSON(needs.release_prepare.outputs.common_matrix).include[0].runner || 'ubuntu-latest' }}");
+    expect(common).toContain("current-job: '[build] Shared JavaScript'");
     expect(workflow).toContain("  build_linux_x64:");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
     expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py prepare");
