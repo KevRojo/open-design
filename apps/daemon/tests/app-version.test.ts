@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// Temporary release-beta daemon-test boundary probe; remove after the experiment.
 import {
   APP_VERSION_FALLBACK,
   isPackagedRuntime,
