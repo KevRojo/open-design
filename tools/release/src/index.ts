@@ -53,6 +53,13 @@ cli
   });
 
 cli
+  .command("prepare-platform-assets", "Stage versioned platform assets and updater metadata")
+  .action(async () => {
+    const { preparePlatformAssets } = await import("./storage/prepare-platform-assets.ts");
+    await preparePlatformAssets();
+  });
+
+cli
   .command("publish-dsh-bootstrap", "Publish immutable DeepSeek Harness bootstrap installers")
   .action(async () => {
     await import("./storage/publish-dsh-bootstrap.ts");

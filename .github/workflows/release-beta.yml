@@ -854,7 +854,7 @@ jobs:
           RELEASE_TARGET: mac_arm64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
-        run: bash tools/release/scripts/prepare-platform-assets.sh
+        run: pnpm exec tools-release prepare-platform-assets
       - name: Publish mac_arm64 platform
         if: ${{ (inputs.publish) }}
         env:
@@ -1138,7 +1138,7 @@ jobs:
           RELEASE_TARGET: mac_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
-        run: bash tools/release/scripts/prepare-platform-assets.sh
+        run: node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" prepare-platform-assets
       - name: Publish mac_x64 platform
         if: ${{ (inputs.publish) }}
         env:
@@ -1381,18 +1381,16 @@ jobs:
         run: Get-Content "${{ runner.temp }}\release-report\win_x64\summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
       - name: Prepare win_x64 assets
         if: ${{ (inputs.publish) }}
-        shell: pwsh
-        run: |
-          tools\release\scripts\prepare-platform-assets.ps1 `
-            -ReleaseTarget win_x64 `
-            -ReleaseAssetsDir "${{ runner.temp }}\release-assets\win_x64" `
-            -BuildJsonPath "${{ runner.temp }}\release-build\win_x64\build.json" `
-            -ReleaseNamespace release-beta-win `
-            -ReleaseVersion "${{ needs.release_prepare.outputs.beta_version }}" `
-            -ReleaseAssetSuffix ".unsigned" `
-            -ReleaseChannel beta `
-            -ReleasePublicOrigin "${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}" `
-            -IncludeZip $${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}
+        env:
+          RELEASE_ASSET_SUFFIX: .unsigned
+          RELEASE_ASSETS_DIR: ${{ runner.temp }}\release-assets\win_x64
+          RELEASE_BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json
+          RELEASE_CHANNEL: beta
+          RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
+          RELEASE_TARGET: win_x64
+          RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
+          WIN_INCLUDE_ZIP: ${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}
+        run: pnpm exec tools-release prepare-platform-assets
       - name: Publish win_x64 platform
         if: ${{ (inputs.publish) }}
         env:
