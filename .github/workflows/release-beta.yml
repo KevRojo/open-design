@@ -521,7 +521,7 @@ jobs:
         run: pnpm exec tools-release prepare-release-note
 
   common:
-    name: ${{ matrix.name || '[build] Shared JavaScript' }}
+    name: "[build] Shared JavaScript"
     outputs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}

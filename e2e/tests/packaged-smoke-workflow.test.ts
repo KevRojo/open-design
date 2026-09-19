@@ -2452,6 +2452,7 @@ process.stdin.on("end", () => {
       for (const unit of ["packages", "daemon", "shell"]) expect(job).not.toContain(`[build] Source ${unit}`);
     }
     const common = workflowJob(workflow, "common");
+    expect(common).toContain('name: "[build] Shared JavaScript"');
     for (const unit of ["packages", "daemon", "shell"]) {
       expect(common).toContain(`[build] Source ${unit}`);
       expect(config.workflows["release-beta"].workloads[`source_js_${unit}`]).toMatchObject({
