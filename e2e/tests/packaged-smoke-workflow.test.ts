@@ -2387,7 +2387,7 @@ process.stdin.on("end", () => {
   it("[P1] consumes public source results before native packaging without a source-test gate", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publicationIds = [...workflow.matchAll(/^          id: (beta-[^\n]+)$/gm)].map((match) => match[1]!);
-    expect(publicationIds).toHaveLength(8);
+    expect(publicationIds).toHaveLength(9);
     expect(new Set(publicationIds).size).toBe(publicationIds.length);
     const action = await readFile(join(workspaceRoot, ".github/actions/convergence/action.yml"), "utf8");
     expect(action).toContain('--config "$CONFIG" handoff');
