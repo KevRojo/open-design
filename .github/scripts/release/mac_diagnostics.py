@@ -13,21 +13,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-INTERESTING_PROCESSES = ("mds", "mdworker", "mdimport", "dmgbuild", "codesign", "ditto", "7za", "hdiutil", "notarytool")
+INTERESTING_PROCESSES = (
+    "mds", "mdworker", "mdimport", "dmgbuild", "codesign", "ditto", "7za", "hdiutil",
+    "notarytool", "diskimage", "python", "node", "app-builder", "xcrun",
+)
 
 
-def probe(command: list[str], timeout: float = 5) -> str:
+def probe(command: list[str], timeout: float = 5, max_output: int | None = 3000) -> str:
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
         if result.returncode:
             return f"exit={result.returncode} {result.stderr.strip()[:200]}"
-        return result.stdout.strip()[:3000]
+        return result.stdout.strip()[:max_output]
     except (OSError, subprocess.TimeoutExpired) as error:
         return f"{type(error).__name__}: {str(error)[:200]}"
 
 
 def processes() -> list[dict[str, str | float]]:
-    output = probe(["ps", "-A", "-o", "pid=,ppid=,%cpu=,%mem=,comm="])
+    output = probe(["ps", "-A", "-o", "pid=,ppid=,%cpu=,%mem=,comm="], max_output=None)
     rows: list[dict[str, str | float]] = []
     for line in output.splitlines():
         parts = line.split(maxsplit=4)
@@ -38,8 +41,8 @@ def processes() -> list[dict[str, str | float]]:
         except ValueError:
             continue
     leaders = sorted(rows, key=lambda row: float(row["cpu"]), reverse=True)[:8]
-    spotlight = [row for row in rows if any(str(row["command"]).startswith(name) for name in INTERESTING_PROCESSES)]
-    return list({str(row["pid"]): row for row in [*leaders, *spotlight]}.values())
+    selected = [row for row in rows if any(str(row["command"]).startswith(name) for name in INTERESTING_PROCESSES)]
+    return list({str(row["pid"]): row for row in [*leaders, *selected]}.values())
 
 
 def sample() -> dict[str, object]:
