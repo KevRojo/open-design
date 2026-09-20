@@ -136,9 +136,10 @@ Keep platform workload/cache/Electron chains and independent test/cache chains
 directly in `release-beta.yml`, without additional wrapper workflows. A cold
 platform product must publish through the shared Python commands before its
 Electron consumer runs. Hot workloads skip build/publication, not Electron,
-for publish and build-only deliveries; the explicit test-only mode requests no
-native product and prunes platform workload/Electron jobs. Consumers use frozen
-Plan references. Each test workload publishes only
+when a platform is enabled. With `publish=false` and all platform inputs off,
+beta runs Plan-selected tests without requesting a native product; existing
+`publish=false` builds with enabled platforms remain unchanged. Consumers use
+frozen Plan references. Each test workload publishes only
 after its complete declared shard set succeeds, independently of other tests.
 Beta distribution may publish while tests run; downloaded-artifact validation
 joins the test and publication branches without making tests a CDN gate.

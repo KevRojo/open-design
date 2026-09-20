@@ -22,15 +22,11 @@ on:
         required: true
         type: boolean
         default: false
-      delivery_mode:
-        description: "Publish, build without publishing, or run Plan-selected tests without platform builds."
+      publish:
+        description: "Publish beta assets and metadata. With publish=false and all platforms disabled, run only Plan-selected tests."
         required: true
-        type: choice
-        options:
-          - publish
-          - build-only
-          - test-only
-        default: publish
+        type: boolean
+        default: true
       force:
         description: "Allow a beta build whose base version is not greater than the current stable/beta feed."
         required: true
@@ -190,10 +186,10 @@ on:
         required: false
         type: boolean
         default: false
-      delivery_mode:
+      publish:
         required: false
-        type: string
-        default: publish
+        type: boolean
+        default: true
       force:
         required: false
         type: boolean
@@ -328,10 +324,10 @@ concurrency:
 env:
   BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}
   OPEN_DESIGN_TELEMETRY_RELAY_URL: ${{ vars.OPEN_DESIGN_TELEMETRY_RELAY_URL }}
-  POSTHOG_KEY: ${{ inputs.delivery_mode == 'publish' && secrets.POSTHOG_KEY || '' }}
-  POSTHOG_HOST: ${{ inputs.delivery_mode == 'publish' && vars.POSTHOG_HOST || '' }}
-  POSTHOG_CLI_API_KEY: ${{ inputs.delivery_mode == 'publish' && secrets.POSTHOG_CLI_API_KEY || '' }}
-  POSTHOG_CLI_PROJECT_ID: ${{ inputs.delivery_mode == 'publish' && vars.POSTHOG_CLI_PROJECT_ID || '' }}
+  POSTHOG_KEY: ${{ inputs.publish && secrets.POSTHOG_KEY || '' }}
+  POSTHOG_HOST: ${{ inputs.publish && vars.POSTHOG_HOST || '' }}
+  POSTHOG_CLI_API_KEY: ${{ inputs.publish && secrets.POSTHOG_CLI_API_KEY || '' }}
+  POSTHOG_CLI_PROJECT_ID: ${{ inputs.publish && vars.POSTHOG_CLI_PROJECT_ID || '' }}
   # Vela web console origin for the AMR profile this build targets. Held in a
   # per-profile repository secret instead of the source tree: the non-prod AMR
   # environments are internal deployments and this repository is public, so
@@ -457,7 +453,7 @@ jobs:
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
       - name: Validate shared beta publisher
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           built_sha="$(git rev-parse HEAD)"
@@ -487,20 +483,16 @@ jobs:
       - name: Validate beta inputs
         run: |
           set -euo pipefail
-          case "${{ inputs.delivery_mode }}" in
-            publish|build-only|test-only) ;;
-            *) echo "unsupported beta delivery_mode: ${{ inputs.delivery_mode }}" >&2; exit 1 ;;
-          esac
-          if [ "${{ inputs.delivery_mode }}" != "test-only" ] && [ "${{ inputs.enable_mac_arm64 }}" != "true" ] && [ "${{ inputs.enable_win_x64 }}" != "true" ] && [ "${{ inputs.enable_mac_x64 }}" != "true" ] && [ "${{ inputs.enable_linux_x64 }}" != "true" ]; then
-            echo "release-beta requires at least one target to be enabled" >&2
+          if [ "${{ inputs.publish }}" = "true" ] && [ "${{ inputs.enable_mac_arm64 }}" != "true" ] && [ "${{ inputs.enable_win_x64 }}" != "true" ] && [ "${{ inputs.enable_mac_x64 }}" != "true" ] && [ "${{ inputs.enable_linux_x64 }}" != "true" ]; then
+            echo "published release-beta requires at least one target to be enabled" >&2
             exit 1
           fi
-          if [ "${{ inputs.delivery_mode == 'publish' }}" = "true" ] && [ "${{ inputs.enable_win_x64 }}" = "true" ] && [ "${{ inputs.win_x64_target }}" != "nsis" ] && [ "${{ inputs.win_x64_target }}" != "all" ]; then
+          if [ "${{ inputs.publish }}" = "true" ] && [ "${{ inputs.enable_win_x64 }}" = "true" ] && [ "${{ inputs.win_x64_target }}" != "nsis" ] && [ "${{ inputs.win_x64_target }}" != "all" ]; then
             echo "release-beta publish requires win_x64_target=nsis or all so the installer and updater feed are produced" >&2
             exit 1
           fi
       - name: Validate R2 release access
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           GITHUB_SHA: ${{ env.BUILT_SHA }}
           R2_ACCESS_PROBE_NAME: release-beta
@@ -521,7 +513,7 @@ jobs:
           OPEN_DESIGN_RELEASE_FORCE: ${{ inputs.force && '1' || '' }}
         run: pnpm exec tools-release prepare beta
       - name: Validate built release-note command before native packaging
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_CHANNEL: beta
           RELEASE_VERSION: ${{ inputs.release_version != '' && inputs.release_version || steps.beta.outputs.beta_version }}
@@ -606,7 +598,7 @@ jobs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_arm64 workload"
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_mac_arm64 && inputs.delivery_mode != 'test-only' && needs.release_prepare.outputs.contribution == 'true' && fromJSON(needs.release_prepare.outputs.requests).source_mac_arm64.web.operation == 'build' }}
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_mac_arm64 && needs.release_prepare.outputs.contribution == 'true' && fromJSON(needs.release_prepare.outputs.requests).source_mac_arm64.web.operation == 'build' }}
     runs-on: macos-14
     defaults:
       run:
@@ -674,7 +666,7 @@ jobs:
       - release_prepare
       - common
       - source_mac_arm64
-    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_arm64 && inputs.delivery_mode != 'test-only' }}
+    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_arm64 }}
     runs-on: macos-14
     defaults:
       run:
@@ -760,7 +752,7 @@ jobs:
           esac
           pnpm "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_arm64/build.log" >&2)
       - name: Upload mac_arm64 DMG for manual distribution
-        if: ${{ !cancelled() && inputs.delivery_mode == 'build-only' }}
+        if: ${{ !cancelled() && !inputs.publish }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-mac-arm64-dmg
@@ -842,7 +834,7 @@ jobs:
         if: ${{ !cancelled() && steps.report_mac_arm64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_arm64/summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare mac_arm64 assets
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ARTIFACT_MODE: dmg-and-payload
           RELEASE_ASSET_SUFFIX: .signed
@@ -856,7 +848,7 @@ jobs:
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: pnpm exec tools-release prepare-platform-assets
       - name: Publish mac_arm64 platform
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ASSET_SUFFIX: .signed
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_arm64
@@ -879,7 +871,7 @@ jobs:
         run: pnpm exec tools-release publish-platform
       - name: Read mac_arm64 platform outputs
         id: mac_arm64_platform_outputs
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -891,7 +883,7 @@ jobs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_x64 workload"
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_mac_x64 && inputs.delivery_mode != 'test-only' && needs.release_prepare.outputs.contribution == 'true' && (fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.executor.operation == 'build' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build') }}
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_mac_x64 && needs.release_prepare.outputs.contribution == 'true' && (fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.executor.operation == 'build' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build') }}
     runs-on: macos-15-intel
     defaults:
       run:
@@ -985,7 +977,7 @@ jobs:
       - release_prepare
       - common
       - source_mac_x64
-    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_x64 && inputs.delivery_mode != 'test-only' }}
+    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_mac_x64 }}
     runs-on: macos-15-intel
     defaults:
       run:
@@ -1122,7 +1114,7 @@ jobs:
         if: ${{ !cancelled() && steps.report_mac_x64.outcome == 'success' }}
         run: cat "${{ runner.temp }}/release-report/mac_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare mac_x64 assets
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ARTIFACT_MODE: ${{ inputs.mac_x64_target == 'all' && 'all' || 'dmg-and-payload' }}
           RELEASE_ASSET_SUFFIX: ${{ inputs.mac_x64_sign_mode != 'no' && '.signed' || '.unsigned' }}
@@ -1135,7 +1127,7 @@ jobs:
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" prepare-platform-assets
       - name: Publish mac_x64 platform
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ASSET_SUFFIX: ${{ inputs.mac_x64_sign_mode != 'no' && '.signed' || '.unsigned' }}
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/mac_x64
@@ -1155,7 +1147,7 @@ jobs:
         run: node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" publish-platform
       - name: Read mac_x64 platform outputs
         id: mac_x64_platform_outputs
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -1167,7 +1159,7 @@ jobs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] win_x64 workload"
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_win_x64 && inputs.delivery_mode != 'test-only' && needs.release_prepare.outputs.contribution == 'true' && fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' }}
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_win_x64 && needs.release_prepare.outputs.contribution == 'true' && fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' }}
     runs-on: windows-latest
     defaults:
       run:
@@ -1235,7 +1227,7 @@ jobs:
       - release_prepare
       - common
       - source_win_x64
-    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_win_x64 && inputs.delivery_mode != 'test-only' }}
+    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_win_x64 }}
     runs-on: windows-latest
     defaults:
       run:
@@ -1309,7 +1301,7 @@ jobs:
           $build = Get-Content -Raw "${{ runner.temp }}\release-build\win_x64\build.json" | ConvertFrom-Json
           pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.release_prepare.outputs.beta_version }}" --json
       - name: Upload win_x64 installer for manual distribution
-        if: ${{ !cancelled() && inputs.delivery_mode == 'build-only' }}
+        if: ${{ !cancelled() && !inputs.publish }}
         uses: actions/upload-artifact@v7
         with:
           name: open-design-beta-win-x64-installer
@@ -1373,7 +1365,7 @@ jobs:
         shell: pwsh
         run: Get-Content "${{ runner.temp }}\release-report\win_x64\summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
       - name: Prepare win_x64 assets
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}\release-assets\win_x64
@@ -1385,7 +1377,7 @@ jobs:
           WIN_INCLUDE_ZIP: ${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}
         run: pnpm exec tools-release prepare-platform-assets
       - name: Publish win_x64 platform
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}\release-assets\win_x64
@@ -1406,7 +1398,7 @@ jobs:
         run: pnpm exec tools-release publish-platform
       - name: Read win_x64 platform outputs
         id: win_x64_platform_outputs
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -1420,7 +1412,7 @@ jobs:
     needs:
       - release_prepare
       - common
-    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_linux_x64 && inputs.delivery_mode != 'test-only' }}
+    if: ${{ !cancelled() && needs.release_prepare.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && inputs.enable_linux_x64 }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -1485,7 +1477,7 @@ jobs:
         if: ${{ (always()) }}
         run: cat "${{ runner.temp }}/release-report/linux_x64/summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare linux_x64 assets
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/linux_x64
@@ -1497,7 +1489,7 @@ jobs:
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
         run: bash tools/release/scripts/prepare-platform-assets.sh
       - name: Publish linux_x64 platform
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           RELEASE_ASSET_SUFFIX: .unsigned
           RELEASE_ASSETS_DIR: ${{ runner.temp }}/release-assets/linux_x64
@@ -1518,7 +1510,7 @@ jobs:
         run: pnpm exec tools-release publish-platform
       - name: Read linux_x64 platform outputs
         id: linux_x64_platform_outputs
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -1537,7 +1529,7 @@ jobs:
       ${{
         always() &&
         !cancelled() &&
-        inputs.delivery_mode == 'publish' &&
+        inputs.publish &&
         needs.release_prepare.outputs.promote == 'true' &&
         needs.release_prepare.result == 'success' &&
         (inputs.enable_mac_arm64 || inputs.enable_win_x64 || inputs.enable_mac_x64 || inputs.enable_linux_x64) &&
@@ -1805,7 +1797,7 @@ jobs:
         always() && !cancelled() &&
         inputs.enable_mac_arm64 &&
         inputs.mac_arm64_smoke_mode == 'core' &&
-        inputs.delivery_mode == 'publish' && needs.publish.outputs.version_metadata_url != ''
+        inputs.publish && needs.publish.outputs.version_metadata_url != ''
       }}
     runs-on: macos-14
     timeout-minutes: 45
@@ -1833,7 +1825,7 @@ jobs:
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
@@ -1879,7 +1871,7 @@ jobs:
         always() && !cancelled() &&
         inputs.enable_mac_x64 &&
         inputs.mac_x64_smoke_mode == 'core' &&
-        inputs.delivery_mode == 'publish' && needs.publish.outputs.version_metadata_url != ''
+        inputs.publish && needs.publish.outputs.version_metadata_url != ''
       }}
     runs-on: macos-15-intel
     timeout-minutes: 45
@@ -1907,7 +1899,7 @@ jobs:
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
@@ -1953,7 +1945,7 @@ jobs:
         always() && !cancelled() &&
         inputs.enable_win_x64 &&
         inputs.win_x64_smoke_mode == 'core' &&
-        inputs.delivery_mode == 'publish' && needs.publish.outputs.version_metadata_url != ''
+        inputs.publish && needs.publish.outputs.version_metadata_url != ''
       }}
     runs-on: windows-latest
     timeout-minutes: 45
@@ -1981,7 +1973,7 @@ jobs:
         env:
           OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
-        if: ${{ inputs.delivery_mode == 'publish' }}
+        if: ${{ inputs.publish }}
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/win_x64/build.json
           TOOLS_PACK_DIR: ${{ runner.temp }}/tools-pack
