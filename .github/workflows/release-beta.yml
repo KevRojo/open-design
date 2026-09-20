@@ -1277,6 +1277,12 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: "[prepare] Workspace package links"
+        shell: pwsh
+        run: >-
+          node "$env:RELEASE_EXECUTOR_ROOT\pack\node_modules\pnpm\bin\pnpm.cjs"
+          install --frozen-lockfile --prod --ignore-scripts --prefer-offline
+          --filter @open-design/packaged...
       - name: "[restore] Shared JavaScript"
         shell: pwsh
         run: node "$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs" workspace ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$env:WORKSPACE_SOURCES" --scratch "$env:RUNNER_TEMP\shared-javascript" --json

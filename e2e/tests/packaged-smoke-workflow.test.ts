@@ -2347,7 +2347,8 @@ process.stdin.on("end", () => {
         expect(job).not.toContain("uses: actions/setup-node");
       }
       expect(job).not.toContain("run: pnpm install --frozen-lockfile");
-      expect(job).not.toContain("--ignore-scripts");
+      if (target === "win_x64") expect(job).toContain("install --frozen-lockfile --prod --ignore-scripts");
+      else expect(job).not.toContain("--ignore-scripts");
     }
     const linux = betaPlatformBuild(workflow, "linux_x64");
     expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
@@ -2458,6 +2459,8 @@ process.stdin.on("end", () => {
         expect(source).toContain("[build] Release executor");
         expect(source).toContain("executor:dev export");
         expect(job).toContain("[restore] Release executor");
+        expect(job).toContain("[prepare] Workspace package links");
+        expect(job).toContain("--filter @open-design/packaged...");
         expect(job).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs"');
         expect(config.workflows["release-beta"].workloads.source_win_x64_executor).toMatchObject({
           inputs: ["suite://platform-executor"], products: "manifest", runnerClass: "source_win_x64",
