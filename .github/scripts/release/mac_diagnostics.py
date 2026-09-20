@@ -15,7 +15,7 @@ from pathlib import Path
 
 INTERESTING_PROCESSES = (
     "mds", "mdworker", "mdimport", "dmgbuild", "codesign", "ditto", "7za", "hdiutil",
-    "notarytool", "diskimage", "python", "node", "app-builder", "xcrun",
+    "notarytool", "diskimage", "python", "node", "app-builder", "xcrun", "sync", "SetFile",
 )
 
 
@@ -30,14 +30,17 @@ def probe(command: list[str], timeout: float = 5, max_output: int | None = 3000)
 
 
 def processes() -> list[dict[str, str | float]]:
-    output = probe(["ps", "-A", "-o", "pid=,ppid=,%cpu=,%mem=,comm="], max_output=None)
+    output = probe(["ps", "-A", "-o", "pid=,ppid=,%cpu=,%mem=,stat=,etime=,comm="], max_output=None)
     rows: list[dict[str, str | float]] = []
     for line in output.splitlines():
-        parts = line.split(maxsplit=4)
-        if len(parts) != 5:
+        parts = line.split(maxsplit=6)
+        if len(parts) != 7:
             continue
         try:
-            rows.append({"pid": parts[0], "ppid": parts[1], "cpu": float(parts[2]), "memory": float(parts[3]), "command": os.path.basename(parts[4])})
+            rows.append({
+                "pid": parts[0], "ppid": parts[1], "cpu": float(parts[2]), "memory": float(parts[3]),
+                "state": parts[4], "elapsed": parts[5], "command": os.path.basename(parts[6]),
+            })
         except ValueError:
             continue
     leaders = sorted(rows, key=lambda row: float(row["cpu"]), reverse=True)[:8]
