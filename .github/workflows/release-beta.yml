@@ -1272,6 +1272,10 @@ jobs:
           python3 .github/scripts/release/executor.py restore
           --url "$env:SOURCE_EXECUTOR_URL" --sha256 "$env:SOURCE_EXECUTOR_SHA256"
           --output "$env:RUNNER_TEMP\release-executor"
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6.0.8
+        with:
+          version: '10.33.2'
       - name: Setup Node.js
         uses: actions/setup-node@v6.4.0
         with:

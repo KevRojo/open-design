@@ -228,6 +228,7 @@ describe("release workflows", () => {
     expect(winX64Producer).toContain("[build] Release executor");
     expect(winX64Producer).toContain("executor:dev export");
     expect(winX64Build).toContain("[restore] Release executor");
+    expect(winX64Build).toContain("uses: pnpm/action-setup@v6.0.8");
     expect(winX64Build).toContain("[prepare] Workspace package links");
     expect(winX64Build).toContain("install --frozen-lockfile --prod --ignore-scripts --prefer-offline");
     expect(winX64Build).toContain("--filter @open-design/packaged...");

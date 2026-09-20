@@ -2459,6 +2459,7 @@ process.stdin.on("end", () => {
         expect(source).toContain("[build] Release executor");
         expect(source).toContain("executor:dev export");
         expect(job).toContain("[restore] Release executor");
+        expect(job).toContain("uses: pnpm/action-setup@v6.0.8");
         expect(job).toContain("[prepare] Workspace package links");
         expect(job).toContain("--filter @open-design/packaged...");
         expect(job).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs"');
