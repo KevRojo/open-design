@@ -135,8 +135,10 @@ or receipt protocol. CDN installation validation requires published version meta
 Keep platform workload/cache/Electron chains and independent test/cache chains
 directly in `release-beta.yml`, without additional wrapper workflows. A cold
 platform product must publish through the shared Python commands before its
-Electron consumer runs. Hot workloads skip build/publication, not Electron;
-consumers then use frozen Plan references. Each test workload publishes only
+Electron consumer runs. Hot workloads skip build/publication, not Electron,
+for publish and build-only deliveries; the explicit test-only mode requests no
+native product and prunes platform workload/Electron jobs. Consumers use frozen
+Plan references. Each test workload publishes only
 after its complete declared shard set succeeds, independently of other tests.
 Beta prepares metadata and Plan in one root job, reusing the source checkout unless
 the workflow control SHA differs. Release build and single-job test results publish

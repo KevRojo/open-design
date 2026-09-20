@@ -2529,7 +2529,7 @@ process.stdin.on("end", () => {
     expect(releasePrepare.indexOf("pnpm exec tools-release prepare beta")).toBeLessThan(
       releasePrepare.indexOf("pnpm exec tools-release prepare-release-note"),
     );
-    expect(releasePrepare).toContain("if: ${{ inputs.publish }}\n        env:\n          RELEASE_CHANNEL: beta");
+    expect(releasePrepare).toContain("if: ${{ inputs.delivery_mode == 'publish' }}\n        env:\n          RELEASE_CHANNEL: beta");
     expect(workflowJob(workflow, "source_mac_arm64")).toContain("- release_prepare");
     expect(workflowJob(workflow, "build_mac_arm64")).toContain("- release_prepare");
     expect(workflow).not.toContain("  plan_tests:");
@@ -2543,7 +2543,7 @@ process.stdin.on("end", () => {
       expect(job).toContain("always() && !cancelled()");
       expect(job).toContain(`inputs.${target}_smoke_mode == 'core'`);
       expect(job).toContain("ref: ${{ needs.release_prepare.outputs.commit }}");
-      expect(job).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
+      expect(job).toContain("inputs.delivery_mode == 'publish' && needs.publish.outputs.version_metadata_url != ''");
       expect(job).toContain("tools-release artifact resolve");
       expect(job).toContain("tools-pack stage-artifact");
       expect(job).toContain("EXPECTED_CHANNEL: beta");
@@ -2555,6 +2555,29 @@ process.stdin.on("end", () => {
       expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'`);
     }
     expect(workflow).not.toMatch(/release-beta-(tests|smoke)\.yml/);
+  });
+
+  it("[P1] gives beta publish, build-only, and test-only explicit independent branches", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    expect(workflow).toContain("      delivery_mode:");
+    expect(workflow).toContain("          - publish\n          - build-only\n          - test-only");
+    const tests = workflowJob(workflow, "test");
+    expect(tests).toContain("needs: [release_prepare, common]");
+    expect(tests).not.toContain("- build_mac_arm64");
+    expect(tests).not.toContain("- publish");
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
+      expect(workflowJob(workflow, `source_${target}`)).toContain("inputs.delivery_mode != 'test-only'");
+      expect(workflowJob(workflow, `build_${target}`)).toContain("inputs.delivery_mode != 'test-only'");
+    }
+    expect(workflowJob(workflow, "build_linux_x64")).toContain("inputs.delivery_mode != 'test-only'");
+    const publish = workflowJob(workflow, "publish");
+    expect(publish).toContain("inputs.delivery_mode == 'publish'");
+    expect(publish).not.toContain("- test");
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
+      const smoke = workflowJob(workflow, `smoke_${target}`);
+      expect(smoke).toContain("needs: [release_prepare, publish]");
+      expect(smoke).toContain("inputs.delivery_mode == 'publish'");
+    }
   });
 
   it("[P2] preserves beta linux AppImage smoke reports for platform publication", async () => {
@@ -2721,14 +2744,14 @@ process.stdin.on("end", () => {
     const manualSteps = workflow.split("\n      - name: ").filter((step) => step.startsWith("Upload") && step.includes("for manual distribution\n"));
     expect(manualSteps).toHaveLength(2);
     for (const step of manualSteps) {
-      expect(step).toContain("!cancelled() && !inputs.publish");
+      expect(step).toContain("!cancelled() && inputs.delivery_mode == 'build-only'");
       expect(step).toContain("uses: actions/upload-artifact");
       expect(step).not.toContain("RELEASE_STORAGE");
       expect(step).not.toContain("tools-release");
     }
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const smoke = workflow.slice(workflow.indexOf("\n  smoke_" + target + ":")).split(/\n  [a-z_0-9]+:/)[1]!;
-      expect(smoke).toContain("inputs.publish && needs.publish.outputs.version_metadata_url != ''");
+      expect(smoke).toContain("inputs.delivery_mode == 'publish' && needs.publish.outputs.version_metadata_url != ''");
       expect(smoke).toContain("tools-pack stage-artifact");
     }
   });
@@ -2927,7 +2950,7 @@ process.stdin.on("end", () => {
     expect(betaWorkflow).toContain(
       "RELEASE_BRANCH: ${{ inputs.ref != '' && inputs.ref || github.ref_name }}",
     );
-    expect(publisherGuard).toContain("if: ${{ inputs.publish }}");
+    expect(publisherGuard).toContain("if: ${{ inputs.delivery_mode == 'publish' }}");
     expect(publisherGuard).toContain('built_sha="$(git rev-parse HEAD)"');
     expect(publisherGuard).toContain(
       'main_sha="$(git ls-remote origin refs/heads/main | awk \'{print $1}\')"',
