@@ -894,6 +894,12 @@ jobs:
         with:
           ref: ${{ needs.release_prepare.outputs.commit }}
           fetch-depth: 1
+      - name: Disable Spotlight indexing for mac_x64 workload
+        run: |
+          set -euo pipefail
+          sudo mdutil -i off /
+          sudo mdutil -i off /System/Volumes/Data
+          mdutil -s / /System/Volumes/Data
       - name: "[validate] Source references"
         shell: bash
         env:
@@ -991,6 +997,12 @@ jobs:
         with:
           ref: ${{ needs.release_prepare.outputs.commit }}
           fetch-depth: 1
+      - name: Disable Spotlight indexing for mac_x64 build
+        run: |
+          set -euo pipefail
+          sudo mdutil -i off /
+          sudo mdutil -i off /System/Volumes/Data
+          mdutil -s / /System/Volumes/Data
       - name: "[validate] Source references"
         shell: bash
         env:
@@ -1044,12 +1056,16 @@ jobs:
         id: mac_x64_tools_pack_build
         env:
           ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
+          DEBUG: electron-builder
+          DEBUG_DMG: "true"
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           OD_WEB_SOURCEMAP_UPLOAD: ${{ !inputs.enable_mac_arm64 }}
         run: |
           set -euo pipefail
+          SECONDS=0
+          trap 'printf "[timing] mac_x64 package: %ss\n" "$SECONDS"' EXIT
           mkdir -p "$RUNNER_TEMP/release-build/mac_x64"
           rm -rf "$RUNNER_TEMP/tools-pack"
           : > "$RUNNER_TEMP/release-build/mac_x64/build.log"
