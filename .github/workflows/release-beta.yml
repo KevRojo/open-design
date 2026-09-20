@@ -1513,6 +1513,7 @@ jobs:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/linux_x64/build.json
           BUILD_LOG_PATH: ${{ runner.temp }}/release-build/linux_x64/build.log
           RELEASE_BUILD_TARGET: appimage
+          RELEASE_CHANNEL: beta
           RELEASE_NAMESPACE: release-beta-linux
           RELEASE_OUTPUTS_PATH: ${{ runner.temp }}/release-build/linux_x64/outputs.json
           RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/linux_x64
