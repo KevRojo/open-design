@@ -13,6 +13,8 @@ import { materializeCachedUnpackedForInstaller } from "@/win/builder.js";
 import winCustomInstallerSource from "@/win/custom-installer.ts?raw";
 import { createLauncherRuntimeSyncPowerShellScript } from "@/win/custom-installer.js";
 import winPayloadSource from "@/win/payload.ts?raw";
+import winZipSource from "@/win/zip.ts?raw";
+import { WIN_PORTABLE_ZIP_COMPRESSION_LEVEL } from "@/win/zip.js";
 import type { WinPaths } from "@/win/types.js";
 import { readWinExecutableVersionSnapshot } from "@/win/version-resource.js";
 
@@ -173,6 +175,12 @@ describe("Windows pack artifact boundaries", () => {
     expect(source).toContain('"-m0=LZMA2"');
     expect(source).toContain('"-mf=off"');
     expect(source).not.toContain('"-ms=off"');
+  });
+
+  it("uses the measured fast portable ZIP level and includes it in the cache identity", () => {
+    expect(WIN_PORTABLE_ZIP_COMPRESSION_LEVEL).toBe(1);
+    expect(winZipSource).toContain("`-mx=${WIN_PORTABLE_ZIP_COMPRESSION_LEVEL}`");
+    expect(winBuilderSource).toContain("compressionLevel: WIN_PORTABLE_ZIP_COMPRESSION_LEVEL");
   });
 
   it("invalidates Windows payload caches when the archive method changes", () => {

@@ -61,7 +61,7 @@ import {
   resolveWinExecutableVersionTargets,
   rewriteWinExecutableVersion,
 } from "./version-resource.js";
-import { buildWinPortableZip } from "./zip.js";
+import { buildWinPortableZip, WIN_PORTABLE_ZIP_COMPRESSION_LEVEL } from "./zip.js";
 import type {
   ElectronBuilderDirCacheMetadata,
   WinBuiltAppManifest,
@@ -882,6 +882,7 @@ export async function runElectronBuilder(
           invalidate: async () => null,
           key: hashJson({
             archiveCacheVersion: WIN_ARCHIVE_CACHE_VERSION,
+            compressionLevel: WIN_PORTABLE_ZIP_COMPRESSION_LEVEL,
             namespace: config.namespace,
             packagedAppKey,
             packagedVersion,
