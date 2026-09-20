@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +26,47 @@ MAX_PRODUCT_BYTES = 1024 * 1024 * 1024
 MAX_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ENTRIES = 100_000
 PROTOCOL = "open-design-release-executor-v1"
+PROGRESS_INTERVAL_SECONDS = 15
+
+
+def log_progress(message: str, **fields: object) -> None:
+    details = " ".join(f"{key}={value}" for key, value in fields.items())
+    print(f"[release-executor] {message}{' ' + details if details else ''}", file=sys.stderr, flush=True)
+
+
+class DownloadProgress:
+    def __init__(self, attempt: int) -> None:
+        self.attempt = attempt
+        self.started = time.monotonic()
+        self.received = 0
+        self.expected: int | None = None
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self.report_until_stopped, daemon=True)
+
+    def __enter__(self) -> DownloadProgress:
+        log_progress("download:start", attempt=self.attempt)
+        self.thread.start()
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        self.stopped.set()
+        self.thread.join()
+        self.report("download:stop")
+
+    def report_until_stopped(self) -> None:
+        while not self.stopped.wait(PROGRESS_INTERVAL_SECONDS):
+            self.report("download:heartbeat")
+
+    def report(self, event: str) -> None:
+        elapsed = max(time.monotonic() - self.started, 0.001)
+        log_progress(
+            event,
+            attempt=self.attempt,
+            elapsedSeconds=round(elapsed, 1),
+            receivedMiB=round(self.received / (1024 * 1024), 1),
+            expectedMiB=round(self.expected / (1024 * 1024), 1) if self.expected is not None else "unknown",
+            averageMiBPerSecond=round(self.received / (1024 * 1024) / elapsed, 2),
+        )
 
 
 def fail(message: str) -> None:
@@ -125,25 +168,32 @@ def download(url: str, sha256: str, destination: Path, timeout: float) -> None:
     for attempt in range(2):
         try:
             digest = hashlib.sha256()
-            received = 0
-            with urllib.request.urlopen(request, timeout=timeout) as source, destination.open("xb") as target:
-                if source.status != 200:
-                    raise OSError(f"unexpected executor response status: {source.status}")
-                while chunk := source.read(1024 * 1024):
-                    received += len(chunk)
-                    if received > MAX_PRODUCT_BYTES:
-                        fail("executor product exceeds 1 GiB")
-                    digest.update(chunk)
-                    target.write(chunk)
+            with DownloadProgress(attempt + 1) as progress:
+                with urllib.request.urlopen(request, timeout=timeout) as source, destination.open("xb") as target:
+                    if source.status != 200:
+                        raise OSError(f"unexpected executor response status: {source.status}")
+                    length = source.headers.get("Content-Length")
+                    if length is not None and length.isdigit():
+                        progress.expected = int(length)
+                    log_progress("download:connected", attempt=attempt + 1, status=source.status, expectedBytes=length or "unknown")
+                    while chunk := source.read(1024 * 1024):
+                        progress.received += len(chunk)
+                        if progress.received > MAX_PRODUCT_BYTES:
+                            fail("executor product exceeds 1 GiB")
+                        digest.update(chunk)
+                        target.write(chunk)
             if digest.hexdigest() != sha256:
                 fail("executor product digest mismatch")
+            log_progress("download:verified", attempt=attempt + 1, bytes=progress.received)
             return
         except urllib.error.HTTPError as error:
             destination.unlink(missing_ok=True)
+            log_progress("download:http-error", attempt=attempt + 1, status=error.code)
             if attempt or error.code not in {408, 429, 500, 502, 503, 504}:
                 raise
-        except (TimeoutError, ConnectionError, urllib.error.URLError):
+        except (TimeoutError, ConnectionError, urllib.error.URLError) as error:
             destination.unlink(missing_ok=True)
+            log_progress("download:network-error", attempt=attempt + 1, error=type(error).__name__)
             if attempt:
                 raise
 
@@ -166,11 +216,16 @@ def append_environment(destination: Path) -> None:
 def restore(args: argparse.Namespace) -> int:
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="release-executor-download-", dir=output.parent) as temporary:
         product = Path(temporary) / "product.zip"
         download(args.url, args.sha256, product, args.timeout)
+        extraction_started = time.monotonic()
+        log_progress("extract:start", productBytes=product.stat().st_size)
         manifest = extract_executor(product, output)
+        log_progress("extract:done", elapsedSeconds=round(time.monotonic() - extraction_started, 1))
     append_environment(output)
+    log_progress("restore:done", elapsedSeconds=round(time.monotonic() - started, 1))
     print(json.dumps({"manifest": manifest, "output": str(output)}, sort_keys=True))
     return 0
 

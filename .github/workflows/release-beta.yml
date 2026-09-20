@@ -987,10 +987,12 @@ jobs:
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.release_prepare.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[restore] Release executor"
         shell: bash
-        run: >-
-          python3 .github/scripts/release/executor.py restore
-          --url "$SOURCE_EXECUTOR_URL" --sha256 "$SOURCE_EXECUTOR_SHA256"
-          --output "$RUNNER_TEMP/release-executor"
+        run: |
+          python3 .github/scripts/release/mac_diagnostics.py \
+            --output "$RUNNER_TEMP/release-build/mac_x64/restore-resources.jsonl" \
+            -- python3 .github/scripts/release/executor.py restore \
+            --url "$SOURCE_EXECUTOR_URL" --sha256 "$SOURCE_EXECUTOR_SHA256" \
+            --output "$RUNNER_TEMP/release-executor"
       - name: "[restore] mac_x64 runtime"
         shell: bash
         run: >-
@@ -1064,7 +1066,20 @@ jobs:
             notarize) build_args+=(--signed --notarize) ;;
             *) echo "unsupported mac_x64_sign_mode: ${{ inputs.mac_x64_sign_mode }}" >&2; exit 1 ;;
           esac
-          node "${build_args[@]}" 2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2)
+          python3 .github/scripts/release/mac_diagnostics.py \
+            --output "$RUNNER_TEMP/release-build/mac_x64/runner-resources.jsonl" \
+            -- node "${build_args[@]}" \
+            2> >(tee -a "$RUNNER_TEMP/release-build/mac_x64/build.log" >&2)
+      - name: Preserve mac_x64 runner diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-design-beta-mac_x64-runner-diagnostics
+          path: |
+            ${{ runner.temp }}/release-build/mac_x64/restore-resources.jsonl
+            ${{ runner.temp }}/release-build/mac_x64/runner-resources.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
       - name: "[prepare] Full smoke dependencies"
         if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
         uses: ./.github/actions/setup-workspace
