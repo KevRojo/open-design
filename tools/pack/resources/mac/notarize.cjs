@@ -58,6 +58,7 @@ function isTransientNotaryError(error) {
     "deadlineExceeded",
     "ECONNRESET",
     "ETIMEDOUT",
+    "NSURLErrorDomain Code=-1001",
     "ENOTFOUND",
     "EAI_AGAIN",
     "socket hang up",
