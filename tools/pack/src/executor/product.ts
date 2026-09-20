@@ -160,7 +160,9 @@ export async function exportReleaseExecutorProduct(options: ReleaseExecutorExpor
   if ((await stat(output).catch(() => null)) != null) throw new Error(`release executor output already exists: ${output}`);
 
   await mkdir(dirname(output), { recursive: true });
-  const temporary = await mkdtemp(join(tmpdir(), "open-design-release-executor-"));
+  // Hosted Windows runners expose TEMP through an 8.3 path (RUNNER~1), which
+  // pnpm deploy can misclassify as relative and append to the workspace root.
+  const temporary = await realpath(await mkdtemp(join(tmpdir(), "open-design-release-executor-")));
   const stage = join(temporary, "executor");
   const runDeploy = options.runDeploy ?? defaultDeploy;
   const copyRelease = options.copyRelease ?? defaultCopyRelease;
