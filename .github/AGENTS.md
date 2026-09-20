@@ -140,6 +140,8 @@ for publish and build-only deliveries; the explicit test-only mode requests no
 native product and prunes platform workload/Electron jobs. Consumers use frozen
 Plan references. Each test workload publishes only
 after its complete declared shard set succeeds, independently of other tests.
+Beta distribution may publish while tests run; downloaded-artifact validation
+joins the test and publication branches without making tests a CDN gate.
 Beta prepares metadata and Plan in one root job, reusing the source checkout unless
 the workflow control SHA differs. Release build and single-job test results publish
 in place through the thin convergence action; product directories go directly to

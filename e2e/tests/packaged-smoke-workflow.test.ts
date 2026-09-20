@@ -2575,7 +2575,7 @@ process.stdin.on("end", () => {
     expect(publish).not.toContain("- test");
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const smoke = workflowJob(workflow, `smoke_${target}`);
-      expect(smoke).toContain("needs: [release_prepare, publish]");
+      expect(smoke).toContain("needs: [release_prepare, publish, test]");
       expect(smoke).toContain("inputs.delivery_mode == 'publish'");
     }
   });

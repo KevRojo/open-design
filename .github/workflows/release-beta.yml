@@ -1799,7 +1799,7 @@ jobs:
           CLOUDFLARE_R2_WORKLOAD_RESULTS_SK: ${{ secrets.CLOUDFLARE_R2_WORKLOAD_RESULTS_SK }}
   smoke_mac_arm64:
     name: "[validate] beta mac_arm64 downloaded artifact"
-    needs: [release_prepare, publish]
+    needs: [release_prepare, publish, test]
     if: |-
       ${{
         always() && !cancelled() &&
@@ -1873,7 +1873,7 @@ jobs:
 
   smoke_mac_x64:
     name: "[validate] beta mac_x64 downloaded artifact"
-    needs: [release_prepare, publish]
+    needs: [release_prepare, publish, test]
     if: |-
       ${{
         always() && !cancelled() &&
@@ -1947,7 +1947,7 @@ jobs:
 
   smoke_win_x64:
     name: "[validate] beta win_x64 downloaded artifact"
-    needs: [release_prepare, publish]
+    needs: [release_prepare, publish, test]
     if: |-
       ${{
         always() && !cancelled() &&
