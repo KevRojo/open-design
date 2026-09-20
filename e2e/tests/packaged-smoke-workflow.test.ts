@@ -2350,8 +2350,6 @@ process.stdin.on("end", () => {
       if (target === "win_x64") expect(job).toContain("install --frozen-lockfile --prod --ignore-scripts");
       else expect(job).not.toContain("--ignore-scripts");
     }
-    const linux = betaPlatformBuild(workflow, "linux_x64");
-    expect(linux).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
     expect(action).toContain("OPEN_DESIGN_POSTINSTALL_PHASE: dependencies");
     expect(action).toContain("run: pnpm run postinstall build");
     expect(action).toContain("run: pnpm run postinstall dependencies");
@@ -2506,7 +2504,8 @@ process.stdin.on("end", () => {
     const common = workflowJob(workflow, "common");
     expect(common).toContain("runs-on: ${{ fromJSON(needs.release_prepare.outputs.common_matrix).include[0].runner || 'ubuntu-latest' }}");
     expect(common).toContain("current-job: '[build] Shared JavaScript'");
-    expect(workflow).toContain("  build_linux_x64:");
+    expect(workflow).not.toContain("linux_x64");
+    expect(workflow).not.toContain("enable_linux_x64");
     expect(workflow).not.toContain("uses: ./.github/workflows/ui-extended-main.yml");
     expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py prepare");
     expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py run");
@@ -2594,7 +2593,6 @@ process.stdin.on("end", () => {
       expect(workflowJob(workflow, `source_${target}`)).toContain(`inputs.enable_${target}`);
       expect(workflowJob(workflow, `build_${target}`)).toContain(`inputs.enable_${target}`);
     }
-    expect(workflowJob(workflow, "build_linux_x64")).toContain("inputs.enable_linux_x64");
     const publish = workflowJob(workflow, "publish");
     expect(publish).toContain("inputs.publish &&");
     expect(publish).not.toContain("- test");
@@ -2605,23 +2603,12 @@ process.stdin.on("end", () => {
     }
   });
 
-  it("[P2] preserves beta linux AppImage smoke reports for platform publication", async () => {
+  it("[P2] excludes Linux from beta inputs, builds and publication", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const linuxBuildStep = [sectionBetween(workflow, "- name: Build beta linux_x64", "- name: Write linux_x64 release report")];
-    expect(linuxBuildStep?.[0]).toBeDefined();
-    expect(linuxBuildStep?.[0]).toContain("RELEASE_TARGET: linux_x64");
-    expect(linuxBuildStep?.[0]).toContain("RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/linux_x64");
-    expect(linuxBuildStep?.[0]).toContain("bash tools/release/scripts/build-platform.sh");
-    expect(workflow).toContain("Write linux_x64 release report");
-    expect(workflow).toContain("RELEASE_REPORT_JSON_PATH: ${{ runner.temp }}/release-report/linux_x64/report.json");
-    expect(workflow).toContain("Prepare linux_x64 assets");
-    expect(workflow).toContain("Publish linux_x64 platform");
-    expect(workflow).not.toContain("Upload linux_x64 publish manifest");
-    expect(workflow).not.toContain("open-design-beta-linux-x64-publish-manifest");
-    expect(workflow).toContain("Download linux_x64 platform manifest");
-    expect(workflow).toContain("tools-release download-platform-manifest");
-    expect(workflow).not.toContain(".github/scripts/release/assets/linux.sh");
-    expect(workflow).not.toContain(".github/scripts/release/r2/publish-platform.ts");
+    expect(workflow).not.toContain("linux_x64");
+    expect(workflow).not.toContain("enable_linux_x64");
+    expect(workflow).not.toContain("ENABLE_LINUX_X64");
+    expect(workflowJob(workflow, "publish")).not.toContain("build_linux_x64");
   });
 
   it("[P2] preserves stable linux AppImage smoke reports for release publication", async () => {
@@ -2678,11 +2665,9 @@ process.stdin.on("end", () => {
     expect(releaseBetaWorkflow).toContain("RELEASE_NAMESPACE: release-beta");
     expect(releaseBetaWorkflow).toContain("RELEASE_NAMESPACE: release-beta-win");
     expect(releaseBetaWorkflow).toContain("RELEASE_NAMESPACE: release-beta-x64");
-    expect(releaseBetaWorkflow).toContain("RELEASE_NAMESPACE: release-beta-linux");
     expect(releaseBetaWorkflow).toContain("RELEASE_TARGET: mac_arm64");
     expect(releaseBetaWorkflow).toContain("RELEASE_TARGET: win_x64");
     expect(releaseBetaWorkflow).toContain("RELEASE_TARGET: mac_x64");
-    expect(releaseBetaWorkflow).toContain("RELEASE_TARGET: linux_x64");
     expect(releaseBetaWorkflow).toContain("OD_PACKAGED_E2E_MAC_UPDATE_FIXTURE: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' && 'tools-serve' || '' }}");
     const betaWinJob = betaPlatformBuild(releaseBetaWorkflow, "win_x64");
     expect(betaWinJob).not.toContain("tools\\release\\scripts\\build-platform.ps1");
@@ -3017,12 +3002,12 @@ process.stdin.on("end", () => {
     expect(publishJob).toContain("needs.release_prepare.outputs.promote == 'true'");
     expect(publishJob).not.toContain("actions/download-artifact");
     expect(publishJob).not.toContain("Cleanup workflow artifacts");
-    for (const target of ["mac_arm64", "mac_x64", "win_x64", "linux_x64"]) {
+    for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       expect(publishJob).toContain(`Download ${target} platform manifest`);
       expect(publishJob).toContain(`RELEASE_TARGET: ${target}`);
       expect(publishJob).toContain(`RELEASE_PLATFORM_MANIFEST_KEY: \${{ needs.build_${target}.outputs.manifest_key }}`);
     }
-    expect(publishJob.match(/tools-release download-platform-manifest/g)).toHaveLength(4);
+    expect(publishJob.match(/tools-release download-platform-manifest/g)).toHaveLength(3);
     expect(publishJob.indexOf("Setup workspace")).toBeLessThan(
       publishJob.indexOf("Download mac_arm64 platform manifest"),
     );

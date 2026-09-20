@@ -204,7 +204,7 @@ describe("release workflows", () => {
     ]);
     const macX64Producer = sectionBetween(beta, "  source_mac_x64:", "  build_mac_x64:");
     const winX64Producer = sectionBetween(beta, "  source_win_x64:", "  build_win_x64:");
-    const winX64Build = sectionBetween(beta, "  build_win_x64:", "  build_linux_x64:");
+    const winX64Build = sectionBetween(beta, "  build_win_x64:", "  publish:");
     const executorPaths = (JSON.parse(convergenceConfig) as {
       resources: { "platform-executor": { paths: string[] }; "platform-mac-runtime": { paths: string[] } };
     }).resources["platform-executor"].paths;
@@ -284,8 +284,7 @@ describe("release workflows", () => {
     ]);
     const mac = sectionBetween(beta, "  build_mac_arm64:", "  build_mac_x64:");
     const macX64 = sectionBetween(beta, "  build_mac_x64:", "  build_win_x64:");
-    const win = sectionBetween(beta, "  build_win_x64:", "  build_linux_x64:");
-    const linux = sectionBetween(beta, "      - name: Build beta linux_x64", "  publish:");
+    const win = sectionBetween(beta, "  build_win_x64:", "  publish:");
     const betaMetadata = sectionBetween(beta, "  release_prepare:", "  common:");
     const betaPublish = sectionAfter(beta, "  publish:");
     const prereleaseMetadata = sectionBetween(prerelease, "  metadata:", "  dispatch_validation:");
@@ -318,7 +317,6 @@ describe("release workflows", () => {
     expect(buildMac).toContain('OD_PACKAGED_E2E_MAC_UPDATE_BUILD_JSON_PATH="$update_build_json_path"');
     expect(buildMac).toContain('OD_PACKAGED_E2E_MAC_UPDATE_VERSION="${OD_PACKAGED_E2E_MAC_UPDATE_VERSION:-$update_version}"');
     expect(buildMac).not.toContain("::warning::Expected Electron framework symlink");
-    expect(linux).not.toContain("--require-vela-cli");
     expect(beta).not.toContain("REQUIRE_VELA_CLI: \"true\"");
     expect(beta).toContain("release-beta publish requires win_x64_target=nsis or all");
     expect(beta).toContain("mac_arm64_update_metadata_url:");
