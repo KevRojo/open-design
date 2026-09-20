@@ -1,5 +1,4 @@
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { createTarArchive } from "@open-design/download";
@@ -160,9 +159,10 @@ export async function exportReleaseExecutorProduct(options: ReleaseExecutorExpor
   if ((await stat(output).catch(() => null)) != null) throw new Error(`release executor output already exists: ${output}`);
 
   await mkdir(dirname(output), { recursive: true });
-  // Hosted Windows runners expose TEMP through an 8.3 path (RUNNER~1), which
-  // pnpm deploy can misclassify as relative and append to the workspace root.
-  const temporary = await realpath(await mkdtemp(join(tmpdir(), "open-design-release-executor-")));
+  // Keep pnpm deploy on the output drive. Hosted Windows runners check out on
+  // D: while exposing TEMP on C:, and legacy deploy misresolves cross-drive
+  // destinations beneath the workspace root.
+  const temporary = await realpath(await mkdtemp(join(dirname(output), ".release-executor-")));
   const stage = join(temporary, "executor");
   const runDeploy = options.runDeploy ?? defaultDeploy;
   const copyRelease = options.copyRelease ?? defaultCopyRelease;
