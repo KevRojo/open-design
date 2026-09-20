@@ -164,6 +164,7 @@ describe("buildDockerArgs", () => {
   it("sets noninteractive install and Electron cache env vars", () => {
     const args = buildDockerArgs(makeConfig(), { uid: 1000, gid: 1000 });
     expect(args).toContain("CI=true");
+    expect(args).toContain("npm_execpath=/tmp/pnpm");
     expect(args).toContain("HOME=/home/builder");
     expect(args).toContain("ELECTRON_CACHE=/home/builder/.cache/electron");
     expect(args).toContain("ELECTRON_BUILDER_CACHE=/home/builder/.cache/electron-builder");

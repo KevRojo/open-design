@@ -216,6 +216,8 @@ export function buildDockerArgs(
     "-e",
     "CI=true",
     "-e",
+    `npm_execpath=${CONTAINER_PNPM_PATH}`,
+    "-e",
     "ELECTRON_CACHE=/home/builder/.cache/electron",
     "-e",
     "ELECTRON_BUILDER_CACHE=/home/builder/.cache/electron-builder",
