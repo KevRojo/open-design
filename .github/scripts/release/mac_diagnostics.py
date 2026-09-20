@@ -53,6 +53,7 @@ def sample() -> dict[str, object]:
     cpu = next((line for line in top.splitlines() if line.startswith("CPU usage:")), top[:200])
     memory = next((line for line in top.splitlines() if line.startswith("PhysMem:")), "")
     disk = probe(["iostat", "-d", "-w", "1", "-c", "2"])
+    mounts = probe(["mount"], max_output=None)
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "logicalCpus": os.cpu_count(),
@@ -60,7 +61,8 @@ def sample() -> dict[str, object]:
         "cpu": cpu,
         "memory": memory,
         "disk": disk,
-        "spotlight": probe(["mdutil", "-s", "/", "/System/Volumes/Data"]),
+        "spotlight": probe(["mdutil", "-sa"]),
+        "mountedImages": [line for line in mounts.splitlines() if " on /Volumes/" in line],
         "processes": processes(),
     }
 
