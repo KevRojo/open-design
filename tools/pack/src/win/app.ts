@@ -1,6 +1,7 @@
 import { finalizeRuntimeManifest } from "../resources/runtime-manifest.js";
 import { execFile } from "node:child_process";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 
@@ -80,7 +81,11 @@ async function runNpmInstall(appRoot: string): Promise<void> {
 }
 
 async function runEsbuild(config: ToolPackConfig, args: string[]): Promise<void> {
-  await runPnpm(config, ["--filter", "@open-design/packaged", "exec", "esbuild", ...args]);
+  const esbuildCli = createRequire(import.meta.url).resolve("esbuild/bin/esbuild");
+  await execFileAsync(process.execPath, [esbuildCli, ...args], {
+    cwd: config.workspaceRoot,
+    env: process.env,
+  });
 }
 
 async function runElectronRebuild(config: ToolPackConfig, appRoot: string): Promise<void> {
