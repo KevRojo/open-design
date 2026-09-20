@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { listArchive, readTarEntry } from "@open-design/download";
 import {
   exportReleaseExecutorProduct,
+  pnpmInvocation,
   releaseExecutorManifest,
 } from "@/executor/product.js";
 
@@ -22,6 +23,16 @@ async function fixture(): Promise<string> {
 }
 
 describe("release executor product", () => {
+  it("runs the pnpm script through Node when deploying on Windows", () => {
+    expect(pnpmInvocation("win32", "C:\\pnpm\\pnpm.cjs")).toEqual({
+      args: ["C:\\pnpm\\pnpm.cjs"],
+      command: process.execPath,
+    });
+    expect(() => pnpmInvocation("win32", "")).toThrow("requires npm_execpath");
+    expect(pnpmInvocation("darwin")).toEqual({ args: [], command: "pnpm" });
+    expect(pnpmInvocation("linux")).toEqual({ args: [], command: "pnpm" });
+  });
+
   it("exports one reproducible platform contract without command links", async () => {
     const root = await fixture();
     const archive = join(root, "product", "workspace.tar.gz");

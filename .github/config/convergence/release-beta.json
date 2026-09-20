@@ -391,6 +391,20 @@
             ]
           }
         },
+        "source_win_x64_executor": {
+          "successBoundary": "steps",
+          "inputs": [
+            "suite://platform-executor"
+          ],
+          "runnerClass": "source_win_x64",
+          "products": "manifest",
+          "reusable": true,
+          "success": {
+            "[build] win_x64 workload": [
+              "[build] Release executor"
+            ]
+          }
+        },
         "test_web_workspace_tests": {
           "inputs": [
             "suite://web-tests"
@@ -547,6 +561,13 @@
               "workload": "source_win_x64_web",
               "request": {
                 "unit": "web"
+              },
+              "product": "bundle"
+            },
+            "executor": {
+              "workload": "source_win_x64_executor",
+              "request": {
+                "unit": "executor"
               },
               "product": "bundle"
             }

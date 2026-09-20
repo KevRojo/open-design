@@ -79,8 +79,21 @@ async function assertPortableTree(root: string, boundary = root): Promise<void> 
   }
 }
 
+export function pnpmInvocation(
+  platform: NodeJS.Platform = process.platform,
+  npmExecPath: string | undefined = process.env.npm_execpath,
+): { args: string[]; command: string } {
+  if (platform !== "win32") return { args: [], command: "pnpm" };
+  if (npmExecPath == null || npmExecPath.length === 0) {
+    throw new Error("release executor export on Windows requires npm_execpath");
+  }
+  return { args: [npmExecPath], command: process.execPath };
+}
+
 async function defaultDeploy(packageName: string, destination: string, includeOptional: boolean): Promise<void> {
-  await execFileAsync("pnpm", [
+  const pnpm = pnpmInvocation();
+  await execFileAsync(pnpm.command, [
+    ...pnpm.args,
     "--filter",
     packageName,
     "--prod",

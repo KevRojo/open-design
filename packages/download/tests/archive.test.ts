@@ -44,6 +44,18 @@ it("reproduces identical archive bytes despite source mtimes and creation order"
   expect(archives[0]).toEqual(archives[1]);
 });
 
+it("keeps distinct file contents independent in reproducible archives", () => {
+  const root = mkdtempSync(join(tmpdir(), "archive-independent-files-")); roots.push(root);
+  const source = join(root, "source"), destination = join(root, "destination"), archive = join(root, "blob.tar.gz");
+  mkdirSync(source); mkdirSync(destination);
+  writeFileSync(join(source, "small.js"), "export const value = 'small';\n");
+  writeFileSync(join(source, "large.js"), `export const value = '${"large".repeat(8_000)}';\n`);
+  createTarArchive(archive, [{ directory: source, entries: ["small.js", "large.js"] }], { reproducible: true });
+  extractArchive(archive, destination, "tar.gz");
+  expect(readFileSync(join(destination, "small.js"), "utf8")).toBe("export const value = 'small';\n");
+  expect(readFileSync(join(destination, "large.js"), "utf8")).toBe(`export const value = '${"large".repeat(8_000)}';\n`);
+});
+
 it.skipIf(process.platform === "win32")("preserves declared safe links without inheriting outside targets", () => {
   const root = mkdtempSync(join(tmpdir(), "archive-links-")); roots.push(root);
   const source = join(root, "source"), destination = join(root, "destination"), archive = join(root, "blob.tar.gz");

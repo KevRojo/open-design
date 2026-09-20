@@ -196,13 +196,15 @@ describe("release workflows", () => {
     }
   });
 
-  it("selects bounded producer closures for mac x64 platform products", async () => {
+  it("selects bounded producer closures for platform executors and mac x64 runtime", async () => {
     const [beta, setupWorkspace, convergenceConfig] = await Promise.all([
       readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/actions/setup-workspace/action.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/config/convergence/release-beta.json", import.meta.url), "utf8"),
     ]);
     const macX64Producer = sectionBetween(beta, "  source_mac_x64:", "  build_mac_x64:");
+    const winX64Producer = sectionBetween(beta, "  source_win_x64:", "  build_win_x64:");
+    const winX64Build = sectionBetween(beta, "  build_win_x64:", "  build_linux_x64:");
     const executorPaths = (JSON.parse(convergenceConfig) as {
       resources: { "platform-executor": { paths: string[] }; "platform-mac-runtime": { paths: string[] } };
     }).resources["platform-executor"].paths;
@@ -220,6 +222,13 @@ describe("release workflows", () => {
     expect(macX64Producer).toContain(
       "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
     );
+    expect(winX64Producer).toContain(
+      "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
+    );
+    expect(winX64Producer).toContain("[build] Release executor");
+    expect(winX64Producer).toContain("executor:dev export");
+    expect(winX64Build).toContain("[restore] Release executor");
+    expect(winX64Build).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs"');
     expect(macX64Producer).toContain("[build] mac_x64 runtime");
     expect(macX64Producer).toContain("mac runtime-export");
     expect(beta).toContain("mac runtime-restore");
@@ -326,11 +335,11 @@ describe("release workflows", () => {
       expect(workflow).toContain("tools-release check-storage");
     }
     expect(win).not.toContain("tools\\release\\scripts\\build-platform.ps1");
-    expect(win).toContain('pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\\tools-pack" --namespace release-beta-win --json');
-    expect(win).toContain('"tools-pack", "win", "build"');
+    expect(win).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs" win cleanup --dir "${{ runner.temp }}\\tools-pack" --namespace release-beta-win --json');
+    expect(win).toContain('"$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs", "win", "build"');
     expect(buildWin).toContain('$buildArgs += "--require-vela-cli"');
     expect(buildWin).toContain('$updateArgs += "--require-vela-cli"');
-    expect(win).toContain("tools-pack win validate-payload");
+    expect(win).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs" win validate-payload');
     expect(win).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
     for (const section of [betaMetadata, betaPublish]) {
       expect(section).toContain("uses: ./.github/actions/setup-workspace");

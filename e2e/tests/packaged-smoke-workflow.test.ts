@@ -2330,11 +2330,13 @@ process.stdin.on("end", () => {
     );
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);
-      if (target === "mac_x64") {
+      if (target === "mac_x64" || target === "win_x64") {
         expect(job).toContain('name: "[prepare] Full smoke dependencies"');
-        expect(job).toContain("if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}");
+        expect(job).toContain("if: ${{ (inputs." + target + "_smoke_mode == 'full') }}");
         expect(job).toContain("uses: ./.github/actions/setup-workspace");
-        expect(job).toContain('"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package');
+        expect(job).toContain(target === "mac_x64"
+          ? '"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package'
+          : '"$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs", "win", "package"');
         expect(job).toContain("uses: actions/setup-node");
         expect(job).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
         expect(job).not.toContain("cache-tools: 'true'");
@@ -2409,7 +2411,7 @@ process.stdin.on("end", () => {
       expect(job.indexOf("[restore] Shared JavaScript")).toBeLessThan(job.indexOf(`id: ${target === "win_x64" ? "win" : target}_tools_pack_build`));
       expect(job).toContain(
         target === "win_x64"
-          ? '"tools-pack", "win", "package"'
+          ? '"$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs", "win", "package"'
           : target === "mac_x64"
             ? '"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package'
             : "exec tools-pack mac package",
@@ -2424,8 +2426,10 @@ process.stdin.on("end", () => {
       const source = workflowJob(workflow, `source_${target}`);
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
       expect(source).toContain(target === "mac_x64"
-          ? "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
-        : "install-profile: source-web");
+        ? "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
+        : target === "win_x64"
+          ? "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
+          : "install-profile: source-web");
       expect(source).toContain("pnpm --filter @open-design/tools-pack workspace:dev build web");
       expect(source).not.toContain("cache-tools: 'true'");
       expect(source).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
@@ -2450,6 +2454,19 @@ process.stdin.on("end", () => {
         });
       }
       for (const unit of ["packages", "daemon", "shell"]) expect(job).not.toContain(`[build] Source ${unit}`);
+      if (target === "win_x64") {
+        expect(source).toContain("[build] Release executor");
+        expect(source).toContain("executor:dev export");
+        expect(job).toContain("[restore] Release executor");
+        expect(job).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs"');
+        expect(config.workflows["release-beta"].workloads.source_win_x64_executor).toMatchObject({
+          inputs: ["suite://platform-executor"], products: "manifest", runnerClass: "source_win_x64",
+          success: { "[build] win_x64 workload": ["[build] Release executor"] }, successBoundary: "steps",
+        });
+        expect(config.workflows["release-beta"].batches.source_win_x64.entries.executor).toEqual({
+          workload: "source_win_x64_executor", request: { unit: "executor" }, product: "bundle",
+        });
+      }
     }
     const common = workflowJob(workflow, "common");
     expect(common).toContain('name: "[build] Shared JavaScript"');
@@ -2663,8 +2680,8 @@ process.stdin.on("end", () => {
     expect(releaseBetaWorkflow).toContain("OD_PACKAGED_E2E_MAC_UPDATE_FIXTURE: ${{ inputs.mac_arm64_smoke_mode == 'full' && inputs.mac_arm64_update_metadata_url == '' && inputs.mac_arm64_update_target_version == '' && 'tools-serve' || '' }}");
     const betaWinJob = betaPlatformBuild(releaseBetaWorkflow, "win_x64");
     expect(betaWinJob).not.toContain("tools\\release\\scripts\\build-platform.ps1");
-    expect(betaWinJob).toContain('"tools-pack", "win", "build"');
-    expect(betaWinJob).toContain("tools-pack win validate-payload");
+    expect(betaWinJob).toContain('"$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs", "win", "build"');
+    expect(betaWinJob).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs" win validate-payload');
     expect(betaWinJob).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
     const betaBuildScript = await readFile(releaseBetaPosixBuildScriptPath, "utf8");
     expect(betaBuildScript).toContain("required RELEASE_CHANNEL");
@@ -3056,7 +3073,9 @@ process.stdin.on("end", () => {
         step.includes(`RELEASE_SMOKE_OUTCOME: \${{ steps.${stepId}.outcome }}`),
       );
       expect(reportStep, `no report step consumes ${stepId}.outcome`).toBeDefined();
-      expect(reportStep).toContain("pnpm exec tools-release write-report");
+      expect(reportStep).toContain(stepId === "win_x64_smoke"
+        ? 'node "$env:RELEASE_EXECUTOR_ROOT\\release\\dist\\index.mjs" write-report'
+        : "pnpm exec tools-release write-report");
       expect(reportStep).toContain('RELEASE_SMOKE_EXEMPT: "true"');
       expect(reportStep).toContain("!cancelled()");
       expect(reportStep).toContain(`steps.${stepId === "win_x64_smoke" ? "win" : stepId.replace(/_smoke$/, "")}_tools_pack_build.outcome == 'success'`);

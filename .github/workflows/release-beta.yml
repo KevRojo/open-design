@@ -1159,7 +1159,7 @@ jobs:
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] win_x64 workload"
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_win_x64 && needs.release_prepare.outputs.contribution == 'true' && fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' }}
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.release_prepare.result == 'success' && inputs.enable_win_x64 && needs.release_prepare.outputs.contribution == 'true' && (fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' || fromJSON(needs.release_prepare.outputs.requests).source_win_x64.executor.operation == 'build') }}
     runs-on: windows-latest
     defaults:
       run:
@@ -1181,17 +1181,35 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          install-profile: source-web
+          install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
+        if: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' }}
         shell: bash
         env:
           SOURCE_OUTPUT: ${{ runner.temp }}/source-products/web/product
           OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}
         run: pnpm --filter @open-design/tools-pack workspace:dev build web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+      - name: "[prepare] Platform product tools"
+        id: platform_product_tools
+        if: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.executor.operation == 'build' }}
+        shell: pwsh
+        run: pnpm.cmd --filter @open-design/tools-pack build
+      - name: "[build] Release executor"
+        id: release_executor
+        if: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.executor.operation == 'build' }}
+        shell: pwsh
+        env:
+          SOURCE_OUTPUT: ${{ runner.temp }}\source-products\executor\product\workspace.tar.gz
+        run: |
+          $ErrorActionPreference = "Stop"
+          pnpm.cmd --filter @open-design/tools-release build
+          if ($LASTEXITCODE -ne 0) { throw "tools-release build failed with exit code $LASTEXITCODE" }
+          pnpm.cmd --filter @open-design/tools-pack executor:dev export --output $env:SOURCE_OUTPUT --json
+          if ($LASTEXITCODE -ne 0) { throw "release executor export failed with exit code $LASTEXITCODE" }
       - name: '[cache] Publish workload results'
         id: workload_results
         if: ${{ success() && needs.release_prepare.outputs.contribution == 'true' }}
@@ -1204,7 +1222,7 @@ jobs:
           batches: '["source_win_x64"]'
           current-job: '[build] win_x64 workload'
           step-results: |
-            {"[build] Source web":"${{ steps.source_web.outcome }}"}
+            {"[build] Source web":"${{ steps.source_web.outcome }}","[build] Release executor":"${{ steps.release_executor.outcome }}"}
           local-products-root: ${{ runner.temp }}/source-products
           local-product-pattern: '**/workspace.tar.gz'
         env:
@@ -1234,6 +1252,7 @@ jobs:
         shell: pwsh
     env:
       RELEASE_COMMIT: ${{ needs.release_prepare.outputs.commit }}
+      OD_TOOLS_PACK_WORKSPACE_ROOT: ${{ github.workspace }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -1247,22 +1266,26 @@ jobs:
           SOURCE_REQUESTS: ${{ needs.source_win_x64.result == 'success' && needs.source_win_x64.outputs.requests || needs.source_win_x64.result == 'skipped' && needs.release_prepare.outputs.requests || 'null' }}
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.release_prepare.outputs.common_count != '0' && needs.common.outputs.sources || needs.release_prepare.outputs.common_count == '0' && needs.release_prepare.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_win_x64 ${{ (needs.release_prepare.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
-      - name: "[prepare] Workspace source tools"
-        uses: ./.github/actions/setup-workspace
+      - name: "[restore] Release executor"
+        shell: pwsh
+        run: >-
+          python3 .github/scripts/release/executor.py restore
+          --url "$env:SOURCE_EXECUTOR_URL" --sha256 "$env:SOURCE_EXECUTOR_SHA256"
+          --output "$env:RUNNER_TEMP\release-executor"
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
         with:
-          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          cache-tools: 'true'
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          node-version: '24'
+          package-manager-cache: false
       - name: "[restore] Shared JavaScript"
-        shell: bash
-        run: pnpm exec tools-pack workspace ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
+        shell: pwsh
+        run: node "$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs" workspace ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$env:WORKSPACE_SOURCES" --scratch "$env:RUNNER_TEMP\shared-javascript" --json
       - name: "[build] Source web"
         id: source_web
-        shell: bash
+        shell: pwsh
         env:
           SOURCE_OUTPUT: ""
-        run: pnpm exec tools-pack workspace ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} web --url "$SOURCE_WEB_URL" --sha256 "$SOURCE_WEB_SHA256" --output "$SOURCE_OUTPUT" --scratch "$RUNNER_TEMP/source-import" --web-output-mode standalone --json
+        run: node "$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs" workspace ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} web --url "$env:SOURCE_WEB_URL" --sha256 "$env:SOURCE_WEB_SHA256" --output "$env:SOURCE_OUTPUT" --scratch "$env:RUNNER_TEMP\source-import" --web-output-mode standalone --json
       - name: Setup NSIS
         shell: pwsh
         run: |
@@ -1293,13 +1316,15 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
-          pnpm.cmd exec tools-pack win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
-          $buildArgs = @("exec", "tools-pack", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.release_prepare.outputs.beta_version }}", "--build-json", "${{ runner.temp }}\release-build\win_x64\build.json", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
+          node "$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs" win cleanup --dir "${{ runner.temp }}\tools-pack" --namespace release-beta-win --json
+          if ($LASTEXITCODE -ne 0) { throw "tools-pack win cleanup failed with exit code $LASTEXITCODE" }
+          $buildArgs = @("$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs", "win", "package", "--dir", "${{ runner.temp }}\tools-pack", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--portable", "--app-version", "${{ needs.release_prepare.outputs.beta_version }}", "--build-json", "${{ runner.temp }}\release-build\win_x64\build.json", "--to", "${{ inputs.win_x64_target }}", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
-          pnpm.cmd @buildArgs
+          node @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win build failed with exit code $LASTEXITCODE" }
           $build = Get-Content -Raw "${{ runner.temp }}\release-build\win_x64\build.json" | ConvertFrom-Json
-          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.release_prepare.outputs.beta_version }}" --json
+          node "$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs" win validate-payload --namespace release-beta-win --payload-path $build.payloadPath --expected-version "${{ needs.release_prepare.outputs.beta_version }}" --json
+          if ($LASTEXITCODE -ne 0) { throw "tools-pack win validate-payload failed with exit code $LASTEXITCODE" }
       - name: Upload win_x64 installer for manual distribution
         if: ${{ !cancelled() && !inputs.publish }}
         uses: actions/upload-artifact@v7
@@ -1310,6 +1335,11 @@ jobs:
             ${{ runner.temp }}\tools-pack\out\win\namespaces\release-beta-win\builder\*-portable.zip
           if-no-files-found: warn
           retention-days: 14
+      - name: "[prepare] Full smoke dependencies"
+        if: ${{ (inputs.win_x64_smoke_mode == 'full') }}
+        uses: ./.github/actions/setup-workspace
+        with:
+          save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: Build beta win_x64 update fixture
         if: ${{ (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
         shell: pwsh
@@ -1318,12 +1348,13 @@ jobs:
           $match = [regex]::Match("${{ needs.release_prepare.outputs.beta_version }}", "^(?<base>\d+\.\d+\.\d+)-beta\.(?<number>\d+)$")
           if (-not $match.Success) { throw "full Windows smoke requires a counted beta version; got ${{ needs.release_prepare.outputs.beta_version }}" }
           $updateVersion = "{0}-beta.{1}" -f $match.Groups["base"].Value, ([int]$match.Groups["number"].Value + 1)
-          $buildArgs = @("exec", "tools-pack", "win", "build", "--dir", "${{ runner.temp }}\release-work\win_x64\tools-pack-update-fixture", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--app-version", $updateVersion, "--build-json", "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json", "--to", "nsis", "--require-vela-cli", "--json")
+          $buildArgs = @("$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs", "win", "build", "--dir", "${{ runner.temp }}\release-work\win_x64\tools-pack-update-fixture", "--cache-dir", "${{ runner.temp }}\tools-pack-cache", "--namespace", "release-beta-win", "--app-version", $updateVersion, "--build-json", "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json", "--to", "nsis", "--require-vela-cli", "--json")
           if ("${{ inputs.win_x64_sign_mode }}" -eq "on") { $buildArgs += "--signed" }
-          pnpm.cmd @buildArgs
+          node @buildArgs
           if ($LASTEXITCODE -ne 0) { throw "tools-pack win update fixture failed with exit code $LASTEXITCODE" }
           $updateBuild = Get-Content -Raw "${{ runner.temp }}\release-build\win_x64\windows-tools-pack-update-build.json" | ConvertFrom-Json
-          pnpm.cmd exec tools-pack win validate-payload --namespace release-beta-win --payload-path $updateBuild.payloadPath --expected-version $updateVersion --json
+          node "$env:RELEASE_EXECUTOR_ROOT\pack\dist\index.mjs" win validate-payload --namespace release-beta-win --payload-path $updateBuild.payloadPath --expected-version $updateVersion --json
+          if ($LASTEXITCODE -ne 0) { throw "tools-pack win update fixture validation failed with exit code $LASTEXITCODE" }
       - name: Smoke beta win_x64 packaged runtime
         id: win_x64_smoke
         if: ${{ (inputs.win_x64_smoke_mode == 'full') }}
@@ -1359,7 +1390,7 @@ jobs:
           RELEASE_TARGET: win_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           REPORT_TITLE: win_x64 beta build
-        run: pnpm exec tools-release write-report
+        run: node "$env:RELEASE_EXECUTOR_ROOT\release\dist\index.mjs" write-report
       - name: Publish win_x64 report summary
         if: ${{ !cancelled() && steps.report_win_x64.outcome == 'success' }}
         shell: pwsh
@@ -1375,7 +1406,7 @@ jobs:
           RELEASE_TARGET: win_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           WIN_INCLUDE_ZIP: ${{ inputs.win_x64_target == 'all' || inputs.win_x64_target == 'zip' }}
-        run: pnpm exec tools-release prepare-platform-assets
+        run: node "$env:RELEASE_EXECUTOR_ROOT\release\dist\index.mjs" prepare-platform-assets
       - name: Publish win_x64 platform
         if: ${{ inputs.publish }}
         env:
@@ -1395,7 +1426,7 @@ jobs:
           RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}
           RELEASE_TARGET: win_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
-        run: pnpm exec tools-release publish-platform
+        run: node "$env:RELEASE_EXECUTOR_ROOT\release\dist\index.mjs" publish-platform
       - name: Read win_x64 platform outputs
         id: win_x64_platform_outputs
         if: ${{ inputs.publish }}

@@ -92,7 +92,10 @@ export function createTarArchive(archive: string, sources: { directory: string; 
       const next = new Set([...ancestors, real]);
       for (const child of readdirSync(path).sort()) visit(directory, join(entry, child).replaceAll("\\", "/"), next);
     } else if (stat.isFile()) {
-      manifest.push(`${escape(entry)} type=file mode=${mode} size=${stat.size} contents=${escape(path)}`);
+      // mtree otherwise inherits the source link count and inode. On Windows,
+      // pnpm's content-store hardlinks can make bsdtar coalesce unrelated
+      // archive entries, replacing their bytes with the first file it saw.
+      manifest.push(`${escape(entry)} type=file mode=${mode} nlink=1 size=${stat.size} contents=${escape(path)}`);
     } else throw new Error(`unsupported archive entry: ${entry}`);
   }
   for (const source of sources) for (const entry of [...source.entries].sort()) visit(source.directory, entry, new Set());
