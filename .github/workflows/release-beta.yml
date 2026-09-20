@@ -63,7 +63,7 @@ on:
           - "no"
           - "sign-only"
           - "notarize"
-        default: "sign-only"
+        default: "notarize"
       mac_arm64_smoke_mode:
         description: "macOS arm64 smoke coverage."
         required: true
@@ -99,7 +99,7 @@ on:
           - "no"
           - "sign-only"
           - "notarize"
-        default: "sign-only"
+        default: "notarize"
       mac_x64_smoke_mode:
         description: "macOS x64 smoke coverage."
         required: true
@@ -204,7 +204,7 @@ on:
       mac_arm64_sign_mode:
         required: false
         type: string
-        default: "sign-only"
+        default: "notarize"
       mac_arm64_smoke_mode:
         required: false
         type: string
@@ -224,7 +224,7 @@ on:
       mac_x64_sign_mode:
         required: false
         type: string
-        default: "sign-only"
+        default: "notarize"
       mac_x64_smoke_mode:
         required: false
         type: string

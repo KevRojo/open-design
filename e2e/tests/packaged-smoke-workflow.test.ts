@@ -2283,7 +2283,7 @@ process.stdin.on("end", () => {
     expect(postMergeWorkflow).not.toContain("PREVIEW_BAKE_TOKEN");
   });
 
-  it("[P2] aligns beta desktop defaults with prerelease without merging channel identity", async () => {
+  it("[P2] defaults beta mac delivery to notarized artifacts", async () => {
     const [beta, prerelease] = await Promise.all([
       readFile(releaseBetaWorkflowPath, "utf8"),
       readFile(releasePrereleaseWorkflowPath, "utf8"),
@@ -2293,7 +2293,7 @@ process.stdin.on("end", () => {
         .map((match) => match[1]?.replaceAll('"', ""));
     expect(defaults(beta, "enable_mac_x64")).toEqual(defaults(prerelease, "enable_mac_x64"));
     for (const platform of ["mac_arm64", "mac_x64"]) {
-      expect(defaults(beta, `${platform}_sign_mode`)).toEqual(defaults(prerelease, "mac_sign_mode"));
+      expect(defaults(beta, `${platform}_sign_mode`)).toEqual(["notarize", "notarize"]);
       expect(defaults(beta, `${platform}_target`)).toEqual(["all", "all"]);
       expect(defaults(beta, `${platform}_smoke_mode`)).toEqual(["core", "core"]);
     }
