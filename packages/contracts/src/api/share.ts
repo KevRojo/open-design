@@ -409,7 +409,7 @@ export const SHARE_COMMENT_ERROR_CODES = [
   'SHARE_STOPPED',
   /** 404 — no share binding for this `(projectId, slug)` pair. */
   'SHARE_NOT_FOUND',
-  /** 400 — body empty, over {@link SHARE_COMMENT_MAX_LENGTH}, or anchor malformed. */
+  /** 400 — body empty or anchor malformed; payload overflow is PAYLOAD_TOO_LARGE. */
   'INVALID_COMMENT',
   /** 429 — per-viewer write throttle tripped; carries `retryAfterSeconds`. */
   'RATE_LIMITED',
