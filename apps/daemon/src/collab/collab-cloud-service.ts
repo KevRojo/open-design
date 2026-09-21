@@ -793,7 +793,7 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     // Personal relay eligibility is per published file. Re-check both the
     // principal and active publication set after the async transport returns:
     // an account/workspace switch or stop must never merge an in-flight reply.
-    let comments = result.comments;
+    const comments = result.comments;
     let responseIdentity = identity;
     if (identity.relayScope === 'personal') {
       const freshContext = await deps.resolveProjectWorkspaceContext?.(projectId, { fresh: true }) ?? null;
@@ -805,7 +805,8 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
         || freshIdentity.teamId !== identity.teamId
       ) return false;
       responseIdentity = freshIdentity;
-      comments = comments.filter((comment) => freshIdentity.allowedFilePaths!.has(comment.filePath));
+      // Apply per-record eligibility during sequential merging below: a later
+      // tombstone may target a row created earlier in this very response.
     }
     // Commit the result under the freshly-authoritative publication scope.
     // If the set changed while a conditional request was in flight, a 304 is
@@ -818,6 +819,23 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     }
     let inserted = 0;
     for (const comment of comments) {
+      if (responseIdentity.relayScope === 'personal') {
+        const allowed = responseIdentity.allowedFilePaths!;
+        if (comment.deleted) {
+          // A tombstone has no authoritative anchor. Even when it carries a
+          // path, only the stored, project-scoped target can authorize deletion.
+          // Resolve here, after preceding records have actually persisted.
+          if (!deps.resolveStoredCommentLocation) {
+            throw new Error('Stored comment location lookup is unavailable');
+          }
+          const location = deps.resolveStoredCommentLocation(projectId, comment.id);
+          if (!location.found) continue; // Confirmed absence is a safe no-op.
+          if (!location.filePath) {
+            throw new Error('Stored comment location has no file path');
+          }
+          if (!allowed.has(location.filePath)) continue;
+        } else if (!allowed.has(comment.filePath)) continue;
+      }
       const outcome = deps.mergeComment({ projectId, conversationId, comment });
       if (outcome === 'changed') inserted += 1;
       else if (outcome !== 'unchanged') {

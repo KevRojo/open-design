@@ -4,14 +4,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
-import { closeDatabase, insertProject, insertConversation, openDatabase, mergeSyncedPreviewComment, listPreviewComments } from '../src/db.js';
+import { closeDatabase, insertProject, insertConversation, openDatabase, mergeSyncedPreviewComment, listPreviewComments, getProjectPreviewComment } from '../src/db.js';
 import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
 
 let root: string | undefined;
 afterEach(() => { closeDatabase(); if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 
-it('replays unmodified Vela cb44e7597d HTTP capture through adapter, service and SQLite', async () => {
+it.each(['team', 'personal'] as const)('replays unmodified Vela cb44e7597d HTTP capture through adapter, service and SQLite (%s)', async (workspaceType) => {
   const wire = readFileSync(new URL('./fixtures/vela-share-downstream-cb44e7597d.json', import.meta.url), 'utf8');
   expect(createHash('sha256').update(wire).digest('hex')).toBe('1306f34a75b57468976c4133259d7aabc5b6d00cefc9f371ce3ae52ab2b70710');
   const captured = JSON.parse(wire);
@@ -27,7 +27,7 @@ it('replays unmodified Vela cb44e7597d HTTP capture through adapter, service and
   insertProject(db, { id: projectId, name: 'Capture', createdAt: 1, updatedAt: 1 });
   insertConversation(db, { id: 'local', projectId, title: 'Local', createdAt: 1, updatedAt: 1 });
   const context: WorkspaceCollabContext = {
-    workspaceId: 'fixture-space', workspaceType: 'team', workspaceMemberId: 'member-owner',
+    workspaceId: 'fixture-space', workspaceType, workspaceMemberId: 'member-owner',
     role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active',
     planId: null, providerMode: 'platform_credits', teamId: 'fixture-space',
     seatSummary: buildWorkspaceSeatSummary({ seatLimit: 5, usedSeats: 1 }),
@@ -45,6 +45,10 @@ it('replays unmodified Vela cb44e7597d HTTP capture through adapter, service and
     client, listProjectIds: () => [], resolveLocalConversationId: () => 'local',
     resolveProjectWorkspaceContext: async () => context,
     listPersonalCommentRelayFilePaths: () => new Set(['index.html']),
+    resolveStoredCommentLocation: (id, commentId) => {
+      const stored = getProjectPreviewComment(db, id, commentId);
+      return stored ? { found: true, filePath: stored.filePath } : { found: false };
+    },
     mergeComment: ({ projectId: id, conversationId, comment }) => {
       received.push(comment);
       const result = mergeSyncedPreviewComment(db, id, conversationId, comment);
@@ -78,3 +82,76 @@ it('replays unmodified Vela cb44e7597d HTTP capture through adapter, service and
     ]);
   } finally { service.dispose(); }
 });
+
+// Fault/authorization cases below are controlled local scenarios, not new Vela captures.
+it.each(['allowed', 'unpublished', 'foreign-project', 'absent', 'lookup-throws', 'lookup-unavailable', 'unknown-path', 'stopped', 'principal-changed', 'forged-file'] as const)(
+  'personal tombstone preserves storage and next cursor/etag contract: %s', async (scenario) => {
+    const wire = readFileSync(new URL('./fixtures/vela-share-downstream-cb44e7597d.json', import.meta.url), 'utf8');
+    const adapter = createVelaCliCollabClient({ run: async () => wire });
+    const decoded = await adapter.pullComments('fixture-space', 'share-management-project', 0);
+    const target = decoded.comments[1]!;
+    const tombstone = decoded.comments[3]!;
+    root = mkdtempSync(join(tmpdir(), 'od-tombstone-scope-'));
+    const db = openDatabase(root);
+    for (const id of ['share-management-project', 'foreign']) {
+      insertProject(db, { id, name: id, createdAt: 1, updatedAt: 1 });
+      insertConversation(db, { id: `local-${id}`, projectId: id, title: 'Local', createdAt: 1, updatedAt: 1 });
+    }
+    const projectId = 'share-management-project';
+    const storedProjectId = scenario === 'foreign-project' ? 'foreign' : projectId;
+    if (scenario !== 'absent') mergeSyncedPreviewComment(db, storedProjectId, `local-${storedProjectId}`, {
+      ...target, filePath: scenario === 'unpublished' || scenario === 'forged-file' ? 'private.html' : target.filePath,
+    });
+    const storedBefore = getProjectPreviewComment(db, storedProjectId, target.id);
+    const context: WorkspaceCollabContext = {
+      workspaceId: 'fixture-space', workspaceType: 'personal', workspaceMemberId: 'member-owner',
+      role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active',
+      planId: null, providerMode: 'platform_credits', teamId: 'fixture-space',
+      seatSummary: buildWorkspaceSeatSummary({ seatLimit: 5, usedSeats: 1 }),
+      permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
+    };
+    let freshContext = context;
+    let active = true;
+    const requests: Array<{ sinceSeq: number; etag: string | null | undefined }> = [];
+    const errors: unknown[] = [];
+    const blocked = ['lookup-throws', 'lookup-unavailable', 'unknown-path', 'stopped', 'principal-changed'].includes(scenario);
+    const service = createCollabCloudService({
+      client: { ...adapter, pullComments: async (_team: string, _project: string, sinceSeq: number, etag?: string | null) => {
+        requests.push({ sinceSeq, etag });
+        if (requests.length === 2) {
+          if (scenario === 'stopped') active = false;
+          if (scenario === 'principal-changed') freshContext = { ...context, workspaceMemberId: 'other-member' };
+        }
+        const initial = requests.length === 1;
+        return { comments: initial ? [] : [scenario === 'forged-file' ? { ...tombstone, filePath: 'index.html' } : tombstone],
+          latestSeq: initial ? 1 : 4, etag: initial ? 'etag-1' : 'etag-4', notModified: false };
+      } },
+      listProjectIds: () => [], resolveLocalConversationId: () => `local-${projectId}`,
+      resolveProjectWorkspaceContext: async () => freshContext,
+      listPersonalCommentRelayFilePaths: () => new Set(active ? ['index.html'] : []),
+      ...(scenario === 'lookup-unavailable' ? {} : { resolveStoredCommentLocation: (id: string, commentId: string) => {
+        if (scenario === 'lookup-throws') throw new Error('injected database lookup failure');
+        const stored = getProjectPreviewComment(db, id, commentId);
+        return stored ? { found: true as const, filePath: scenario === 'unknown-path' ? null : stored.filePath }
+          : { found: false as const };
+      } }),
+      mergeComment: ({ projectId: id, conversationId, comment }) => mergeSyncedPreviewComment(db, id, conversationId, comment),
+      onError: (error) => errors.push(error),
+    });
+    try {
+      expect(await service.pullProject(projectId, context)).toBe(true);
+      expect(await service.pullProject(projectId, context)).toBe(!blocked);
+      expect(getProjectPreviewComment(db, storedProjectId, target.id)).toEqual(scenario === 'allowed' ? null : storedBefore);
+      // Restore only simulated authority changes, not stored state or service cursors.
+      active = true; freshContext = context;
+      await service.pullProject(projectId, context);
+      expect(requests).toEqual([
+        { sinceSeq: 0, etag: undefined }, { sinceSeq: 1, etag: 'etag-1' },
+        { sinceSeq: blocked ? 1 : 4, etag: blocked ? 'etag-1' : 'etag-4' },
+      ]);
+      const eventuallyDeleted = scenario === 'allowed' || scenario === 'stopped' || scenario === 'principal-changed';
+      expect(getProjectPreviewComment(db, storedProjectId, target.id)).toEqual(eventuallyDeleted ? null : storedBefore);
+      expect(errors).toHaveLength(['lookup-throws', 'lookup-unavailable', 'unknown-path'].includes(scenario) ? 2 : 0);
+    } finally { service.dispose(); }
+  },
+);
