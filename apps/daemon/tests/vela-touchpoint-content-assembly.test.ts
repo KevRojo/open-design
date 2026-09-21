@@ -209,11 +209,40 @@ describe('daemon touchpoint content assembly', () => {
       heldContentLocale: LOCALE,
     });
     expect(warm.status).toBe(200);
+    // Byte for byte, which is also what guards the re-encode: blobs are stored
+    // as raw bytes and encoded back to base64 on the way out, so a rebuilt
+    // response matches the original only while upstream sends canonical
+    // base64. If Vela ever folds lines or switches to base64url, this is the
+    // assertion that says so.
     expect(warm.text).toBe(cold.text);
     expect(warm.text).toBe(JSON.stringify(FULL_RESPONSE));
     expect(warm.text).not.toContain('contentOmitted');
     // The saving is on the WAN hop only; the browser's own response is unchanged.
     expect(upstreamBytes[1]).toBeLessThan(upstreamBytes[0]! / 10);
+  });
+
+  it('never forwards bytes its digest did not cover', async () => {
+    await decide();
+    // `SHARED` is 4121 bytes, so its base64 form ends in padding and Node's
+    // decoder drops anything appended after it. The digest is computed over
+    // that decoded view, so it goes on matching while the file -- and the
+    // response built from it -- carries nine bytes nobody verified.
+    fs.appendFileSync(blobFile(digest(SHARED)), 'GARBAGEXX');
+    calls = [];
+    const next = await decide();
+    expect(next.status).toBe(200);
+    // The daemon hands over the response it actually verified, or it asks
+    // again. It does not hand over one it only appeared to verify.
+    expect(next.text).toBe(JSON.stringify(FULL_RESPONSE));
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.heldContentId).toBeNull();
+    // The consequence this pins, in one line: `atob` is WHATWG
+    // forgiving-base64 and strips ASCII whitespace only. Any other stray
+    // character throws, the placement never mounts, and because the daemon
+    // believed it succeeded no fallback anywhere is reached.
+    const rebuilt = JSON.parse(next.text) as { content: { resources: Array<{ bytes: string }> } };
+    for (const resource of rebuilt.content.resources)
+      expect(() => atob(resource.bytes)).not.toThrow();
   });
 
   it('keeps serving the campaign when the cached bytes are corrupted, and stops paying for them', async () => {

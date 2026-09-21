@@ -19,7 +19,11 @@ import { createTouchpointContentCache } from '../src/routes/touchpoint-content-c
 const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
 const base64 = (value: string) => Buffer.from(value, 'utf8').toString('base64');
 
-const SHARED = 'export const shared = 1;';
+// 25 bytes, deliberately not a multiple of three: its base64 form therefore
+// carries padding, which is what makes appended garbage invisible to Node's
+// tolerant decoder. A fixture whose length divides by three would fold the
+// garbage into the decode, break the digest, and pass for the wrong reason.
+const SHARED = 'export const shared = 1;\n';
 const MODAL_ENTRY = "import './shared.js'; export function mount(root) { root.textContent = 'modal'; }";
 const BADGE_ENTRY = "import './shared.js'; export function mount(root) { root.textContent = 'badge'; }";
 
@@ -151,6 +155,33 @@ describe('touchpoint content cache', () => {
     const [corrupted] = fs.readdirSync(blobsDir());
     fs.writeFileSync(path.join(blobsDir(), corrupted as string), base64('tampered'));
     expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+  });
+
+  it('refuses a blob whose stored bytes are not exactly the bytes its digest names', () => {
+    const cache = createTouchpointContentCache(dataDir);
+    const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
+    cache.remember(MODAL, full);
+    // Node's base64 decoder silently drops every character outside the
+    // alphabet, so a digest taken over the decoded view never covered these
+    // bytes -- while the file, and whatever the cache hands back, still
+    // carries them. The browser's `atob` is not tolerant the same way.
+    fs.appendFileSync(blobFile(digest(SHARED)), 'GARBAGEXX');
+    expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+  });
+
+  it('hands back only bytes a browser can decode', () => {
+    const cache = createTouchpointContentCache(dataDir);
+    const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
+    cache.remember(MODAL, full);
+    fs.appendFileSync(blobFile(digest(SHARED)), 'GARBAGEXX');
+    const rebuilt = cache.reassemble(MODAL, trimmedResponse(full)) as
+      | { content: { resources: Array<{ bytes: string }> } }
+      | null;
+    // Either the cache refuses (it does now), or every resource it vouches for
+    // survives the decoder the browser actually uses. What must never happen is
+    // a package the daemon calls verified and the browser rejects.
+    for (const resource of rebuilt?.content.resources ?? [])
+      expect(() => atob(resource.bytes)).not.toThrow();
   });
 
   it('repairs a damaged blob the next time it holds the real bytes', () => {
