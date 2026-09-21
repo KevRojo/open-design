@@ -252,7 +252,9 @@ export function ShareTab({
                           }}
                         >
                           {publishingPublicFile ? (
-                            <RemixIcon name="loader-4-line" size={15} className="icon-spin" />
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true" focusable="false" className="icon-spin">
+                              <path d="M12 3a9 9 0 1 0 9 9" />
+                            </svg>
                           ) : (
                             <svg
                               width="13"

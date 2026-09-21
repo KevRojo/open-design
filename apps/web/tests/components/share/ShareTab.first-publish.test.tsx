@@ -113,7 +113,12 @@ describe('S1 first-publish visual seam', () => {
     expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
     if (restriction === 'publishingPublicFile') {
       expect(button).toHaveTextContent('fileViewer.publishingFile');
-      expect(button.querySelector('.icon-spin')).not.toBeNull();
+      const spinner = button.querySelector('.icon-spin');
+      expect(spinner).not.toBeNull();
+      for (const [name, value] of Object.entries({ width: '13', height: '13', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+        expect(spinner).toHaveAttribute(name, value);
+      }
+      expect(spinner?.querySelector('path')).toHaveAttribute('d', 'M12 3a9 9 0 1 0 9 9');
       expect(screen.getByRole('progressbar')).toHaveAttribute('value', '0.45');
     } else {
       expect(button).toHaveAttribute('title', restriction === 'viewerOnly' ? 'read only' : 'fileViewer.shareAfterGenerationComplete');

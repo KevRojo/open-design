@@ -2755,6 +2755,14 @@ for (const origin of ['artifact-card', 'toolbar'] as const) {
       await expect(progress).toHaveCSS('background-color', 'rgb(110, 110, 112)');
       const busy = menu.getByRole('menuitem', { name: /Creating link.*\d+%/ });
       await expect(busy).toBeDisabled();
+      const spinner = busy.locator('.icon-spin');
+      await expect(spinner).toHaveCSS('width', '13px');
+      await expect(spinner).toHaveCSS('height', '13px');
+      for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+        await expect(spinner).toHaveAttribute(name, value);
+      }
+      await expect(spinner.locator('path')).toHaveAttribute('d', 'M12 3a9 9 0 1 0 9 9');
+      expect(await spinner.evaluate(node => getComputedStyle(node).animationName)).not.toBe('none');
       await expect(busy).toHaveCSS('color', 'rgb(255, 255, 255)');
       await expect(busy).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
       expect(await progress.boundingBox()).toEqual(await busy.boundingBox());
