@@ -2015,77 +2015,30 @@ process.stdin.on("end", () => {
     expect(uiFull).toContain("needs: [validate_inputs, p0_runners]");
   });
 
-  it("[P1] runs the prerelease code suites outside the pipeline they validate", async () => {
-    // The inverse of what this test used to assert, and deliberately so.
-    //
-    // These four suites once gated `build_*` and `publish`, which meant one
-    // flaky run cost the team a day's package. Making them advisory fixed that
-    // but not the second-order problem: release-prerelease.yml holds ONE
-    // repository-wide concurrency group with cancel-in-progress: false, so a
-    // 45-minute suite still kept the group held and stopped the NEXT prerelease
-    // from starting. They now live in a dispatched workflow of their own.
-    const [prerelease, tests, functionalE2e] = await Promise.all([
+  it("[P1] runs Plan-selected prerelease suites beside delivery without gating publish", async () => {
+    const [prerelease, legacyTests, convergenceConfig] = await Promise.all([
       readFile(releasePrereleaseWorkflowPath, "utf8"),
       readFile(releasePrereleaseTestsWorkflowPath, "utf8"),
-      readFile(uiExtendedMainWorkflowPath, "utf8"),
+      readFile(join(workspaceRoot, ".github", "config", "convergence", "release-prerelease.json"), "utf8"),
     ]);
+    const testJob = workflowJob(prerelease, "test");
+    const publishJob = workflowJob(prerelease, "publish");
+    expect(testJob).toContain("matrix: ${{ fromJSON(needs.metadata.outputs.test_matrix) }}");
+    expect(testJob).toContain("ref: ${{ needs.metadata.outputs.commit }}");
+    expect(testJob).toContain("python3 .github/scripts/release/test_unit.py run");
+    expect(publishJob).not.toContain("- test");
+    expect(publishJob).not.toContain("cache_test");
+    expect(prerelease).not.toContain("dispatch-validation.sh release-prerelease-tests.yml");
+    expect(prerelease).toContain("formal-release: 'true'");
+    const config = JSON.parse(convergenceConfig) as { workflows: { "release-prerelease": { workloads: Record<string, unknown> } } };
+    expect(Object.keys(config.workflows["release-prerelease"].workloads)).toEqual(expect.arrayContaining([
+      "test_functional_e2e", "test_e2e_vitest", "test_daemon_unit_tests", "test_verify",
+    ]));
+    expect(Object.keys(config.workflows["release-prerelease"].workloads)).not.toContain("test_web_workspace_tests");
+    // Kept for release branches cut before the integrated topology existed.
+    expect(legacyTests).toContain("workflow_dispatch:");
+    expect(legacyTests).toContain("group: release-prerelease-tests-${{ inputs.origin_run_id || inputs.commit }}");
 
-    // Gone from the pipeline, in both `needs` and `if`.
-    for (const jobId of ["  functional_e2e:", "  e2e_vitest:", "  daemon_unit_tests:", "  verify:", "  test_signals:"]) {
-      expect(prerelease, jobId).not.toContain(jobId);
-    }
-    for (const [start, end] of [
-      ["  build_mac:", "  build_mac_intel:"],
-      ["  build_mac_intel:", "  build_win:"],
-      ["  build_win:", "  build_linux:"],
-      ["  build_linux:", "  publish:"],
-      ["  publish:", "  dispatch_smoke:"],
-    ] as const) {
-      const job = sectionBetween(prerelease, start, end);
-      expect(job).toContain("ref: ${{ needs.metadata.outputs.commit }}");
-      // Match the dependency forms, not the bare word: build_mac legitimately
-      // contains "verify" inside `codesign --verify`.
-      for (const suite of ["functional_e2e", "e2e_vitest", "daemon_unit_tests", "verify"]) {
-        expect(job, `${start} must not depend on ${suite}`).not.toContain(`needs.${suite}`);
-        expect(job, `${start} must not depend on ${suite}`).not.toContain(`- ${suite}\n`);
-        expect(job, `${start} must not depend on ${suite}`).not.toContain(`, ${suite}`);
-      }
-    }
-
-    // Present, intact, and aimed at the exact commit that was built — a branch
-    // head would validate a different tree than the one that shipped.
-    const gate = sectionBetween(tests, "  functional_e2e:", "  e2e_vitest:");
-    expect(gate).toContain("uses: ./.github/workflows/ui-extended-main.yml");
-    expect(gate).toContain("ref: ${{ inputs.commit }}");
-    expect(gate).toContain("suite: p0");
-
-    const e2eVitestGate = sectionBetween(tests, "  e2e_vitest:", "  daemon_unit_tests:");
-    expect(e2eVitestGate).toContain("ref: ${{ inputs.commit }}");
-    expect(e2eVitestGate).toContain("playwright install --with-deps chromium");
-    expect(e2eVitestGate).toContain("Allow Chromium user namespaces on GitHub Ubuntu");
-    expect(e2eVitestGate).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
-    expect(e2eVitestGate).not.toContain("--no-sandbox");
-    expect(e2eVitestGate.indexOf("kernel.apparmor_restrict_unprivileged_userns=0"))
-      .toBeLessThan(e2eVitestGate.indexOf("pnpm --filter @open-design/e2e test"));
-    expect(e2eVitestGate).toContain("pnpm --filter @open-design/e2e test");
-
-    const daemonGate = sectionBetween(tests, "  daemon_unit_tests:", "  verify:");
-    expect(daemonGate).toContain("shard: [1, 2, 3, 4]");
-    expect(daemonGate).toContain("ref: ${{ inputs.commit }}");
-    expect(daemonGate).toContain("pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4");
-
-    const verifyGate = tests.slice(tests.indexOf("  verify:"));
-    expect(verifyGate).toContain("ref: ${{ inputs.commit }}");
-    expect(verifyGate).toContain("pnpm -r --workspace-concurrency=4 --if-present run typecheck");
-    expect(verifyGate).toContain("run: pnpm guard");
-
-    // A group scoped to the origin run, never the pipeline's.
-    expect(tests).toContain("group: release-prerelease-tests-${{ inputs.origin_run_id || inputs.commit }}");
-    expect(tests).not.toContain("open-design-release-prerelease");
-
-    expect(functionalE2e).toContain("workflow_call:");
-    expect(functionalE2e).not.toContain("schedule:");
-    expect(functionalE2e).toContain("ref: ${{ inputs.ref || github.sha }}");
   });
 
   it("[P2] rejects duplicate file assignments across UI P0 shards", () => {
@@ -2683,8 +2636,8 @@ process.stdin.on("end", () => {
     expect(releaseStableWorkflow).not.toMatch(/namespaces\/release-stable(?:-intel|-win|-linux)?\b/);
 
     expectChannelWorkflowNamespaces(releasePrereleaseWorkflow, "prerelease", {
-      hasLinuxSmoke: true,
-      packagedSmokeWorkflow: await readFile(releasePrereleaseSmokeWorkflowPath, "utf8"),
+      hasLinuxSmoke: false,
+      packagedSmokeWorkflow: releasePrereleaseWorkflow,
     });
     expect(releaseBetaWorkflow).toContain("RELEASE_NAMESPACE: release-beta");
     expect(releaseBetaWorkflow).toContain("RELEASE_NAMESPACE: release-beta-win");
@@ -2714,11 +2667,7 @@ process.stdin.on("end", () => {
     expect(betaWindowsBuildScript).toContain('$env:OD_PACKAGED_E2E_WIN_UPDATE_FIXTURE = "tools-serve"');
 
     expectWindowsUpdaterSmokeContract(releaseBetaWorkflow, "beta");
-    // prerelease runs its packaged smoke in release-prerelease-smoke.yml, so
-    // the Windows updater contract is asserted there rather than on the build
-    // pipeline. The knobs still originate in release-prerelease.yml, which
-    // forwards them on dispatch.
-    expectWindowsUpdaterSmokeContract(await readFile(releasePrereleaseSmokeWorkflowPath, "utf8"), "prerelease");
+    expectWindowsUpdaterSmokeContract(releasePrereleaseWorkflow, "prerelease");
     expectWindowsUpdaterSmokeContract(releaseStableWorkflow, "stable");
   });
 
@@ -2744,9 +2693,8 @@ process.stdin.on("end", () => {
     const jobBounds: Array<[string, string]> = [
       ["  build_mac:", "  build_mac_intel:"],
       ["  build_mac_intel:", "  build_win:"],
-      ["  build_win:", "  build_linux:"],
-      ["  build_linux:", "  publish:"],
-      ["  publish:", "  cleanup_partial_release_assets:"],
+      ["  build_win:", "  publish:"],
+      ["  publish:", "  smoke_plan:"],
     ];
     for (const [start, end] of jobBounds) {
       expect(sectionBetween(prereleaseWorkflow, start, end)).toContain(releaseCommitEnv);
@@ -3216,7 +3164,7 @@ process.stdin.on("end", () => {
   });
 
   it("[P1] smokes the published prerelease artifact, not the build directory", async () => {
-    const [prerelease, smoke, stage, resolver] = await Promise.all([
+    const [prerelease, legacySmoke, stage, resolver] = await Promise.all([
       readFile(releasePrereleaseWorkflowPath, "utf8"),
       readFile(releasePrereleaseSmokeWorkflowPath, "utf8"),
       readFile(join(workspaceRoot, "tools/pack/src/artifacts/stage.ts"), "utf8"),
@@ -3229,40 +3177,30 @@ process.stdin.on("end", () => {
     // concurrency group open long after the package had shipped.
     const macJob = sectionBetween(prerelease, "  build_mac:", "  build_mac_intel:");
     const macX64Job = sectionBetween(prerelease, "  build_mac_intel:", "  build_win:");
-    const winJob = sectionBetween(prerelease, "  build_win:", "  build_linux:");
+    const winJob = sectionBetween(prerelease, "  build_win:", "  publish:");
     for (const [label, job] of [["mac", macJob], ["mac_x64", macX64Job], ["win", winJob]] as const) {
       expect(job, label).not.toContain("release-smoke.ts");
       expect(job, label).not.toContain("smoke_result");
       expect(job, label).toContain("RELEASE_SMOKE_MODE: skip");
     }
 
-    // Linux is the exception on purpose: that whole lane is opt-in behind
-    // vars.ENABLE_STABLE_LINUX and is on nobody's critical path.
-    const linuxJob = sectionBetween(prerelease, "  build_linux:", "  publish:");
-    const linuxSmoke = sectionBetween(
-      linuxJob,
-      "      - name: Smoke prerelease linux AppImage runtime",
-      "      - name: Upload linux e2e spec report",
-    );
-    expect(linuxJob).toContain("outputs:\n      smoke_result: ${{ steps.linux_smoke.outcome }}");
-    expect(linuxSmoke).toContain("id: linux_smoke");
-    expect(linuxSmoke).toContain("continue-on-error: true");
-    expect(linuxSmoke).toContain('OD_PACKAGED_E2E_LINUX_APPIMAGE: "1"');
-    expect(linuxSmoke).toContain("xvfb-run -a pnpm test specs/linux.spec.ts");
+    expect(prerelease).not.toContain("build_linux");
+    expect(prerelease).not.toContain("release-prerelease-linux");
 
     // The smoke lane starts from the R2 object a user downloads, not from
     // electron-builder's output directory.
-    expect(smoke).toContain("tools-release artifact plan");
-    expect(smoke).toContain("tools-release artifact resolve");
-    expect(smoke).toContain("tools-pack stage-artifact");
-    expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
-    expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
-    expect(smoke).toContain("VERSION_METADATA_URL: ${{ inputs.version_metadata_url }}");
+    expect(prerelease).toContain("tools-release artifact plan");
+    expect(prerelease).toContain("tools-release artifact resolve");
+    expect(prerelease).toContain("tools-pack stage-artifact");
+    expect(prerelease).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
+    expect(prerelease).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
+    expect(prerelease).toContain("VERSION_METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}");
     // The install identity (bundle name, uninstall registry key, launcher
     // channel) is derived from the version, so it has to be the version the
     // artifact was actually built with.
-    expect(smoke).toContain("OD_PACKAGED_E2E_RELEASE_VERSION: ${{ inputs.version }}");
-    expect(smoke).toContain("OD_PACKAGED_E2E_RELEASE_CHANNEL: prerelease");
+    expect(prerelease).toContain("OD_PACKAGED_E2E_RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}");
+    expect(prerelease).toContain("OD_PACKAGED_E2E_RELEASE_CHANNEL: prerelease");
+    expect(legacySmoke).toContain("workflow_dispatch:");
 
     // The staged path must stay in lockstep with resolveMacPaths().dmgPath and
     // resolveWinPaths().setupPath, which is the only file `tools-pack install`
@@ -3369,11 +3307,11 @@ process.stdin.on("end", () => {
     //    would skip the fallback in exactly the case it exists for — the trap
     //    that skipped `dispatch_smoke` for N runs. It must break that itself.
     expect(fallbackJob).toContain("always() && !cancelled()");
-    // The dispatch-side ping is steps of `dispatch_validation`, NOT a job:
+    // The dispatch-side ping is steps of `dispatch_card`, NOT a job:
     // nothing may appear in a `needs:` on the dispatchers (asserted in
     // tools/pack/tests/release-workflows.test.ts), and a step needs no such
     // edge to read the dispatch outcome.
-    const dispatchJob = sectionBetween(prerelease, "  dispatch_validation:", "  build_mac:");
+    const dispatchJob = sectionBetween(prerelease, "  dispatch_card:", "  test:");
     expect(dispatchJob).toContain(".github/scripts/feishu.py fallback");
     expect(dispatchJob).toContain(".github/scripts/feishu.py notice");
     expect(dispatchJob).toContain("STAGE: dispatch");
@@ -4222,10 +4160,12 @@ function expectChannelWorkflowNamespaces(
   expect(packagedSmoke).toContain(`OD_PACKAGED_E2E_NAMESPACE: ${namespace}-intel`);
   expect(workflow).toContain(`"--namespace", "${namespace}-win",`);
   expect(packagedSmoke).toContain(`OD_PACKAGED_E2E_NAMESPACE: ${namespace}-win`);
-  expect(workflow).toContain(`--namespace ${namespace}-linux`);
-
   if (options.hasLinuxSmoke) {
+    expect(workflow).toContain(`--namespace ${namespace}-linux`);
     expect(workflow).toContain(`OD_PACKAGED_E2E_NAMESPACE: ${namespace}-linux`);
+  } else {
+    expect(workflow).not.toContain(`--namespace ${namespace}-linux`);
+    expect(workflow).not.toContain(`OD_PACKAGED_E2E_NAMESPACE: ${namespace}-linux`);
   }
 }
 
@@ -4259,7 +4199,7 @@ function expectCountedReleaseWorkflowCallContract(workflow: string, channel: "pr
   expect(workflow).toContain("release_version:");
   expect(workflow).toContain("description: \"Optional git ref to build.");
   expect(workflow).toContain("ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}");
-  expect(workflow).toContain("Resolve built commit");
+  expect(workflow).toMatch(/Resolve built (commit|identity)/);
   expect(workflow).toContain("GITHUB_SHA: ${{ env.BUILT_SHA }}");
   expect(workflow).toContain("GITHUB_REF_NAME: ${{ inputs.ref != '' && inputs.ref || github.ref_name }}");
   expect(workflow).toContain(`Capture previous ${channel} commit`);
@@ -4268,13 +4208,13 @@ function expectCountedReleaseWorkflowCallContract(workflow: string, channel: "pr
   expect(workflow).toContain("mac_arm64_url:");
   expect(workflow).toContain("mac_intel_url:");
   expect(workflow).toContain("win_url:");
-  expect(workflow).toContain("linux_url:");
+  if (channel !== "prerelease") expect(workflow).toContain("linux_url:");
   expect(workflow).toContain("GITHUB_SHA: ${{ needs.metadata.outputs.commit }}");
   expect(workflow).toContain("version_metadata_url: ${{ steps.outputs.outputs.version_metadata_url }}");
   expect(workflow).toContain("mac_arm64_url: ${{ steps.outputs.outputs.mac_arm64_dmg_url }}");
   expect(workflow).toContain("mac_intel_url: ${{ steps.outputs.outputs.mac_x64_dmg_url }}");
   expect(workflow).toContain("win_url: ${{ steps.outputs.outputs.win_x64_installer_url }}");
-  expect(workflow).toContain("linux_url: ${{ steps.outputs.outputs.linux_x64_appImage_url }}");
+  if (channel !== "prerelease") expect(workflow).toContain("linux_url: ${{ steps.outputs.outputs.linux_x64_appImage_url }}");
 }
 
 function expectReleaseLinuxBuildPreservesEvidence(workflow: string, stepName: string): void {

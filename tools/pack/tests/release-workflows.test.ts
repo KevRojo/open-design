@@ -177,7 +177,7 @@ function parseWorkflowSteps(content: string): WorkflowStep[] {
 const SKIP_CHAIN_BREAKERS = ["always(", "cancelled(", "failure("];
 
 describe("release workflows", () => {
-  it("disables beta outer tools-pack caches without changing other release lanes", async () => {
+  it("uses Plan products instead of outer tools-pack caches in beta and prerelease", async () => {
     const workflows = await Promise.all([
       readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/workflows/release-prerelease.yml", import.meta.url), "utf8"),
@@ -188,8 +188,10 @@ describe("release workflows", () => {
     expect(workflows[0]).not.toContain("win_tools_pack_cache");
     expect(workflows[0]).toContain("uses: ./.github/actions/setup-workspace");
     expect(workflows[0]).toContain("--cache-dir");
-    expect(workflows.map((workflow) => countOccurrences(workflow, "keep=1"))).toEqual([0, 2, 0]);
-    expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([0, 1, 1]);
+    expect(workflows.map((workflow) => countOccurrences(workflow, "keep=1"))).toEqual([0, 0, 0]);
+    expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([0, 0, 1]);
+    expect(workflows[1]).not.toContain("uses: actions/cache/");
+    expect(workflows[1]).toContain(".github/config/convergence/release-prerelease.json");
     for (const workflow of workflows) {
       expect(workflow).not.toContain("keep=3");
       expect(workflow).not.toContain("$keep = 3");
@@ -287,11 +289,11 @@ describe("release workflows", () => {
     const win = sectionBetween(beta, "  build_win_x64:", "  publish:");
     const betaMetadata = sectionBetween(beta, "  release_prepare:", "  common:");
     const betaPublish = sectionAfter(beta, "  publish:");
-    const prereleaseMetadata = sectionBetween(prerelease, "  metadata:", "  dispatch_validation:");
-    const prereleasePublish = sectionBetween(prerelease, "  publish:", "  cleanup_partial_release_assets:");
+    const prereleaseMetadata = sectionBetween(prerelease, "  metadata:", "  common:");
+    const prereleasePublish = sectionBetween(prerelease, "  publish:", "  smoke_plan:");
     const prereleaseMac = sectionBetween(prerelease, "  build_mac:", "  build_mac_intel:");
     const prereleaseMacX64 = sectionBetween(prerelease, "  build_mac_intel:", "  build_win:");
-    const prereleaseWin = sectionBetween(prerelease, "  build_win:", "  build_linux:");
+    const prereleaseWin = sectionBetween(prerelease, "  build_win:", "  publish:");
     const stableMetadata = sectionBetween(stable, "  metadata:", "  verify:");
     const stablePublish = sectionBetween(stable, "  publish:", "  cleanup_partial_release_assets:");
 
@@ -351,11 +353,12 @@ describe("release workflows", () => {
       expect(section).toContain("save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}");
       expect(section.indexOf("uses: ./.github/actions/setup-workspace")).toBeLessThan(section.indexOf("run: pnpm exec tools-release"));
     }
-    for (const metadata of [prereleaseMetadata, stableMetadata]) {
-      expect(metadata).toContain("uses: pnpm/action-setup@v5");
-      expect(metadata).toContain("run: pnpm install --frozen-lockfile");
-      expect(metadata.indexOf("run: pnpm install --frozen-lockfile")).toBeLessThan(metadata.indexOf("tools-release prepare"));
-    }
+    expect(prereleaseMetadata).toContain("uses: ./.github/actions/setup-workspace");
+    expect(prereleaseMetadata).toContain("release-prerelease.json");
+    expect(prereleaseMetadata).toContain("--mode enforce");
+    expect(stableMetadata).toContain("uses: pnpm/action-setup@v5");
+    expect(stableMetadata).toContain("run: pnpm install --frozen-lockfile");
+    expect(stableMetadata.indexOf("run: pnpm install --frozen-lockfile")).toBeLessThan(stableMetadata.indexOf("tools-release prepare"));
     for (const publish of [prereleasePublish, stablePublish]) {
       expect(publish).toContain("uses: pnpm/action-setup@v5");
       expect(publish).toContain("run: pnpm install --frozen-lockfile");
@@ -423,48 +426,44 @@ describe("release workflows", () => {
     expect(prereleaseMetadata).toContain("OPEN_DESIGN_RELEASE_CHANNEL: prerelease");
     expect(prereleasePublish).toContain('GITHUB_RELEASE_ENABLED: "false"');
     expect(prerelease).not.toContain("gh release");
-    expect(prereleaseMac).toContain("uses: actions/cache/restore@v5");
-    expect(prereleaseMac).toContain("uses: actions/cache/save@v5");
-    expect(prereleaseMac).toContain("tools-pack-mac-v1-prerelease-${RUNNER_OS}-arm64-");
-    expect(prereleaseMac).toContain("pnpm exec tools-pack mac cleanup --dir \"$RUNNER_TEMP/tools-pack\" --namespace release-prerelease --json");
-    expect(prereleaseMac).toContain("exec tools-pack mac build");
+    expect(prereleaseMac).not.toContain("uses: actions/cache/");
+    expect(prereleaseMac).toContain("[validate] Source references");
+    expect(prereleaseMac).toContain("[restore] Shared JavaScript");
+    expect(prereleaseMac).toContain("exec tools-pack mac package");
     expect(prereleaseMac).toContain("--cache-dir \"$RUNNER_TEMP/tools-pack-cache\"");
-    expect(countOccurrences(prereleaseMac, "--notarize")).toBe(2);
-    // Both the primary build and the cache-miss retry must carry Apple notary
-    // env, or notarization fails closed on the retry path.
+    expect(countOccurrences(prereleaseMac, "--notarize")).toBe(1);
     expect(
       countOccurrences(prereleaseMac, "APPLE_ID: ${{ secrets.APPLE_ID }}"),
-    ).toBe(2);
+    ).toBe(1);
     expect(
       countOccurrences(
         prereleaseMac,
         "APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
       ),
-    ).toBe(2);
+    ).toBe(1);
     expect(
       countOccurrences(prereleaseMac, "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}"),
-    ).toBe(2);
+    ).toBe(1);
     expect(prereleaseMac).toContain("tools-release write-report");
-    expect(prereleaseMacX64).toContain("uses: actions/cache/restore@v5");
-    expect(prereleaseMacX64).toContain("uses: actions/cache/save@v5");
-    expect(prereleaseMacX64).toContain("tools-pack-mac-v1-prerelease-${RUNNER_OS}-x64-");
-    expect(prereleaseMacX64).toContain("pnpm exec tools-pack mac cleanup --dir \"$RUNNER_TEMP/tools-pack\" --namespace release-prerelease-intel --json");
-    expect(prereleaseMacX64).toContain("exec tools-pack mac build");
+    expect(prereleaseMacX64).not.toContain("uses: actions/cache/");
+    expect(prereleaseMacX64).toContain("[restore] Release executor");
+    expect(prereleaseMacX64).toContain("mac runtime-restore");
+    expect(prereleaseMacX64).toContain('"$RELEASE_EXECUTOR_ROOT/pack/dist/index.mjs" mac package');
     expect(prereleaseMacX64).toContain("--cache-dir \"$RUNNER_TEMP/tools-pack-cache\"");
-    expect(countOccurrences(prereleaseMacX64, "--notarize")).toBe(2);
+    expect(countOccurrences(prereleaseMacX64, "--notarize")).toBe(1);
     expect(
       countOccurrences(prereleaseMacX64, "APPLE_ID: ${{ secrets.APPLE_ID }}"),
-    ).toBe(2);
+    ).toBe(1);
     expect(
       countOccurrences(
         prereleaseMacX64,
         "APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
       ),
-    ).toBe(2);
+    ).toBe(1);
     expect(
       countOccurrences(prereleaseMacX64, "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}"),
-    ).toBe(2);
-    expect(prereleaseMacX64).toContain("tools-release write-report");
+    ).toBe(1);
+    expect(prereleaseMacX64).toContain('"$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" write-report');
     for (const [prereleaseMacJob, nextStep] of [
       [prereleaseMac, "Write mac_arm64 release report"],
       [prereleaseMacX64, "Write mac_x64 release report"],
@@ -478,10 +477,11 @@ describe("release workflows", () => {
         prereleaseMacJob.indexOf(nextStep),
       );
     }
-    expect(prereleaseWin).toContain("tools-pack-win-v1-prerelease-$env:RUNNER_OS-");
-    expect(prereleaseWin).toContain("tools-pack win validate-payload");
+    expect(prereleaseWin).not.toContain("uses: actions/cache/");
+    expect(prereleaseWin).toContain("[restore] Release executor");
+    expect(prereleaseWin).toContain("win validate-payload");
     expect(prereleaseWin).toContain("release-build\\win_x64\\build.json");
-    expect(prereleaseWin).toContain("tools-release write-report");
+    expect(prereleaseWin).toContain('"$env:RELEASE_EXECUTOR_ROOT\\release\\dist\\index.mjs" write-report');
     expect(stable).not.toContain(".github/scripts/release/assets/mac.sh");
     expect(stable).not.toContain(".github/scripts/release/assets/mac-intel.sh");
     expect(stable).not.toContain(".github/scripts/release/assets/win.ps1");
@@ -562,20 +562,18 @@ describe("release workflows", () => {
     // need each other, a failure or skip applies to all jobs in the dependency
     // chain from the point of failure or skip onwards."
     //
-    // The break is per job and is NOT inherited. `always()` on `publish` lets
-    // PUBLISH run past a skipped `build_linux`; it does nothing for publish's
-    // own dependents, which are still downstream of the same skip. A job whose
+    // The break is per job and is NOT inherited. `always()` on a job does
+    // nothing for that job's own dependents, which are still downstream of the
+    // same failed or skipped ancestor. A job whose
     // `if` hand-checks `needs.<x>.result` is by construction making its own
     // decision about an upstream outcome — so it has to break the chain too,
     // or GitHub's implicit `success()` skips it before that condition is ever
     // evaluated.
     //
-    // release-prerelease.yml's `dispatch_smoke` was exactly that shape, and
-    // `build_linux` is skipped on every single run because the repository has
-    // no ENABLE_STABLE_LINUX variable. Run 34149795952: publish succeeded,
-    // version_metadata_url was published, enable_smoke came through as true —
-    // and the job was skipped with zero steps, so release-prerelease-smoke.yml
-    // had never once run.
+    // release-prerelease.yml's former `dispatch_smoke` was exactly that shape.
+    // Run 34149795952 published version metadata but skipped the dispatcher
+    // without running a step, which is why the integrated topology retains the
+    // explicit condition on every validation job.
     const files = [
       "release-prerelease.yml",
       "release-beta.yml",
@@ -608,14 +606,14 @@ describe("release workflows", () => {
     }
     expect(unreachable, "these jobs are skipped before their own condition is evaluated").toEqual([]);
 
-    // And specifically: the smoke dispatcher must stay reachable while
-    // build_linux stays opt-in.
+    // The integrated smoke planner sits below publish and makes its own
+    // decision even when the optional Intel build was skipped.
     const prerelease = parseJobGraph(contents[0] ?? "");
-    const dispatchSmoke = prerelease.get("dispatch_smoke");
-    expect(dispatchSmoke, "release-prerelease.yml must still dispatch packaged smoke").toBeDefined();
-    expect(transitiveNeeds(prerelease, "dispatch_smoke")).toContain("build_linux");
-    expect(prerelease.get("build_linux")?.if).toContain("vars.ENABLE_STABLE_LINUX");
-    expect(SKIP_CHAIN_BREAKERS.some((breaker) => (dispatchSmoke?.if ?? "").includes(breaker))).toBe(true);
+    const smokePlan = prerelease.get("smoke_plan");
+    expect(smokePlan, "release-prerelease.yml must plan downloaded-artifact smoke").toBeDefined();
+    expect(transitiveNeeds(prerelease, "smoke_plan")).toContain("build_mac_intel");
+    expect(prerelease.has("build_linux")).toBe(false);
+    expect(SKIP_CHAIN_BREAKERS.some((breaker) => (smokePlan?.if ?? "").includes(breaker))).toBe(true);
   });
 
   it("keeps the prerelease card fallback reachable after the step it alerts on has failed", async () => {
@@ -641,9 +639,9 @@ describe("release workflows", () => {
       readFile(new URL("../../../.github/workflows/release-prerelease-card.yml", import.meta.url), "utf8"),
     ]);
 
-    // The notifier group inside `dispatch_validation` sits after two dispatch
-    // steps that can fail, so every step of it needs a status function.
-    const dispatchSteps = parseWorkflowSteps(prerelease).filter((step) => step.job === "dispatch_validation");
+    // The notifier group inside `dispatch_card` sits after the card dispatch,
+    // so every fallback step needs a status function.
+    const dispatchSteps = parseWorkflowSteps(prerelease).filter((step) => step.job === "dispatch_card");
     const notifierStart = dispatchSteps.findIndex((step) => step.name === "Compose the fallback notice");
     expect(notifierStart, "release-prerelease.yml must still carry the fallback notifier").toBeGreaterThan(0);
     const stranded = dispatchSteps
@@ -678,14 +676,7 @@ describe("release workflows", () => {
     }
   });
 
-  it("keeps every prerelease validation lane out of the release concurrency group", async () => {
-    // release-prerelease.yml holds ONE repository-wide concurrency group with
-    // cancel-in-progress: false. Anything that outlives `publish` inside it
-    // keeps that group held, which stops the next prerelease from STARTING —
-    // so making the test jobs advisory was not enough, they had to leave the
-    // workflow. Lock that: the pipeline is metadata → build → publish plus two
-    // fire-and-forget dispatchers, and the lanes live in workflows whose
-    // concurrency is scoped to the origin run.
+  it("keeps prerelease validation in one Plan-shaped DAG without gating publish", async () => {
     const [prerelease, tests, smoke, card, dispatcher] = await Promise.all([
       readFile(new URL("../../../.github/workflows/release-prerelease.yml", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/workflows/release-prerelease-tests.yml", import.meta.url), "utf8"),
@@ -695,31 +686,32 @@ describe("release workflows", () => {
     ]);
 
     expect(prerelease).toContain("group: open-design-release-prerelease");
-    for (const jobId of ["  functional_e2e:", "  e2e_vitest:", "  daemon_unit_tests:", "  verify:", "  test_signals:"]) {
-      expect(prerelease, `${jobId} must not be a release-prerelease job any more`).not.toContain(jobId);
-    }
-    // The mac/Windows packaged smoke left with them; Linux keeps its in-job
-    // smoke because that whole lane is opt-in and on nobody's critical path.
-    expect(prerelease).not.toContain("Smoke prerelease mac packaged runtime");
-    expect(prerelease).not.toContain("Smoke prerelease mac_x64 packaged runtime");
-    expect(prerelease).not.toContain("Smoke prerelease windows packaged runtime");
-    expect(prerelease).toContain("Smoke prerelease linux AppImage runtime");
+    expect(prerelease).toContain("  test:");
+    expect(prerelease).toContain("  cache_test:");
+    expect(prerelease).toContain("  smoke_plan:");
+    expect(prerelease).toContain("  smoke_mac_arm64:");
+    expect(prerelease).toContain("  smoke_mac_x64:");
+    expect(prerelease).toContain("  smoke_win_x64:");
+    expect(prerelease).toContain("Smoke prerelease mac packaged runtime");
+    expect(prerelease).toContain("Smoke prerelease mac_x64 packaged runtime");
+    expect(prerelease).toContain("Smoke prerelease windows packaged runtime");
+    expect(prerelease).not.toContain("build_linux");
+    expect(prerelease).not.toContain("linux_x64");
+    expect(prerelease).not.toContain("ENABLE_STABLE_LINUX");
 
-    // Dispatchers, and nothing depending on them.
-    expect(prerelease).toContain("  dispatch_validation:");
-    expect(prerelease).toContain("  dispatch_smoke:");
-    expect(prerelease).toContain("dispatch-validation.sh release-prerelease-tests.yml");
+    // Only the progressive card remains a separate workflow.
+    expect(prerelease).toContain("  dispatch_card:");
     expect(prerelease).toContain("dispatch-validation.sh release-prerelease-card.yml");
-    expect(prerelease).toContain("dispatch-validation.sh release-prerelease-smoke.yml");
-    expect(prerelease).not.toContain("- dispatch_validation");
-    expect(prerelease).not.toContain("- dispatch_smoke");
-    // Smoke needs a package, so it waits for publish — but only long enough to
-    // POST the dispatch. Asserted as substance rather than as one literal
-    // line: the previous form pinned the exact string of a condition that
-    // never ran, which made the topology test agree with the bug. Reachability
-    // itself is covered by "keeps a job that hand-checks an upstream result
-    // reachable past a skipped ancestor" above.
-    const smokeCondition = parseJobGraph(prerelease).get("dispatch_smoke")?.if ?? "";
+    expect(prerelease).not.toContain("dispatch-validation.sh release-prerelease-tests.yml");
+    expect(prerelease).not.toContain("dispatch-validation.sh release-prerelease-smoke.yml");
+    expect(prerelease).toContain('-f "validation_location=origin"');
+
+    const graph = parseJobGraph(prerelease);
+    const publishAncestors = transitiveNeeds(graph, "publish");
+    expect(publishAncestors).not.toContain("test");
+    expect(publishAncestors).not.toContain("cache_test");
+    expect(publishAncestors).not.toContain("smoke_plan");
+    const smokeCondition = graph.get("smoke_plan")?.if ?? "";
     expect(smokeCondition).toContain("inputs.enable_smoke");
     expect(smokeCondition).toContain("needs.publish.result == 'success'");
     expect(smokeCondition).toContain("needs.publish.outputs.version_metadata_url != ''");
@@ -729,11 +721,7 @@ describe("release workflows", () => {
     expect(dispatcher).toContain('for candidate in "${PRIMARY_REF:-}" "${FALLBACK_REF:-}"');
     expect(dispatcher).toContain('gh workflow run "$workflow" --ref "$ref"');
 
-    for (const [label, workflow] of [
-      ["tests", tests],
-      ["smoke", smoke],
-      ["card", card],
-    ] as const) {
+    for (const [label, workflow] of [["tests", tests], ["smoke", smoke], ["card", card]] as const) {
       expect(workflow, label).toContain("workflow_dispatch:");
       expect(workflow, label).not.toContain("open-design-release-prerelease");
       expect(workflow, label).toContain("cancel-in-progress: false");
@@ -743,34 +731,24 @@ describe("release workflows", () => {
       expect(workflow, label).toContain("group: release-prerelease-");
     }
 
-    // The suites moved verbatim and still run against the resolved build commit.
-    for (const suite of [
-      "pnpm --filter @open-design/e2e test",
-      "pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4",
-      "pnpm -r --workspace-concurrency=4 --if-present run typecheck",
-      "run: pnpm guard",
-      "uses: ./.github/workflows/ui-extended-main.yml",
-    ]) {
-      expect(tests).toContain(suite);
-    }
-    expect(tests).toContain("ref: ${{ inputs.commit }}");
-    expect(tests).not.toContain("needs.metadata.outputs.commit");
+    expect(prerelease).toContain("python3 .github/scripts/release/test_unit.py run");
+    expect(prerelease).toContain("matrix: ${{ fromJSON(needs.metadata.outputs.test_matrix) }}");
+    expect(prerelease).toContain("ref: ${{ needs.metadata.outputs.commit }}");
 
     // Smoke installs the PUBLISHED artifact, not a local build directory.
-    expect(smoke).toContain("tools-release artifact plan");
-    expect(smoke).toContain("tools-pack stage-artifact");
-    expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
-    expect(smoke).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
-    expect(smoke).not.toContain("tools-pack mac build");
+    expect(prerelease).toContain("tools-release artifact plan");
+    expect(prerelease).toContain("tools-pack stage-artifact");
+    expect(prerelease).toContain("pnpm exec tsx scripts/release-smoke.ts mac specs/mac.spec.ts");
+    expect(prerelease).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
     // mac.spec.ts reads the profile with a bare `??`, so an empty string reads
     // as "not core" and selects the updater path — which then dies for want of
     // a fixture. It must be a literal, never an expression.
-    expect(smoke).toContain("OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: core");
-    expect(smoke).not.toMatch(/OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: \$\{\{/);
+    expect(prerelease).toContain("OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: core");
+    expect(prerelease).not.toMatch(/OD_PACKAGED_E2E_MAC_SMOKE_PROFILE: \$\{\{/);
     // Every platform lane is gated on what actually published, not on the flags
     // the build was dispatched with.
-    expect(smoke).toContain("if: ${{ needs.plan.outputs.mac_arm64 == 'true' }}");
-    expect(smoke).toContain("if: ${{ needs.plan.outputs.mac_x64 == 'true' }}");
+    expect(prerelease).toContain("needs.smoke_plan.outputs.mac_arm64 == 'true'");
+    expect(prerelease).toContain("needs.smoke_plan.outputs.mac_x64 == 'true'");
 
     // The card watcher reads job state and writes only to Feishu.
     expect(card).toContain("actions: read");
@@ -778,6 +756,8 @@ describe("release workflows", () => {
     expect(card).toContain(".github/scripts/feishu.py watch");
     expect(card).toContain("FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}");
     expect(card).toContain("FEISHU_RELEASE_CHAT_ID: ${{ secrets.FEISHU_RELEASE_CHAT_ID }}");
+    expect(card).toContain("validation_location:");
+    expect(card).toContain("VALIDATION_LOCATION: ${{ inputs.validation_location }}");
   });
 
   it("keeps macOS Intel and the validation lanes on by default without breaking the off switch", async () => {

@@ -13,10 +13,11 @@ name: release-prerelease-card
 #
 # Exactly one job writes that card, on purpose. A PATCH replaces the whole card,
 # so three build jobs updating "their own" row would each erase the other two.
-# This job therefore owns the message and learns the state by polling the jobs
-# API of the three runs involved (build/publish, tests, smoke).
+# This job therefore owns the message and learns the state by polling the origin
+# run directly. In compatibility mode it can still discover the separate test
+# and smoke runs created by older release branches.
 #
-# It is dispatched by release-prerelease.yml's `dispatch_validation` job at the
+# It is dispatched by release-prerelease.yml's `dispatch_card` job at the
 # moment the build commit is resolved — before any package exists — and it holds
 # a concurrency group of its own, so its long watch cannot delay a build.
 #
@@ -53,21 +54,29 @@ on:
         required: true
         type: string
       expect_tests:
-        description: "Whether release-prerelease-tests.yml was dispatched for this build. When false the card renders no test rows instead of waiting for results that will never arrive."
+        description: "Whether this build requested code validation. When false the card renders no test rows."
         required: false
         type: boolean
         default: true
       expect_smoke:
-        description: "Whether release-prerelease-smoke.yml will be dispatched once the packages publish."
+        description: "Whether this build requested downloaded-artifact smoke after publication."
         required: false
         type: boolean
         default: true
+      validation_location:
+        description: "Where validation jobs run: split keeps compatibility with older release branches; origin observes tests and smoke in the release run itself."
+        required: false
+        type: choice
+        options:
+          - split
+          - origin
+        default: split
 
 run-name: prerelease card · ${{ inputs.version }} · origin-run ${{ inputs.origin_run_id }}
 
 permissions:
-  # Reads the job state of the build, test, and smoke runs. It writes nothing to
-  # the repository — the only side effect is a Feishu message.
+  # Reads the origin run, its Plan artifact, and legacy validation runs when
+  # compatibility mode is requested. The only side effect is a Feishu message.
   actions: read
   contents: read
 
@@ -171,6 +180,7 @@ jobs:
           COMMIT: ${{ inputs.commit }}
           EXPECT_SMOKE: ${{ inputs.expect_smoke }}
           EXPECT_TESTS: ${{ inputs.expect_tests }}
+          VALIDATION_LOCATION: ${{ inputs.validation_location }}
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_RELEASE_CHAT_ID: ${{ secrets.FEISHU_RELEASE_CHAT_ID }}
@@ -189,11 +199,9 @@ jobs:
     # an implicit `success()` to a job with `needs`, which would skip this one in
     # exactly the case it exists for — a card job that died — without ever
     # evaluating the conditions below. (The same trap skipped
-    # release-prerelease.yml's `dispatch_smoke` for N runs.) `card` is this
+    # release-prerelease.yml's old `dispatch_smoke` for N runs.) `card` is this
     # workflow's only other job and sits downstream of nothing, so that break is
-    # the whole reachability story here: the permanently-skipped `build_linux`
-    # chain that poisons release-prerelease.yml's graph does not exist in this
-    # two-job workflow.
+    # the whole reachability story in this two-job workflow.
     #
     # The last clause is the "never fire on a healthy release" rule. A green
     # watcher that ALSO reports a delivered card is the normal outcome and must

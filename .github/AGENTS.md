@@ -120,8 +120,9 @@ its default `cache-tools` workspace setup. Full diagnostic smoke modes may still
 prepare their separate test harness explicitly.
 
 Release graphs separate delivery, source validation, and reusable-result publication.
-Beta declares its input suites and execution rows in
-`.github/config/convergence/release-beta.json`. Python projects per-workload test
+Beta and prerelease declare their input suites and execution rows in
+`.github/config/convergence/release-beta.json` and
+`.github/config/convergence/release-prerelease.json`. Python projects per-workload test
 matrices; runner labels for reusable test rows come from their
 workload execution classes. Each row's command, preparation and parameters enter
 that workload's identity. Matrix grouping does not merge workload identities;
@@ -133,7 +134,8 @@ Native outputs are platform-named and emitted only by the owning platform job.
 Unpublished beta builds may retain GitHub artifacts but have no alternate R2 upload
 or receipt protocol. CDN installation validation requires published version metadata.
 Keep platform workload/cache/Electron chains and independent test/cache chains
-directly in `release-beta.yml`, without additional wrapper workflows. A cold
+directly in the owning `release-beta.yml` or `release-prerelease.yml`, without
+additional wrapper workflows. A cold
 platform product must publish through the shared Python commands before its
 Electron consumer runs. Hot workloads skip build/publication, not Electron,
 when a platform is enabled. With `publish=false` and all platform inputs off,
@@ -141,9 +143,11 @@ beta runs Plan-selected tests without requesting a native product; existing
 `publish=false` builds with enabled platforms remain unchanged. Consumers use
 frozen Plan references. Each test workload publishes only
 after its complete declared shard set succeeds, independently of other tests.
-Beta distribution may publish while tests run; downloaded-artifact validation
-joins the test and publication branches without making tests a CDN gate.
-Beta prepares metadata and Plan in one root job, reusing the source checkout unless
+Distribution may publish while tests run; downloaded-artifact validation joins
+the test and publication branches without making tests a CDN gate. Prerelease has
+no Linux input, workload, output, metadata, smoke, or notification row; stable and
+preview keep their optional Linux policy independently. Beta and prerelease prepare
+metadata and Plan in one root job, reusing the source checkout unless
 the workflow control SHA differs. Release build and single-job test results publish
 in place through the thin convergence action; product directories go directly to
 the same normalizer/publisher used by transported CI artifacts. Local assertions

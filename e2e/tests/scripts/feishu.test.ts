@@ -13,6 +13,7 @@ sys.path.insert(0, '.github/scripts')
 import feishu as entry
 from lib.feishu import signed_envelope, request_json, AppClient, NoRedirect
 from lib.notification_cards import duration, elapsed, lane_duration, terminal, undiscovered, render_progress, changelog_lines
+from lib.notification_watch import Observer
 assert signed_envelope({}, '') == {'msg_type':'interactive', 'card':{}}
 expected = base64.b64encode(hmac.new(b'123\\nsecret', b'', hashlib.sha256).digest()).decode()
 assert signed_envelope({}, 'secret', 123)['sign'] == expected
@@ -50,6 +51,13 @@ for status in ['pending','unknown','skipped','never_started']:
 assert undiscovered(False,False,True)=='never_started'
 assert undiscovered(True,False,True)=='pending' and undiscovered(True,True,False)=='skipped'
 assert terminal('never_started') and not terminal('running')
+observer=Observer(env={'GITHUB_REPOSITORY':'nexu-io/open-design','ORIGIN_RUN_ID':'42','VERSION':'0.23.1-prerelease.1','GITHUB_TOKEN':'token','EXPECT_TESTS':'true','EXPECT_SMOKE':'false','VALIDATION_LOCATION':'origin'}, now=lambda:1000)
+def completed(name): return {'name':name,'status':'completed','conclusion':'success','started_at':'2026-09-21T00:00:00Z','completed_at':'2026-09-21T00:01:00Z'}
+observer.current.update(originJobs=[completed('Build prerelease mac arm64'),completed('Build prerelease mac intel x64'),completed('Build prerelease win x64')],originRun={'completed':True},publish='success',testsRun={'completed':True,'url':'https://example.test/run'},testsJobs=[],smokeRun={'completed':True,'url':'https://example.test/run'})
+observer.plan_hits={'test_functional_e2e':True,'test_e2e_vitest':True,'test_daemon_unit_tests':True,'test_verify':True}
+origin_state=observer.state(False)
+assert [item['key'] for item in origin_state['platforms']]==['mac_arm64','mac_x64','win_x64']
+assert all(item['status']=='success' for item in origin_state['tests']) and origin_state['finished']
 state=dict(channelLabel='Prerelease',version='0.22.3-prerelease.1',branch='',commit='',previousCommit='',repo='',originRunUrl='',testsRunUrl='',smokeRunUrl='',changelog=changelog_lines(''),platforms=[],tests=[],expectTests=True,expectSmoke=True,finished=False,timedOut=False,now=60000,runCreatedAt=None,publishCompletedAt=None)
 def platform(status): return dict(key='mac_arm64',label='macOS',build=status,smoke='skipped',downloadUrl='',timing={'startedAt':None,'completedAt':None})
 state['platforms']=[platform('failure'),platform('pending')]
