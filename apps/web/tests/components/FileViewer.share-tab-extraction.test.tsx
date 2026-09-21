@@ -236,6 +236,11 @@ describe('Shared share shell header', () => {
       : await screen.findByRole('menuitem', { name: /Generate and copy link/i });
     const scope = screen.getByText('Visibility in workspace');
     const trigger = document.querySelector('.chrome-access-trigger')!;
+    const chevron = trigger.querySelector(':scope > svg')!;
+    for (const [name, value] of Object.entries({ width: '12', height: '12', viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+      expect(chevron).toHaveAttribute(name, value);
+    }
+    expect(chevron.querySelector('path')).toHaveAttribute('d', 'm4 6 4 4 4-4');
     const row = scope.parentElement!.parentElement!;
     expect(trigger.parentElement!.parentElement).toBe(row);
     expect(row.nextElementSibling).toHaveTextContent('Only you can access this project. Choose workspace members to share it with the team.');

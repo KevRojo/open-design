@@ -2856,6 +2856,11 @@ for (const published of [false, true]) {
     await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
     await expect(trigger.locator(':scope > svg')).toHaveCSS('width', '12px');
     await expect(trigger.locator(':scope > svg')).toHaveCSS('height', '12px');
+    const chevron = trigger.locator(':scope > svg');
+    for (const [name, value] of Object.entries({ viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+      await expect(chevron).toHaveAttribute(name, value);
+    }
+    await expect(chevron.locator('path')).toHaveAttribute('d', 'm4 6 4 4 4-4');
     for (const [property, value] of Object.entries({
       height: '28px', 'min-height': '28px', 'min-width': '88px', padding: '0px 8px', gap: '8px',
       'border-top-width': '0px', 'border-radius': '5px', 'background-color': 'rgb(246, 246, 246)',

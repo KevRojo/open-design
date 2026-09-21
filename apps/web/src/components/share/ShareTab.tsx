@@ -256,7 +256,9 @@ export function ShareTab({
                                   ? t('fileViewer.workspaceAccessPrivate')
                                   : t('fileViewer.workspaceAccessMembers')}
                               </span>
-                              <RemixIcon name="arrow-down-s-line" size={16} />
+                              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                                <path d="m4 6 4 4 4-4" />
+                              </svg>
                             </button>
                             {shareAccessMenuOpen ? (
                               <div className="chrome-access-options" role="listbox">
