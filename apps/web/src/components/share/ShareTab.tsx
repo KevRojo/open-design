@@ -174,7 +174,7 @@ export function ShareTab({
                       ) : null}
                       {filePublished ? (
                         <div className="chrome-publish-plain">
-                          <div className="chrome-publish-url" title={publishedFileUrl}>
+                          <div className={`chrome-publish-url${publishLinkFeedback === 'failed' ? ` ${styles.copyFallback}` : ''}`} title={publishedFileUrl}>
                               {publishedFileUrl}
                             </div>
                             <div className="chrome-publish-actions">

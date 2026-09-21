@@ -2810,6 +2810,43 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   expect((await retried).status()).toBe(500);
   await expect(failure).toBeVisible();
   expect(publishAttempts).toBe(2);
+
+  // S11: publication succeeds, but both browser clipboard mechanisms fail.
+  // Mock external boundaries only; selection and CSS exercise the real DOM.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('clipboard denied by fixture')) },
+    });
+    document.execCommand = () => false;
+  });
+  const publicUrl = `https://example.test/artifact/${projectId}/stable-alias-for-manual-copy`;
+  await page.route(`**/api/projects/${projectId}/files/index.html/publish-public`, async route => {
+    if (route.request().method() !== 'POST') { await route.continue(); return; }
+    publishAttempts += 1;
+    await route.fulfill({ json: { url: publicUrl, slug: 'stable-alias-for-manual-copy', fileName: 'index.html' } });
+  });
+  await retry.click();
+  const failedCopy = menu.getByRole('button', { name: 'Copy failed', exact: true });
+  await expect(failedCopy).toBeVisible();
+  const fallback = menu.locator('.chrome-publish-url');
+  await expect(fallback).toHaveText(publicUrl);
+  await expect(fallback).toHaveAttribute('title', publicUrl);
+  for (const [property, value] of Object.entries({
+    height: '32px', padding: '0px 9px', 'border-radius': '6px',
+    'border-top-width': '1px', 'border-top-color': 'rgb(229, 229, 229)',
+    'background-color': 'rgb(255, 255, 255)', color: 'rgb(102, 102, 102)',
+    'font-size': '11px', 'line-height': '30px', 'user-select': 'text',
+    'white-space': 'nowrap', 'text-overflow': 'ellipsis',
+  })) {
+    await expect(fallback).toHaveCSS(property, value);
+  }
+  await fallback.click({ clickCount: 3 });
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim())).toBe(publicUrl);
+  await test.info().attach('s11-manual-copy', { body: await page.screenshot(), contentType: 'image/png' });
+  await failedCopy.click();
+  await expect(failedCopy).toBeEnabled();
+  expect(publishAttempts).toBe(3); // Retrying copy must not publish again.
 });
 
 test('[P1] project detail fork emits correlated click and result analytics', async ({ page }) => {

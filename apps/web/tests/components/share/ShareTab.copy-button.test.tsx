@@ -53,6 +53,32 @@ describe('S3/S4/S4-C copy-button rendering seam', () => {
     expect(screen.getByRole('button', { name: 'fileViewer.unpublishFile' }).className).not.toContain('copyButton');
   });
 
+  it('scopes the selectable S11 URL fallback to failed clipboard feedback', () => {
+    const input = props({ publishLinkFeedback: 'failed' });
+    const { rerender } = render(<ShareTab {...input} />);
+    expect(screen.getByText(input.publishedFileUrl).className).toContain('copyFallback');
+    expect(screen.getByText(input.publishedFileUrl)).toHaveAttribute('title', input.publishedFileUrl);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    for (const feedback of [null, 'copied'] as const) {
+      rerender(<ShareTab {...input} publishLinkFeedback={feedback} />);
+      expect(screen.getByText(input.publishedFileUrl).className).not.toContain('copyFallback');
+    }
+  });
+
+  it('declares the S11 fallback geometry without changing the global URL style', () => {
+    const css = parse(readFileSync(resolve(__dirname, '../../../src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules('.copyFallback:global(.chrome-publish-url)', rule => {
+      rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+    });
+    expect(values).toMatchObject({
+      height: '32px', padding: '0 9px', border: '1px solid #E5E5E5',
+      'border-radius': '6px', background: '#FFFFFF', color: '#666666',
+      'font-size': '11px', 'line-height': '30px', 'user-select': 'text',
+      'white-space': 'nowrap', 'text-overflow': 'ellipsis',
+    });
+  });
+
   it('keeps copy and stop callbacks separate and the URL read-only', () => {
     const input = props();
     render(<ShareTab {...input} />);
