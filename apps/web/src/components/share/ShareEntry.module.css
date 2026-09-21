@@ -46,9 +46,16 @@
   box-shadow: none;
 }
 
-:global(.artifact-card) .card:global(.artifact-card-act):hover {
+:global(.artifact-card) .card:global(.artifact-card-act):hover:not(:disabled) {
   background: #EDEDF0;
   color: #333333;
+}
+
+/* Disabled appearance applies to the existing readonly/generation gates only. */
+:global(.artifact-card) .card:global(.artifact-card-act):disabled {
+  background: #F3F3F1;
+  color: #BDBDB8;
+  opacity: 1;
 }
 
 :global(.artifact-card) .card:global(.artifact-card-act) svg {

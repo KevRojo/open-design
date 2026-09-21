@@ -3238,6 +3238,40 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await failedCopy.click();
   await expect(failedCopy).toBeEnabled();
   expect(publishAttempts).toBe(3); // Retrying copy must not publish again.
+
+  // The same real cards become disabled through the workspace permission boundary.
+  const readonlyContext = {
+    ...AMR_PERSONAL_WORKSPACE_CONTEXT,
+    workspaceType: 'team', teamId: 'disabled-share-team',
+    permissions: { ...AMR_PERSONAL_WORKSPACE_CONTEXT.permissions, canWriteSyncedFiles: false },
+  };
+  await page.route(`**/api/projects/${projectId}/workspace-scope`, route => route.fulfill({
+    json: { scope: { kind: 'team', projectId, workspaceId: readonlyContext.workspaceId, visibility: 'team', context: readonlyContext } },
+  }));
+  await page.route(`**/api/projects/${projectId}/collab/status`, route => route.fulfill({
+    json: { publishedVersion: 1, materializedVersion: 1, syncState: 'synced', ownerMemberId: 'another-owner' },
+  }));
+  await page.reload();
+  await expect(page.getByTestId('chat-composer-input')).toHaveAttribute('aria-readonly', 'true');
+  // Read-only navigation may focus the preview; reveal chat through its UI controls.
+  const showChat = page.getByTestId('workspace-focus-toggle');
+  if (await showChat.isVisible()) await showChat.click();
+  const expandConversation = page.getByRole('button', { name: 'Expand the conversation pane' });
+  if (await expandConversation.isVisible()) await expandConversation.click();
+  await expect(secondShare).toBeVisible();
+  await expect(shareButtons).toHaveCount(2);
+  for (const share of await shareButtons.all()) {
+    await expect(share).toBeDisabled();
+    await expect(share).toHaveAttribute('title', /.+/);
+    for (const [property, value] of Object.entries({ 'background-color': 'rgb(243, 243, 241)', color: 'rgb(189, 189, 184)', opacity: '1', height: '30px' })) {
+      await expect(share).toHaveCSS(property, value);
+    }
+  }
+  await secondShare.hover();
+  await expect(secondShare).toHaveCSS('background-color', 'rgb(243, 243, 241)');
+  await expect(secondShare).toHaveCSS('color', 'rgb(189, 189, 184)');
+  await expect(page.locator('.share-menu-popover[role="menu"]')).toHaveCount(0);
+  await test.info().attach('card-share-disabled', { body: await page.screenshot(), contentType: 'image/png' });
 });
 
 test('[P1] project detail fork emits correlated click and result analytics', async ({ page }) => {
