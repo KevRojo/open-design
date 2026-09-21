@@ -4787,13 +4787,7 @@ export function CommentSidePanel({
             aria-controls={panelId}
             aria-expanded={true}
             title={t('preview.hideSidebar', { label: commentsLabel })}
-            onClick={() => {
-              if (onDismiss) {
-                onDismiss();
-                return;
-              }
-              handleCollapsedChange(true, 'collapsed');
-            }}
+            onClick={() => handleCollapsedChange(true, 'collapsed')}
           >
             <Icon name="chevron-right" size={14} />
           </button>
@@ -15933,7 +15927,7 @@ function HtmlViewer({
     return () => { cancelled = true; };
   }, [commentReadScopeKey, mergeReadState, projectId, workspaceContext]);
   useEffect(() => {
-    if (!commentPanelOpen) return;
+    if (!commentPanelOpen || commentSidePanelCollapsed) return;
     const scopeKey = commentReadScopeKey;
     let cancelled = false;
     // The daemon clamps this client timestamp and returns its authoritative,
@@ -15948,7 +15942,7 @@ function HtmlViewer({
       mergeReadState(scopeKey, await response.json() as ProjectCommentReadState);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [commentPanelOpen, commentReadScopeKey, latestVisibleSideCommentCreatedAt, mergeReadState, projectId, workspaceContext]);
+  }, [commentPanelOpen, commentReadScopeKey, commentSidePanelCollapsed, latestVisibleSideCommentCreatedAt, mergeReadState, projectId, workspaceContext]);
   // Do not fabricate an authorKey from a member id. This client has no trusted
   // personal authorKey input, so only the verified member identity is excluded
   // here; external-account self recognition remains a server/identity seam.
@@ -16498,10 +16492,8 @@ function HtmlViewer({
       // collapse — forcing `false` here made every click a no-op.
       collapsed={commentSidePanelCollapsed}
       onCollapsedChange={setCommentSidePanelCollapsed}
-      // On a floating card, collapse closes the card and mirrors the toolbar
-      // toggle's OFF branch so one click reopens it. Closing only the panel
-      // would leave create/board mode on and consume that next click. The local
-      // dock keeps its collapse-to-rail behaviour.
+      // Escape remains the explicit floating-card close path. The header
+      // disclosure always preserves this mounted dock as a reversible rail.
       onDismiss={commentPortalHost ? dismissFloatingCommentPanel : undefined}
       onToggleSelect={(commentId) => {
         setSelectedSideCommentIds((current) => {
