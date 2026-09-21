@@ -3260,7 +3260,7 @@ export const id: Dict = {
   'fileViewer.publishFileRequiresTeam': 'Menerbitkan tautan publik memerlukan ruang kerja tim. Beralihlah ke ruang kerja tim, atau gunakan Deploy untuk menerbitkan berkas ini.',
   'fileViewer.publishFileRequiresWorkspace': 'Tautan berbagi memerlukan workspace yang masuk. Masuk ke OpenDesign Cloud atau bagikan file ini lewat deploy.',
   'fileViewer.publishFileTooLarge': "Proyek ini melebihi batas berbagi 20 MiB. Kurangi ukuran HTML dan sumber daya yang dirujuk, lalu coba lagi.",
-  'fileViewer.publishFileFailed': 'Tidak dapat membuat tautan berbagi. Coba lagi atau gunakan opsi deploy di bawah.',
+  "fileViewer.publishFileFailed": "Tidak dapat membuat tautan berbagi. Silakan coba lagi nanti.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
   'fileViewer.workspaceUnshareSuccess': 'Moved back to private',

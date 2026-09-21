@@ -2702,6 +2702,66 @@ test('[P1] project detail assistant completion actions support copy, fork, and f
     .not.toBe(conversationId);
 });
 
+for (const origin of ['artifact-card', 'toolbar'] as const) {
+  test(`[P1] share failure recovery matches available actions from ${origin}`, async ({ page }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await mockWritablePersonalProjectScope(page);
+    const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
+    const publicationPath = `/api/projects/${projectId}/files/index.html/publish-public`;
+    const url = `https://example.test/artifact/${projectId}/recovery-alias`;
+    let attempts = 0;
+    let releaseRetry = () => {};
+    const retryGate = new Promise<void>(resolve => { releaseRetry = resolve; });
+    await page.route(`**${publicationPath}`, async route => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ json: { publication: null } });
+        return;
+      }
+      attempts += 1;
+      if (attempts === 1) {
+        await route.fulfill({ status: 500, json: { error: 'fixture publish failed' } });
+        return;
+      }
+      await retryGate;
+      await route.fulfill({ json: { url, slug: 'recovery-alias', fileName: 'index.html' } });
+    });
+    await page.goto(`/projects/${projectId}/conversations/${conversationId}`);
+    await expectWorkspaceReady(page);
+    if (origin === 'artifact-card') await page.getByTestId('artifact-card-publish-index.html').last().click();
+    else await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
+    const menu = page.locator('.share-menu-popover[role="menu"]');
+    const deploy = menu.getByRole('menuitem', { name: 'Deploy to Vercel', exact: true });
+    if (origin === 'toolbar') await expect(deploy).toBeVisible();
+    else await expect(deploy).toHaveCount(0);
+    await test.info().attach(`failure-recovery-${origin}-entry`, { body: await page.screenshot(), contentType: 'image/png' });
+    await menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true }).click();
+    await expect(menu.getByRole('status')).toHaveText('Could not create the share link. Please try again later.');
+    expect(attempts).toBe(1);
+    const retry = menu.getByRole('menuitem', { name: 'Retry', exact: true });
+    await expect(retry).toBeEnabled();
+    await test.info().attach(`failure-recovery-${origin}-failed`, { body: await page.screenshot(), contentType: 'image/png' });
+    try {
+      await retry.click();
+      await expect(menu.getByRole('progressbar')).toBeVisible();
+      await expect(menu.getByRole('status')).toHaveCount(0);
+      await expect.poll(() => attempts).toBe(2);
+      await test.info().attach(`failure-recovery-${origin}-retry`, { body: await page.screenshot(), contentType: 'image/png' });
+    } finally {
+      releaseRetry();
+    }
+    await expect(menu.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
+    await expect(menu).not.toContainText('Could not create the share link.');
+    await expect(menu.getByRole('status')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+    await expect(retry).toHaveCount(0);
+    await expect(menu.getByRole('progressbar')).toHaveCount(0);
+    expect(attempts).toBe(2);
+    if (origin === 'toolbar') await expect(deploy).toBeVisible();
+    else await expect(deploy).toHaveCount(0);
+    await test.info().attach(`failure-recovery-${origin}-success`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
 for (const published of [false, true]) {
   test(`[P1] team scope trigger canvas published=${published}`, async ({ page }) => {
     await mockWritablePersonalProjectScope(page);
@@ -2932,7 +2992,7 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
     releaseFirstPublish();
   }
   const failure = menu.getByRole('status');
-  await expect(failure).toHaveText('Could not create the share link. Try again, or use a deploy option below.');
+  await expect(failure).toHaveText('Could not create the share link. Please try again later.');
   await expect(failure).not.toContainText('s7_fixture_internal_failure');
   for (const [property, value] of Object.entries({
     color: 'rgb(201, 78, 78)', 'font-size': '12px', 'line-height': '18px',

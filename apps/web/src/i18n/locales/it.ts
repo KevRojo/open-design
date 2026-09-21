@@ -3260,7 +3260,7 @@ export const it: Dict = {
   'fileViewer.publishFileRequiresTeam': 'La pubblicazione di un link pubblico richiede uno spazio di lavoro del team. Passa a uno spazio del team o usa Distribuisci per pubblicare questo file.',
   'fileViewer.publishFileRequiresWorkspace': 'Un link di condivisione richiede uno spazio di lavoro con accesso effettuato. Accedi a OpenDesign Cloud oppure condividi questo file tramite un deploy.',
   'fileViewer.publishFileTooLarge': "Questo progetto supera il limite di condivisione di 20 MiB. Riduci HTML e risorse referenziate, poi riprova.",
-  'fileViewer.publishFileFailed': 'Impossibile creare il link di condivisione. Riprova o usa un\'opzione di deploy qui sotto.',
+  "fileViewer.publishFileFailed": "Impossibile creare il link di condivisione. Riprova più tardi.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
   'fileViewer.workspaceUnshareSuccess': 'Moved back to private',

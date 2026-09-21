@@ -3267,7 +3267,7 @@ export const de: Dict = {
   'fileViewer.publishFileRequiresTeam': 'Für einen öffentlichen Link wird ein Team-Workspace benötigt. Wechsle zu einem Team-Workspace oder veröffentliche diese Datei über Deploy.',
   'fileViewer.publishFileRequiresWorkspace': 'Für einen Freigabelink ist ein angemeldeter Workspace nötig. Melde dich bei OpenDesign Cloud an oder teile die Datei über eine Deploy-Option.',
   'fileViewer.publishFileTooLarge': "Dieses Projekt überschreitet das Freigabelimit von 20 MiB. Verkleinere HTML und referenzierte Ressourcen und versuche es erneut.",
-  'fileViewer.publishFileFailed': 'Freigabelink konnte nicht erstellt werden. Versuche es erneut oder nutze unten eine Deploy-Option.',
+  "fileViewer.publishFileFailed": "Freigabelink konnte nicht erstellt werden. Versuche es später erneut.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
   'fileViewer.workspaceUnshareSuccess': 'Moved back to private',
