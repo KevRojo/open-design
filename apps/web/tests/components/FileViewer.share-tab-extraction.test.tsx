@@ -261,7 +261,15 @@ describe('G4 · retired HTML publishing section label', () => {
     } else {
       fireEvent.click(document.querySelector<HTMLButtonElement>('.chrome-access-trigger')!);
       expect(screen.getAllByRole('option')).toHaveLength(2);
-      expect(screen.getByRole('option', { name: 'Only me' })).toHaveAttribute('aria-selected', 'true');
+      const selected = screen.getByRole('option', { name: 'Only me' });
+      expect(selected).toHaveAttribute('aria-selected', 'true');
+      const check = selected.querySelector(':scope > svg');
+      expect(check).not.toBeNull();
+      for (const [name, value] of Object.entries({ width: '13', height: '13', viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+        expect(check).toHaveAttribute(name, value);
+      }
+      expect(check?.querySelector('path')).toHaveAttribute('d', 'm3 8 3 3 7-7');
+      expect(screen.getByRole('option', { name: 'Workspace members' }).querySelector(':scope > svg')).toBeNull();
     }
     fireEvent.click(publish);
     await screen.findByRole('button', { name: /stop sharing/i });

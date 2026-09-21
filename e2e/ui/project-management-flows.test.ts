@@ -2852,6 +2852,11 @@ for (const published of [false, true]) {
     await expect(check).toHaveCSS('grid-column-start', '1');
     await expect(check).toHaveCSS('width', '13px');
     await expect(check).toHaveCSS('height', '13px');
+    for (const [name, value] of Object.entries({ viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+      await expect(check).toHaveAttribute(name, value);
+    }
+    await expect(check.locator('path')).toHaveAttribute('d', 'm3 8 3 3 7-7');
+    await expect(menu.getByRole('option', { selected: false }).locator(':scope > svg')).toHaveCount(0);
     await expect(options).toHaveCount(2);
     for (const option of await options.all()) {
       for (const [property, value] of Object.entries({

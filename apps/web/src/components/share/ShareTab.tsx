@@ -170,7 +170,11 @@ export function ShareTab({
                                 >
                                   <span className="share-menu-icon"><RemixIcon name={icon} size={16} /></span>
                                   <span>{label}</span>
-                                  {shareAccess === value ? <RemixIcon name="check-line" size={15} /> : null}
+                                  {shareAccess === value ? (
+                                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                                      <path d="m3 8 3 3 7-7" />
+                                    </svg>
+                                  ) : null}
                                 </button>
                               ))}
                             </div>
