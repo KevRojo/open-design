@@ -2938,6 +2938,28 @@ for (const published of [false, true]) {
     await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
     await expect(trigger).toHaveText('Workspace members');
     await expect(description).toBeVisible(); // Failed move must not announce a different visibility.
+
+    // Reuse this workflow's settled team project for Chinese copy/cascade checks.
+    for (const [locale, label] of [['zh-CN', '团队成员'], ['zh-TW', '團隊成員']] as const) {
+      await page.evaluate(locale => {
+        localStorage.setItem('open-design:locale', locale);
+        localStorage.setItem('open-design:locale-source', 'manual');
+      }, locale);
+      await page.reload();
+      await expectWorkspaceReady(page);
+      await page.locator('.chrome-share-menu--unified > button[aria-label="分享"]').click();
+      await expect(trigger).toHaveText(label);
+      await expect(trigger).toBeEnabled();
+      await trigger.click();
+      const teamOption = menu.getByRole('option', { name: label, exact: true });
+      await expect(teamOption).toHaveAttribute('aria-selected', 'true');
+      await expect(teamOption).toHaveCSS('height', '28px');
+      await expect(menu.getByRole('listbox')).toHaveCSS('width', '168px');
+      const teamLabel = teamOption.locator(':scope > span:nth-child(2)');
+      expect(await teamLabel.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await expect(menu).not.toContainText(locale === 'zh-CN' ? '工作空间成员' : '工作空間成員');
+      await test.info().attach(`team-scope-${locale}-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
+    }
   });
 }
 
