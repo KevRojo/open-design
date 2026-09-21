@@ -61,7 +61,6 @@ downloadBuilderToolset({
             "OD_DMG_TRACE_DIR": trace_dir.resolve(),
             "OD_DMG_TRACE_TAG": "primary",
             "OD_DMG_STACK_PROBE": "1",
-            "OD_DMG_FS_USAGE": "1",
         }.items():
             stream.write(f"{key}={value}\n")
     print(f"[dmg-probe] verified vendor bundle at {vendor_root}")
