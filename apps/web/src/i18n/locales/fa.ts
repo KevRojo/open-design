@@ -3258,6 +3258,7 @@ export const fa: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'در حال ایجاد پیوند…',
+  "fileViewer.publishingContinuesOnClose": "بستن این پنل، بارگذاری را متوقف نمی‌کند.",
   'fileViewer.unpublishFile': 'توقف اشتراک‌گذاری',
   'fileViewer.shareEmptyStateTitle': 'چیزی برای اشتراک‌گذاری وجود ندارد',
   'fileViewer.shareEmptyStateDescription': 'برای اشتراک‌گذاری این فایل با همکاران، یک تیم بسازید یا به تیمی بپیوندید',

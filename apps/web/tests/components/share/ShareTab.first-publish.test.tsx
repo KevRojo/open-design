@@ -34,6 +34,25 @@ const uploadPath = 'M12 15V4m-4 4 4-4 4 4M5 20h14';
 const firstProps = (overrides: Partial<Props> = {}) => props({ filePublished: false, ...overrides });
 
 describe('S1 first-publish visual seam', () => {
+  it.each(['artifact-card', 'toolbar'] as const)('%s explains closing only while publishing, not while stopping', (menuOrigin) => {
+    const input = firstProps({ menuOrigin, t: key => zhCN[key] });
+    const hint = '关闭面板不会中断上传。';
+    const { rerender } = render(<ShareTab {...input} />);
+    expect(screen.queryByText(hint)).toBeNull();
+    rerender(<ShareTab {...input} publishingPublicFile publishProgress={0.45} />);
+    expect(screen.getByText(hint).className).toContain('publishHint');
+    rerender(<ShareTab {...input} filePublished publishingPublicFile />);
+    expect(screen.queryByText(hint)).toBeNull();
+    rerender(<ShareTab {...input} publishFailureKey="fileViewer.publishFileFailed" />);
+    expect(screen.queryByText(hint)).toBeNull();
+  });
+
+  it('uses the S2 help typography without borrowing the failure or copy hint', () => {
+    const css = parse(readFileSync(resolve(__dirname, '../../../src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules('p.publishHint', rule => { rule.walkDecls(decl => { values[decl.prop] = decl.value; }); });
+    expect(values).toMatchObject({ margin: '0', color: '#999999', 'font-size': '10.5px', 'line-height': '17px' });
+  });
   it.each([0, 0.45, 0.9])('integrates progress %s into the busy control without changing its value', (publishProgress) => {
     const input = firstProps({ publishingPublicFile: true, publishProgress });
     render(<ShareTab {...input} />);

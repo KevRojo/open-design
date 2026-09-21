@@ -273,6 +273,9 @@ export function ShareTab({
                         </Button>
                         </PublishProgressFrame>
                       ) }
+                      {publishingPublicFile && !filePublished ? (
+                        <p className={styles.publishHint}>{t('fileViewer.publishingContinuesOnClose')}</p>
+                      ) : null}
                       {publishFailureKey ? (
                         <p className={styles.publishError} role="status">
                           <svg

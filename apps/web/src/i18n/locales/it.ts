@@ -3251,6 +3251,7 @@ export const it: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Creazione del link…',
+  "fileViewer.publishingContinuesOnClose": "Chiudere questo pannello non interromperà il caricamento.",
   'fileViewer.unpublishFile': 'Interrompi la condivisione',
   'fileViewer.shareEmptyStateTitle': 'Niente da condividere per ora',
   'fileViewer.shareEmptyStateDescription': 'Crea o unisciti a un team per condividere questo file con i colleghi',

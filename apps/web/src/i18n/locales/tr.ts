@@ -3251,6 +3251,7 @@ export const tr: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Bağlantı oluşturuluyor…',
+  "fileViewer.publishingContinuesOnClose": "Bu paneli kapatmak yüklemeyi kesintiye uğratmaz.",
   'fileViewer.unpublishFile': 'Paylaşımı durdur',
   'fileViewer.shareEmptyStateTitle': 'Henüz paylaşılacak bir şey yok',
   'fileViewer.shareEmptyStateDescription': 'Bu dosyayı takım arkadaşlarınızla paylaşmak için bir takım oluşturun veya katılın',

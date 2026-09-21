@@ -3251,6 +3251,7 @@ export const th: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'กำลังสร้างลิงก์…',
+  "fileViewer.publishingContinuesOnClose": "การปิดแผงนี้จะไม่ขัดจังหวะการอัปโหลด",
   'fileViewer.unpublishFile': 'หยุดแชร์',
   'fileViewer.shareEmptyStateTitle': 'ยังไม่มีอะไรให้แชร์',
   'fileViewer.shareEmptyStateDescription': 'สร้างหรือเข้าร่วมทีมเพื่อแชร์ไฟล์นี้กับเพื่อนร่วมทีม',

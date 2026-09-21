@@ -3251,6 +3251,7 @@ export const ko: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': '만드는 중…',
+  "fileViewer.publishingContinuesOnClose": "이 패널을 닫아도 업로드는 중단되지 않습니다.",
   'fileViewer.unpublishFile': '공유 중지',
   'fileViewer.shareEmptyStateTitle': '아직 공유할 항목이 없습니다',
   'fileViewer.shareEmptyStateDescription': '팀을 만들거나 참여하면 이 파일을 동료와 공유할 수 있습니다',

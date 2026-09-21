@@ -3432,6 +3432,7 @@ export const zhTW: Dict = {
   "fileViewer.openFileRequired": "打开文件后可用。",
   "fileViewer.publishFile": "發布檔案",
   "fileViewer.publishingFile": "產生中…",
+  "fileViewer.publishingContinuesOnClose": "關閉面板不會中斷上傳。",
   "fileViewer.unpublishFile": "停止分享",
   "fileViewer.shareEmptyStateTitle": "暫時無法分享",
   "fileViewer.shareEmptyStateDescription": "建立或加入一個團隊,就能把這個檔案分享給同事",

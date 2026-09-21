@@ -3258,6 +3258,7 @@ export const esES: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Creando enlace…',
+  "fileViewer.publishingContinuesOnClose": "Cerrar este panel no interrumpirá la carga.",
   'fileViewer.unpublishFile': 'Dejar de compartir',
   'fileViewer.shareEmptyStateTitle': 'Nada que compartir todavía',
   'fileViewer.shareEmptyStateDescription': 'Crea o únete a un equipo para compartir este archivo con tus compañeros',

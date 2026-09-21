@@ -3251,6 +3251,7 @@ export const hu: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Link létrehozása…',
+  "fileViewer.publishingContinuesOnClose": "A panel bezárása nem szakítja meg a feltöltést.",
   'fileViewer.unpublishFile': 'Megosztás leállítása',
   'fileViewer.shareEmptyStateTitle': 'Még nincs mit megosztani',
   'fileViewer.shareEmptyStateDescription': 'Hozz létre egy csapatot, vagy csatlakozz egyhez, hogy megoszthasd ezt a fájlt a kollégáiddal',

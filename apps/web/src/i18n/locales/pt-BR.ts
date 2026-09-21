@@ -3251,6 +3251,7 @@ export const ptBR: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Criando link…',
+  "fileViewer.publishingContinuesOnClose": "Fechar este painel não interromperá o envio.",
   'fileViewer.unpublishFile': 'Parar de compartilhar',
   'fileViewer.shareEmptyStateTitle': 'Nada para compartilhar ainda',
   'fileViewer.shareEmptyStateDescription': 'Crie ou participe de uma equipe para compartilhar este arquivo com colegas',

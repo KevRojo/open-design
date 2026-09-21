@@ -2731,6 +2731,8 @@ for (const origin of ['artifact-card', 'toolbar'] as const) {
     if (origin === 'artifact-card') await page.getByTestId('artifact-card-publish-index.html').last().click();
     else await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
     const menu = page.locator('.share-menu-popover[role="menu"]');
+    const hint = menu.getByText('Closing this panel will not interrupt the upload.', { exact: true });
+    await expect(hint).toHaveCount(0);
     const deploy = menu.getByRole('menuitem', { name: 'Deploy to Vercel', exact: true });
     if (origin === 'toolbar') await expect(deploy).toBeVisible();
     else await expect(deploy).toHaveCount(0);
@@ -2765,12 +2767,28 @@ for (const origin of ['artifact-card', 'toolbar'] as const) {
       expect(rendered.text).toContain(`${Math.round(rendered.value * 100)}%`);
       await expect(menu.getByRole('status')).toHaveCount(0);
       await expect.poll(() => attempts).toBe(2);
+      await expect(hint).toBeVisible();
+      await expect(hint).toHaveCSS('font-size', '10.5px');
+      await expect(hint).toHaveCSS('line-height', '17px');
+      await expect(hint).toHaveCSS('color', 'rgb(153, 153, 153)');
+      await expect(hint).toHaveCSS('margin', '0px');
       await test.info().attach(`failure-recovery-${origin}-retry`, { body: await page.screenshot(), contentType: 'image/png' });
+      await menu.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(menu).toBeHidden();
+      await page.clock.fastForward(500);
+      if (origin === 'artifact-card') await page.getByTestId('artifact-card-publish-index.html').last().click();
+      else await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
+      await expect(hint).toBeVisible();
+      await expect(progress).toBeVisible();
+      expect(Number(await progress.getAttribute('value'))).toBeGreaterThanOrEqual(rendered.value);
+      expect(attempts).toBe(2); // Dismissing does not abort or restart the pending upload.
+      await test.info().attach(`failure-recovery-${origin}-reopened`, { body: await page.screenshot(), contentType: 'image/png' });
     } finally {
       releaseRetry();
     }
     await expect(menu.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
     await expect(menu).not.toContainText('Could not create the share link.');
+    await expect(hint).toHaveCount(0);
     await expect(menu.getByRole('status')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(url);
     await expect(retry).toHaveCount(0);

@@ -3251,6 +3251,7 @@ export const ja: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': '作成中…',
+  "fileViewer.publishingContinuesOnClose": "このパネルを閉じてもアップロードは中断されません。",
   'fileViewer.unpublishFile': '共有を停止',
   'fileViewer.shareEmptyStateTitle': '共有できるものがまだありません',
   'fileViewer.shareEmptyStateDescription': 'チームを作成または参加すると、このファイルをメンバーと共有できます',

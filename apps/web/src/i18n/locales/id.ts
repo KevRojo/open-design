@@ -3251,6 +3251,7 @@ export const id: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Membuat tautan…',
+  "fileViewer.publishingContinuesOnClose": "Menutup panel ini tidak akan mengganggu unggahan.",
   'fileViewer.unpublishFile': 'Hentikan berbagi',
   'fileViewer.shareEmptyStateTitle': 'Belum ada yang bisa dibagikan',
   'fileViewer.shareEmptyStateDescription': 'Buat atau gabung ke tim untuk membagikan file ini ke rekan tim',

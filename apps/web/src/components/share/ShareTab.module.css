@@ -191,6 +191,14 @@ button.copyButton.publishingButton:disabled {
   gap: 6px;
 }
 
+/* S2 help describes panel dismissal, not quitting the app. */
+p.publishHint {
+  margin: 0;
+  color: #999999;
+  font-size: 10.5px;
+  line-height: 17px;
+}
+
 /* S11 (◇): preserve the full selectable URL; only clipboard failure gets
    this fallback treatment. Successful/idle links retain their existing skin. */
 .copyFallback:global(.chrome-publish-url) {
