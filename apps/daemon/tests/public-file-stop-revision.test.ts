@@ -21,6 +21,26 @@ it.each(['memory', 'sqlite'])('captures failed publication revision without reta
     }
   } finally { db.close(); }
 });
+it.each(['memory', 'sqlite'])('accepts a witnessed new stop intent but never resets the same exhausted intent: %s', (backend) => {
+  const db = new Database(':memory:');
+  try {
+    migratePublicFilePublications(db);
+    const store = backend === 'memory' ? createInMemoryPublicFilePublicationStore() : createSqlitePublicFilePublicationStore(db);
+    store.set(key, publication); const old = store.getRevision(key)!;
+    store.enqueueStop(key); for (let i = 0; i < 4; i++) store.recordStopFailure(key);
+    store.set(key, publication); const current = store.getRevision(key)!;
+    store.enqueueStop(key, current);
+    expect(store.listRetryableStops()).toEqual([{ ...key, publicationRevision: current.token, failureCount: 1 }]);
+    for (let i = 0; i < 4; i++) store.recordStopFailure(key);
+    store.enqueueStop(key, current);
+    store.enqueueStop(key, old);
+    store.enqueueStop(key, { ...current, slug: 'different' });
+    expect(store.listStops()).toEqual([{ ...key, publicationRevision: current.token, failureCount: 5 }]);
+    expect(store.listRetryableStops()).toEqual([]);
+    if (backend === 'sqlite') expect(createSqlitePublicFilePublicationStore(db).listStops()).toEqual(store.listStops());
+  } finally { db.close(); }
+});
+
 it('migrates legacy tasks without inventing ownership of a current generation', () => {
   const db = new Database(':memory:');
   try {
