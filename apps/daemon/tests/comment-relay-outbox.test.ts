@@ -218,7 +218,7 @@ describe('durable Team comment relay outbox', () => {
     const publications = createSqlitePublicFilePublicationStore(db, () => 100);
     const exactScope = { resourceTeamId: 'workspace-a', ownerMemberId: 'owner-a', projectId: 'p1', filePath: 'index.html' };
     publications.set(exactScope, { url: 'https://example.test/index', slug: 'index', fileName: 'index.html' });
-    publications.delete(exactScope);
+    expect(publications.deleteIfRevisionMatches(exactScope, publications.getRevision(exactScope)!)).toBe(true);
     expect(db.prepare(`SELECT comment_id, file_path FROM comment_relay_outbox ORDER BY comment_id`).all()).toEqual([
       { comment_id: 'malformed', file_path: '' },
       { comment_id: 'other-file', file_path: 'other.html' },
@@ -237,11 +237,12 @@ describe('durable Team comment relay outbox', () => {
     outbox.enqueue({ workspaceId: 'workspace-a', workspaceMemberId: 'owner-a', teamId: 'workspace-a', relayScope: 'personal', projectId: 'p1', expectedOwnerMemberId: 'owner-a', comment: previewCommentToCloud(comment({ id: 'atomic-row' }), 'owner-a') });
     db.exec(`CREATE TRIGGER abort_personal_outbox_delete BEFORE DELETE ON comment_relay_outbox BEGIN SELECT RAISE(ABORT, 'forced cancellation failure'); END;`);
 
-    expect(() => publications.delete(scope)).toThrow('forced cancellation failure');
+    const revision = publications.getRevision(scope)!;
+    expect(() => publications.deleteIfRevisionMatches(scope, revision)).toThrow('forced cancellation failure');
     expect(publications.get(scope)?.slug).toBe('index');
     expect(outbox.listDue(100).map((record) => record.commentId)).toEqual(['atomic-row']);
     db.exec('DROP TRIGGER abort_personal_outbox_delete');
-    publications.delete(scope);
+    expect(publications.deleteIfRevisionMatches(scope, revision)).toBe(true);
     expect(publications.get(scope)).toBeNull();
     expect(outbox.count()).toBe(0);
   });
@@ -343,7 +344,8 @@ describe('durable Team comment relay outbox', () => {
     outbox.enqueue({ workspaceId: owner.workspaceId, workspaceMemberId: owner.workspaceMemberId, teamId: owner.workspaceId, relayScope: 'team', projectId: 'p1', expectedOwnerMemberId: owner.workspaceMemberId, comment: previewCommentToCloud(comment({ id: 'team-row' }), owner.workspaceMemberId) });
     // A stop invalidates pre-stop rows even when the stable alias is immediately
     // republished; an active witness cannot safely distinguish their generation.
-    publications.delete({ resourceTeamId: owner.workspaceId, ownerMemberId: owner.workspaceMemberId, projectId: 'p1', filePath: 'index.html' });
+    const publicationScope = { resourceTeamId: owner.workspaceId, ownerMemberId: owner.workspaceMemberId, projectId: 'p1', filePath: 'index.html' };
+    expect(publications.deleteIfRevisionMatches(publicationScope, publications.getRevision(publicationScope)!)).toBe(true);
     publications.set({ resourceTeamId: owner.workspaceId, ownerMemberId: owner.workspaceMemberId, projectId: 'p1', filePath: 'index.html' }, { url: 'https://example.test/share', slug: 'public-slug', fileName: 'index.html' });
     expect(outbox.listDue(100).map((record) => record.commentId).sort()).toEqual(['other-file', 'other-principal', 'other-project', 'team-row']);
 
