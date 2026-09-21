@@ -128,7 +128,7 @@ def trace(argv: list[str]) -> None:
     command_line.main()
 
 
-def replay(trace_dir: Path, count: int) -> None:
+def replay(trace_dir: Path, count: int, zip_control: bool, pack_root: Path | None) -> None:
     if count < 1 or count > 3:
         raise ValueError("replay count must be between 1 and 3")
     invocation = json.loads((trace_dir / "invocation.json").read_text(encoding="utf-8"))
@@ -146,18 +146,39 @@ def replay(trace_dir: Path, count: int) -> None:
     expanded = json.loads(settings.read_text(encoding="utf-8"))
     expanded["size"] = f"{math.ceil(float(original_size[:-1]) * 1.2)}K"
     expanded_settings.write_text(json.dumps(expanded) + "\n", encoding="utf-8")
+    source_app = Path(expanded["contents"][0]["path"])
+    zip_binary = (pack_root / "node_modules/7zip-bin/mac/x64/7za") if pack_root else None
+    if zip_control and (zip_binary is None or not zip_binary.is_file() or not source_app.is_dir()):
+        raise ValueError("zip control requires the installed 7za binary and source app")
     for number in range(1, count + 1):
         output = trace_dir / f"replay-{number}.dmg"
-        variant = "expanded" if number == 1 else "original"
+        variant = ("concurrent-zip" if number in (1, 3) else "solo") if zip_control else ("expanded" if number == 1 else "original")
         replay_settings = expanded_settings if variant == "expanded" else settings
         environment = {**os.environ, "OD_DMG_TRACE_TAG": f"replay-{number}-{variant}"}
         started = time.monotonic()
+        zip_output = trace_dir / f"replay-{number}-parallel.zip"
+        zip_process = None
         try:
+            if variant == "concurrent-zip":
+                zip_process = subprocess.Popen(
+                    [str(zip_binary), "a", "-bd", "-mx=1", "-mtc=off", "-mm=Deflate", "-mcu",
+                     str(zip_output), source_app.name],
+                    cwd=source_app.parent, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                )
+                time.sleep(2)
             subprocess.run([str(wrapper), "-s", str(replay_settings), invocation["volume"], str(output)],
                            env=environment, check=True, timeout=240)
+            if zip_process is not None:
+                _, zip_stderr = zip_process.communicate(timeout=120)
+                if zip_process.returncode:
+                    raise RuntimeError(f"parallel 7za failed: {zip_stderr[-500:]}")
             print(f"[dmg-probe] replay={number} variant={variant} durationMs={round((time.monotonic() - started) * 1000)}", flush=True)
         finally:
+            if zip_process is not None and zip_process.poll() is None:
+                zip_process.kill()
+                zip_process.wait()
             output.unlink(missing_ok=True)
+            zip_output.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -170,6 +191,8 @@ def main() -> None:
     replay_parser = subparsers.add_parser("replay")
     replay_parser.add_argument("--trace-dir", type=Path, required=True)
     replay_parser.add_argument("--count", type=int, default=2)
+    replay_parser.add_argument("--zip-control", action="store_true")
+    replay_parser.add_argument("--pack-root", type=Path)
     subparsers.add_parser("trace")
     args, remainder = parser.parse_known_args()
     if args.command == "prepare":
@@ -179,7 +202,7 @@ def main() -> None:
     elif args.command == "replay":
         if remainder:
             parser.error(f"unexpected arguments: {remainder}")
-        replay(args.trace_dir, args.count)
+        replay(args.trace_dir, args.count, args.zip_control, args.pack_root)
     else:
         trace(remainder)
 
