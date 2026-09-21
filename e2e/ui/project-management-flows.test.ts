@@ -2731,7 +2731,24 @@ for (const published of [false, true]) {
     })) await expect(trigger).toHaveCSS(property, value);
     await trigger.click();
     await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(menu.getByRole('option')).toHaveCount(2);
+    const options = menu.getByRole('option');
+    await expect(options).toHaveCount(2);
+    for (const option of await options.all()) {
+      for (const [property, value] of Object.entries({
+        height: '28px', 'min-height': '28px', padding: '0px 8px', gap: '8px',
+        'border-top-width': '0px', 'border-radius': '4px', 'font-size': '12px', 'font-weight': '400',
+      })) await expect(option).toHaveCSS(property, value);
+    }
+    const selected = menu.getByRole('option', { name: 'Workspace members', exact: true });
+    await expect(selected).toHaveAttribute('aria-selected', 'true');
+    await expect(selected).toHaveCSS('background-color', 'rgb(242, 242, 244)');
+    await expect(selected).toHaveCSS('color', 'rgb(31, 31, 31)');
+    const privateOption = menu.getByRole('option', { name: 'Only me', exact: true });
+    await expect(privateOption).toHaveCSS('color', 'rgb(73, 73, 73)');
+    await privateOption.hover();
+    await expect(privateOption).toHaveCSS('background-color', 'rgb(242, 242, 244)');
+    await expect(privateOption).toHaveCSS('color', 'rgb(31, 31, 31)');
+    await expect(privateOption).toHaveAttribute('aria-selected', 'false');
     await test.info().attach(`team-scope-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
     await trigger.click();
     await expect(menu.getByRole('listbox')).toBeHidden();

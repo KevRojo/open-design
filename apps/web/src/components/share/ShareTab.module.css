@@ -34,6 +34,30 @@
   font-size: 12px;
 }
 
+/* S1-T2 option-row skin; retain existing listbox anchoring and permission gates. */
+.panel :global(.chrome-access-options button) {
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  gap: 8px;
+  border: 0;
+  border-radius: 4px;
+  color: #494949;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.panel :global(.chrome-access-options button[aria-selected="true"]) {
+  background: #F2F2F4;
+  color: #1F1F1F;
+}
+
+.panel :global(.chrome-access-options button:hover:not(:disabled)) {
+  background: #F2F2F4;
+  color: #1F1F1F;
+}
+
 .panel:global(.chrome-unified-panel) {
   padding: 0;
   gap: 12px;
