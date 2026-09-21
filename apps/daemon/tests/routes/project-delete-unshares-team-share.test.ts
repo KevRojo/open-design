@@ -113,6 +113,7 @@ function fakeHub() {
 
 async function startServer(
   hub: ReturnType<typeof fakeHub>,
+  stopPublicFilesBeforeDelete?: (projectId: string) => Promise<void>,
 ) {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-delete-unshare-'));
   projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-delete-unshare-dir-'));
@@ -127,6 +128,7 @@ async function startServer(
   app.use(express.json());
   registerProjectRoutes(app, {
     db,
+    stopPublicFilesBeforeDelete,
     design: { runs: { list: () => [], cancel: async () => {} } },
     http: { sendApiError, createSseResponse: () => ({ send: () => {} }) },
     paths: { PROJECTS_DIR: projectsDir },
@@ -197,6 +199,29 @@ async function startServer(
   const port = typeof address === 'object' && address ? address.port : 0;
   return { baseUrl: `http://127.0.0.1:${port}`, db };
 }
+
+it.each([true, false])('runs public stop before catalog and local deletion, stop fails=%s', async (fails) => {
+  const hub = fakeHub();
+  let called = false;
+  const projectId = 'public-delete-order';
+  const principal: ResourceHubPrincipal = { teamId: WORKSPACE_ID, memberId: OWNER_MEMBER_ID, role: 'owner', lifecycleState: 'active' };
+  const { baseUrl, db } = await startServer(hub, async (id) => {
+    called = true;
+    expect(id).toBe(projectId);
+    expect(hub.catalog.has(hub.key(projectId, principal))).toBe(true);
+    expect(getProject(db, projectId)).toBeTruthy();
+    if (fails) throw new Error('PUBLIC_FILE_STOP_PENDING');
+  });
+  insertProject(db, { id: projectId, name: 'Public', createdAt: 1, updatedAt: 1 });
+  ensureWorkspaceProject(db, { projectId, workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: OWNER_MEMBER_ID, resourceState: 'active', syncState: 'synced' });
+  hub.catalog.set(hub.key(projectId, principal), {});
+  const response = await fetch(`${baseUrl}/api/projects/${projectId}`, { method: 'DELETE', headers: ownerHeaders() });
+  expect(called).toBe(true);
+  expect(response.status).toBe(fails ? 400 : 200);
+  expect(Boolean(getProject(db, projectId))).toBe(fails);
+  expect(hub.catalog.has(hub.key(projectId, principal))).toBe(fails);
+  expect(hub.catalogRemoveCalls).toHaveLength(fails ? 0 : 1);
+});
 
 describe('DELETE /api/projects/:id unshares a team-visible project from the hub first', () => {
   it('unpublishes and drops the catalog entry BEFORE the local delete, for a project the caller shared', async () => {
