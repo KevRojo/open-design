@@ -250,6 +250,20 @@ export function createSqlitePublicFilePublicationStore(
   const deleteRevision = db.prepare(`DELETE FROM public_file_publications
     WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ?
     AND slug = ? AND revision = ?`);
+  const deleteRevisionAndCancelOutbox = db.transaction((
+    scope: PublicFilePublicationScope,
+    expected: PublicFilePublicationRevision,
+  ): boolean => {
+    const removed = deleteRevision.run(
+      scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath,
+      expected.slug, expected.token,
+    ).changes === 1;
+    // A stale stop owns neither the current publication nor its relay intents.
+    // Cancellation failure rolls back the witness deletion, and re-publication
+    // cannot interleave between the CAS and cancellation of pre-stop rows.
+    if (removed) cancelPersonalCommentRelayOutbox(db, scope);
+    return removed;
+  });
   // Independent of publications/projects: replacement slugs and local deletion
   // must not erase an outstanding remote stop, including exhausted diagnostics.
   const stopSelect = `SELECT resource_team_id AS resourceTeamId,
@@ -275,7 +289,7 @@ export function createSqlitePublicFilePublicationStore(
       return selectRevision.get(scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath) as PublicFilePublicationRevision | undefined ?? null;
     },
     deleteIfRevisionMatches(scope, expected) {
-      return deleteRevision.run(scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath, expected.slug, expected.token).changes === 1;
+      return deleteRevisionAndCancelOutbox(scope, expected);
     },
     enqueueStop(key) { enqueueStop.run(...stopTaskValues(key)); },
     listStops() { return selectStops.all() as PublicFileStopTask[]; },

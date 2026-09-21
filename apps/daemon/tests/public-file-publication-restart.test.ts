@@ -302,7 +302,7 @@ describe('public file publication restart lifecycle', () => {
         versionId: 'version-1', createdAt: new Date(1).toISOString(),
       });
       if (args[0] === 'snapshot-redact') throw new Error('remote stop unavailable');
-      return JSON.stringify({ version: 1 });
+      return JSON.stringify({ id: 'version-1', version: 1 });
     });
     const publicationStore = createSqlitePublicFilePublicationStore(
       openDatabase(projectDir, { dataDir: projectDir }),

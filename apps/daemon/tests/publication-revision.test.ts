@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { migrateCommentRelayOutbox } from '../src/collab/comment-relay-outbox.js';
 import { describe, expect, it } from 'vitest';
 import { createInMemoryPublicFilePublicationStore, createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
 
@@ -10,6 +11,7 @@ for (const backend of ['memory', 'sqlite'] as const) {
       const db = new Database(':memory:');
       try {
         migratePublicFilePublications(db);
+        migrateCommentRelayOutbox(db);
         const store = backend === 'memory' ? createInMemoryPublicFilePublicationStore() : createSqlitePublicFilePublicationStore(db, () => 1);
         store.set(scope, publication);
         const old = store.getRevision(scope)!;
