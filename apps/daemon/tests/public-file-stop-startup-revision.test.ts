@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { createPublicFileMutations } from '../src/collab/public-file-mutations.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +35,21 @@ it.each([false, true])('preserves original revision across SQLite close/reopen a
     expect(store.get(key)).toEqual(replace ? publication : null);
     expect(db.prepare('SELECT comment_id FROM comment_relay_outbox').all()).toEqual(replace ? [{ comment_id: 'old' }] : []);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('holds the shared project lock through stop and persistence before another publish', async () => {
+  const store = createInMemoryPublicFilePublicationStore(); store.set(key, publication); store.enqueueStop(key);
+  const mutations = createPublicFileMutations();
+  let entered!: () => void; const entry = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
+  const run = createPublicFileStopStartup(store, async () => ({ ...key, stop: async () => { entered(); await barrier; } }), mutations);
+  const retry = run(); await entry;
+  let published = false;
+  const publish = mutations.run(key.projectId, async () => { published = true; store.set(key, publication); });
+  try { await Promise.resolve(); await Promise.resolve(); expect(published).toBe(false); }
+  finally { release(); await retry; await publish; }
+  expect((await retry).stopped).toBe(1);
+  expect(store.listStops()).toEqual([]); expect(store.get(key)).toEqual(publication);
 });
 
 const key = { resourceTeamId: 'team', ownerMemberId: 'owner', projectId: 'project', filePath: 'index.html', slug: 'stable' };
