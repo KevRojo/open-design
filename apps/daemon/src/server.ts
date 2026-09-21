@@ -956,6 +956,8 @@ import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
 import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
+import { createVelaPublicFileStop } from './collab/vela-public-file-stop.js';
+import { createProjectPublicFileStop } from './collab/project-public-file-stop.js';
 import { resolveLocalProjectCommentWorkspaceContext } from './collab/project-comment-workspace-context.js';
 import { commentRelayScope, personalCommentRelayFilePaths } from './collab/comment-relay-scope.js';
 import {
@@ -8584,8 +8586,26 @@ export async function startServer({
   });
   registerSocialShareRoutes(app, { http: httpDeps });
   const projectCreatePreparationTimeoutMs = projectCreatePreparationTimeoutMsFromEnv();
+  const stopProjectPublicFiles = createProjectPublicFileStop(
+    publicFilePublicationStore,
+    createVelaPublicFileStop({ configuredEnv: configuredAmrEnv }),
+  );
   registerProjectRoutes(app, {
     db,
+    stopPublicFilesBeforeDelete: async (projectId) => {
+      const binding = getWorkspaceProjectByProjectId(db, projectId);
+      if (!binding?.workspaceId || !binding.createdByWorkspaceMemberId) {
+        // An orphaned publication cannot borrow the current user's identity.
+        const publication = db.prepare('SELECT 1 FROM public_file_publications WHERE project_id = ? LIMIT 1').get(projectId);
+        if (publication) throw new Error('PUBLIC_FILE_STOP_PENDING');
+        return;
+      }
+      await stopProjectPublicFiles({
+        resourceTeamId: binding.workspaceId,
+        ownerMemberId: binding.createdByWorkspaceMemberId,
+        projectId,
+      });
+    },
     design,
     // Test seam for the POST /api/projects preparation deadline; production
     // keeps the route's 15s default when the variable is unset or invalid.

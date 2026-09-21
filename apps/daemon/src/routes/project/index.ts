@@ -331,6 +331,8 @@ function assertProjectCreatePreparationWithinDeadline(
 }
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
+  /** Stop public bindings before any catalog/local deletion; production supplies this capability. */
+  stopPublicFilesBeforeDelete?: (projectId: string) => Promise<void>;
   /**
    * Request-wide deadline for the read-only preparation POST /api/projects
    * runs before its transaction. Production keeps the 15s default; tests and
@@ -5477,6 +5479,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         project.id,
         'delete',
       )) return;
+      await ctx.stopPublicFilesBeforeDelete?.(project.id);
       // spec 04 §11: a team-visible project must be unshared from the hub
       // BEFORE it disappears locally — mirrors the 'personal' branch of
       // /move's `requestTeamVisibility`, the one other place this daemon
