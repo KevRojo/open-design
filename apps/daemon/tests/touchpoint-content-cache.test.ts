@@ -112,6 +112,8 @@ afterEach(() => {
 });
 
 const blobsDir = () => path.join(dataDir, 'touchpoint-content-cache', 'blobs');
+/** The file a digest names, so a case can damage one specific blob rather than whichever one readdir happens to list first. */
+const blobFile = (value: string) => path.join(blobsDir(), value.slice('sha256:'.length));
 
 describe('touchpoint content cache', () => {
   it('rebuilds a trimmed response into the full one, field for field', () => {
@@ -149,6 +151,20 @@ describe('touchpoint content cache', () => {
     const [corrupted] = fs.readdirSync(blobsDir());
     fs.writeFileSync(path.join(blobsDir(), corrupted as string), base64('tampered'));
     expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+  });
+
+  it('repairs a damaged blob the next time it holds the real bytes', () => {
+    const cache = createTouchpointContentCache(dataDir);
+    const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
+    cache.remember(MODAL, full);
+    fs.writeFileSync(blobFile(digest(SHARED)), base64('tampered'));
+    // The damage has to be real before its repair means anything.
+    expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+    // This is the fallback's full response arriving: the one moment the daemon
+    // holds the correct bytes for that blob again. Refusing to write them is
+    // what turns one damaged file into a permanent trimmed-then-full round.
+    cache.remember(MODAL, full);
+    expect(cache.reassemble(MODAL, trimmedResponse(full))).toEqual(full);
   });
 
   it('does not offer content it can no longer read', () => {
