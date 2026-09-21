@@ -298,3 +298,73 @@ export function createSqlitePublicFilePublicationStore(
     },
   };
 }
+
+/**
+ * Prepare an operation bound to the queued resource team AND member. Return null
+ * when capability/identity is unavailable; never resolve to a different account.
+ * Preparation must not send the stop request. The returned operation must retain
+ * the verified credentials rather than consulting mutable current-account state.
+ */
+interface PreparedPublicFileStop {
+  resourceTeamId: string;
+  ownerMemberId: string;
+  stop(): Promise<void>;
+}
+
+export type PreparePublicFileStop = (
+  key: Readonly<PublicFileStopTaskKey>,
+) => Promise<PreparedPublicFileStop | null>;
+
+interface PublicFileStopStartupResult {
+  stopped: number;
+  failed: number;
+  deferred: number;
+  persistenceFailures: number;
+}
+
+/** One pass per daemon lifecycle, not per route registration or request. */
+export function createPublicFileStopStartup(
+  store: StopQueuePublicFilePublicationStore,
+  prepare: PreparePublicFileStop | null,
+): () => Promise<PublicFileStopStartupResult> {
+  let started: Promise<PublicFileStopStartupResult> | undefined;
+  return () => started ??= Promise.resolve().then(async () => {
+    const result = { stopped: 0, failed: 0, deferred: 0, persistenceFailures: 0 };
+    const seen = new Set<string>();
+    for (const task of store.listRetryableStops()) {
+      const key: PublicFileStopTaskKey = {
+        resourceTeamId: task.resourceTeamId,
+        ownerMemberId: task.ownerMemberId,
+        projectId: task.projectId,
+        filePath: task.filePath,
+        slug: task.slug,
+      };
+      const id = stopTaskKey(key);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      let operation: PreparedPublicFileStop | null = null;
+      try { operation = await prepare?.(Object.freeze(key)) ?? null; } catch { /* No verified operation. */ }
+      if (!operation
+        || operation.resourceTeamId !== key.resourceTeamId
+        || operation.ownerMemberId !== key.ownerMemberId) {
+        result.deferred++;
+        continue;
+      }
+      let failed = false;
+      try { await operation.stop(); } catch { failed = true; }
+      // Persistence errors must not masquerade as network failures or success.
+      try {
+        if (failed) {
+          store.recordStopFailure(key);
+          result.failed++;
+        } else {
+          store.completeStop(key);
+          result.stopped++;
+        }
+      } catch {
+        result.persistenceFailures++;
+      }
+    }
+    return result;
+  });
+}
