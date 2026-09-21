@@ -16,12 +16,12 @@
 import { createHash } from 'node:crypto';
 import express from 'express';
 import fs from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigPrefs } from '../src/app-config.js';
 import { registerVelaRoutes } from '../src/routes/vela.js';
@@ -103,7 +103,31 @@ const TRIMMED_RESPONSE = (() => {
   return trimmed;
 })();
 
-type UpstreamCall = Readonly<{ path: string; heldContentId: string | null; heldContentLocale: string | null }>;
+type HeldParams = Readonly<{ heldContentId: string | null; heldContentLocale: string | null }>;
+type UpstreamCall = Readonly<{ path: string } & HeldParams>;
+
+/**
+ * A case takes the fake Vela over when it needs to control WHEN a reply lands,
+ * not just what it says. Everything else keeps the default handler below.
+ */
+type UpstreamHandler = (req: IncomingMessage, res: ServerResponse, held: HeldParams) => void;
+
+/**
+ * The server's own rule, which no case here may bypass: it may omit the
+ * content only when the caller already holds exactly the version it decided to
+ * serve. A fake that trimmed on a flag instead would be exercising a protocol
+ * nobody implements.
+ */
+const decisionPayload = (served: typeof FULL_RESPONSE, held: HeldParams): string => {
+  if (held.heldContentId !== served.content.id || held.heldContentLocale !== served.content.locale)
+    return JSON.stringify(served);
+  const trimmed: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(served)) {
+    if (field === 'content') trimmed.contentOmitted = true;
+    else trimmed[field] = value;
+  }
+  return JSON.stringify(trimmed);
+};
 
 let dataDir: string;
 let upstream: Server;
@@ -116,6 +140,7 @@ let upstreamBytes: number[];
 let supportsTrimming: boolean;
 let status: number;
 let errorBody: unknown;
+let upstreamHandler: UpstreamHandler | null;
 
 const listen = (server: Server) =>
   new Promise<AddressInfo>((resolve) => {
@@ -130,18 +155,25 @@ beforeEach(async () => {
   supportsTrimming = true;
   status = 200;
   errorBody = null;
+  upstreamHandler = null;
   upstream = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://upstream');
-    const heldContentId = url.searchParams.get('heldContentId');
-    const heldContentLocale = url.searchParams.get('heldContentLocale');
-    calls.push({ path: url.pathname, heldContentId, heldContentLocale });
+    const held: HeldParams = {
+      heldContentId: url.searchParams.get('heldContentId'),
+      heldContentLocale: url.searchParams.get('heldContentLocale'),
+    };
+    calls.push({ path: url.pathname, ...held });
+    if (upstreamHandler) {
+      upstreamHandler(req, res, held);
+      return;
+    }
     res.setHeader('content-type', 'application/json');
     res.statusCode = status;
     const trim =
       supportsTrimming &&
       status === 200 &&
-      heldContentId === FULL_RESPONSE.content.id &&
-      heldContentLocale === FULL_RESPONSE.content.locale;
+      held.heldContentId === FULL_RESPONSE.content.id &&
+      held.heldContentLocale === FULL_RESPONSE.content.locale;
     const payload = JSON.stringify(
       status === 200 ? (trim ? TRIMMED_RESPONSE : FULL_RESPONSE) : errorBody,
     );
@@ -186,6 +218,30 @@ const decide = async () => {
 const blobsDir = () => path.join(dataDir, 'touchpoint-content-cache', 'blobs');
 /** The file a digest names, so a case can damage one specific blob rather than whichever one readdir happens to list first. */
 const blobFile = (value: string) => path.join(blobsDir(), value.slice('sha256:'.length));
+
+/** The content id the assembly record on disk names right now, or `null` when there is none. */
+const recordedContentId = (): string | null => {
+  const dir = path.join(dataDir, 'touchpoint-content-cache', 'assemblies');
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  if (files.length !== 1) return null;
+  const record = JSON.parse(fs.readFileSync(path.join(dir, files[0] as string), 'utf8')) as {
+    contentId?: string;
+  };
+  return record.contentId ?? null;
+};
+
+/** `FULL_RESPONSE` promoted to the next campaign: a new activity carrying new content. */
+const nextCampaign = (): typeof FULL_RESPONSE => {
+  const next = JSON.parse(JSON.stringify(FULL_RESPONSE)) as typeof FULL_RESPONSE;
+  next.activityId = 'activity-2';
+  next.deploymentId = 'deployment-2';
+  next.touchpointDecisionId = 'decision-2';
+  next.content.id = 'version-2';
+  return next;
+};
+
+/** Which content each activity is allowed to appear with. Crossing them is the defect. */
+const CONTENT_OF: Record<string, string> = { 'activity-1': 'version-1', 'activity-2': 'version-2' };
 
 describe('daemon touchpoint content assembly', () => {
   // Property 1. If this ever fails, every already-published client stops seeing
@@ -323,6 +379,121 @@ describe('daemon touchpoint content assembly', () => {
       heldContentId: 'someone-elses',
       heldContentLocale: 'fr-FR',
     });
+  });
+
+  it('never splices a content version the server did not trim for', async () => {
+    await decide(); // Cold: the daemon now holds version-1, of activity-1.
+
+    let served = FULL_RESPONSE;
+    let announceArrival!: () => void;
+    const firstArrived = new Promise<void>((resolve) => {
+      announceArrival = resolve;
+    });
+    let release!: () => void;
+    const firstReleased = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holdNext = true;
+    upstreamHandler = (_req, res, held) => {
+      // A real server frames its reply against what it is serving at the moment
+      // the request lands, so the payload is decided here and not after the wait.
+      const payload = decisionPayload(served, held);
+      const answer = () => {
+        res.setHeader('content-type', 'application/json');
+        res.end(payload);
+      };
+      if (!holdNext) {
+        answer();
+        return;
+      }
+      holdNext = false;
+      announceArrival();
+      void firstReleased.then(answer);
+    };
+
+    // A is a live request a user is waiting on. It offers version-1 and the
+    // server, still serving version-1, trims its reply against exactly that.
+    const inFlight = decide();
+    await firstArrived;
+    // The campaign is promoted while A is still on the wire.
+    served = nextCampaign();
+    // B offers version-1 too, which no longer matches, so it gets the new
+    // campaign in full -- and the daemon records version-2 under this placement.
+    await decide();
+    expect(recordedContentId()).toBe('version-2');
+    release();
+
+    const first = JSON.parse((await inFlight).text) as { activityId: string; content: { id: string } };
+    // The invariant: the decision metadata and the content name one campaign.
+    // The browser's verifier only checks that the content is internally
+    // consistent, and each half is, so a crossed pair renders happily and
+    // reports its impressions against the other campaign's decision id.
+    expect(first.content.id).toBe(CONTENT_OF[first.activityId]);
+  });
+
+  it('drops its upstream request when the caller walks away', async () => {
+    await decide(); // Cold: the daemon now holds version-1.
+
+    let upstreamClosed = false;
+    let announceArrival!: () => void;
+    const requestArrived = new Promise<void>((resolve) => {
+      announceArrival = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    upstreamHandler = (req, res) => {
+      req.socket.once('close', () => {
+        upstreamClosed = true;
+      });
+      res.on('error', () => {
+        /* the caller is gone; failing to write to it is the expected outcome */
+      });
+      announceArrival();
+      // Answer only once the caller has given up. The browser's per-attempt
+      // budget is shorter than this proxy's, so this is the ordinary case.
+      void released.then(() => {
+        try {
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(nextCampaign()));
+        } catch {
+          /* the socket is already gone, which is the point of this case */
+        }
+      });
+    };
+
+    const controller = new AbortController();
+    const abandoned = fetch(
+      `${baseUrl}/api/touchpoints/production-runtime?placementKey=${PLACEMENT}&locale=${LOCALE}`,
+      { signal: controller.signal },
+    ).catch(() => null);
+    await requestArrived;
+    controller.abort();
+    await abandoned;
+    // Let the abort reach the daemon before the upstream speaks. Waiting on the
+    // signal rather than a fixed delay keeps the passing path at milliseconds;
+    // when the proxy does not drop its request there is no signal to wait for,
+    // so the budget runs out and the assertions below say why.
+    await vi
+      .waitFor(
+        () => {
+          expect(upstreamClosed).toBe(true);
+        },
+        { timeout: 2_000, interval: 10 },
+      )
+      .catch(() => undefined);
+    // A real upstream has no idea the browser gave up. It answers regardless.
+    release();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+
+    expect(upstreamClosed).toBe(true);
+    // Nobody reads an orphan's response; its side effects are the whole
+    // problem. A reply that outlived its caller must not rewrite the record a
+    // later, live request is about to rebuild from.
+    expect(recordedContentId()).toBe('version-1');
   });
 
   it('follows the server to a new activity within one poll instead of pinning the cached one', async () => {
