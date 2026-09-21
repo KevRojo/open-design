@@ -3,6 +3,22 @@ import { resolve } from 'node:path';
 import postcss from 'postcss';
 import { describe, expect, it } from 'vitest';
 
+describe('S1-T2 scope menu container', () => {
+  it('uses canvas spacing and elevation without changing the anchor', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules('.panel :global(.chrome-access-options)', rule => {
+      rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+    });
+    expect(values).toMatchObject({
+      'box-sizing': 'border-box', padding: '4px', display: 'flex', 'flex-direction': 'column', gap: '2px',
+      border: '1px solid #00000008', 'border-radius': '8px', background: '#FFFFFF',
+      'box-shadow': '0 6px 20px #00000012, 0 1px 4px #00000006',
+    });
+    for (const property of ['position', 'top', 'left', 'right', 'width']) expect(values).not.toHaveProperty(property);
+  });
+});
+
 describe('S1-T2 scope option rows', () => {
   it('declares compact rows and neutral selected/hover feedback', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));

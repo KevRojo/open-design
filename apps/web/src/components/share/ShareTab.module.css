@@ -34,6 +34,19 @@
   font-size: 12px;
 }
 
+/* S1-T2 menu elevation/spacing; inherited anchoring and width remain intact. */
+.panel :global(.chrome-access-options) {
+  box-sizing: border-box;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid #00000008;
+  border-radius: 8px;
+  background: #FFFFFF;
+  box-shadow: 0 6px 20px #00000012, 0 1px 4px #00000006;
+}
+
 /* S1-T2 option-row skin; retain existing listbox anchoring and permission gates. */
 .panel :global(.chrome-access-options button) {
   box-sizing: border-box;

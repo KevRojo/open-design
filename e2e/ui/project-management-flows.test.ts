@@ -2731,6 +2731,13 @@ for (const published of [false, true]) {
     })) await expect(trigger).toHaveCSS(property, value);
     await trigger.click();
     await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const scopeMenu = menu.getByRole('listbox');
+    for (const [property, value] of Object.entries({
+      padding: '4px', gap: '2px', display: 'flex', 'flex-direction': 'column',
+      'border-top-width': '1px', 'border-top-color': 'rgba(0, 0, 0, 0.03)',
+      'border-radius': '8px', 'background-color': 'rgb(255, 255, 255)',
+      'box-shadow': 'rgba(0, 0, 0, 0.07) 0px 6px 20px 0px, rgba(0, 0, 0, 0.024) 0px 1px 4px 0px',
+    })) await expect(scopeMenu).toHaveCSS(property, value);
     const options = menu.getByRole('option');
     await expect(options).toHaveCount(2);
     for (const option of await options.all()) {
