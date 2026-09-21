@@ -244,16 +244,21 @@ describe('od comment CLI HTTP/SQLite route integration', () => {
   it('accepts exactly the server byte ceiling and rejects one UTF-8 byte over it through CLI, HTTP, and SQLite', async () => {
     const base = await startRouteServer();
     const common = [...headers(OWNER), '--daemon-url', base, '--json'];
-    const multibyte = '评论';
-    const exactNote = multibyte.repeat(Math.floor(SHARE_COMMENT_MAX_BYTES / Buffer.byteLength(multibyte, 'utf8')))
-      + 'a'.repeat(SHARE_COMMENT_MAX_BYTES % Buffer.byteLength(multibyte, 'utf8'));
+    const exactNote = '评论'.repeat(Math.floor(SHARE_COMMENT_MAX_BYTES / Buffer.byteLength('评论', 'utf8')))
+      + 'a'.repeat(SHARE_COMMENT_MAX_BYTES % Buffer.byteLength('评论', 'utf8'));
+    const exactUpdateNote = '更新'.repeat(Math.floor(SHARE_COMMENT_MAX_BYTES / Buffer.byteLength('更新', 'utf8')))
+      + 'b'.repeat(SHARE_COMMENT_MAX_BYTES % Buffer.byteLength('更新', 'utf8'));
     const oversizedNote = `${exactNote}b`;
     expect(Buffer.byteLength(exactNote, 'utf8')).toBe(SHARE_COMMENT_MAX_BYTES);
+    expect(Buffer.byteLength(exactUpdateNote, 'utf8')).toBe(SHARE_COMMENT_MAX_BYTES);
+    expect(exactUpdateNote).not.toBe(exactNote);
     expect(Buffer.byteLength(oversizedNote, 'utf8')).toBe(SHARE_COMMENT_MAX_BYTES + 1);
 
     const exactPath = join(tempRoot, 'exact-limit.txt');
+    const exactUpdatePath = join(tempRoot, 'exact-update-limit.txt');
     const oversizedPath = join(tempRoot, 'one-byte-over-limit.txt');
     writeFileSync(exactPath, exactNote, 'utf8');
+    writeFileSync(exactUpdatePath, exactUpdateNote, 'utf8');
     writeFileSync(oversizedPath, oversizedNote, 'utf8');
 
     const create = await runCli(['comment', 'create', PROJECT, CONVERSATION, '--target', JSON.stringify(target), '--prompt-file', exactPath, ...common]);
@@ -263,39 +268,46 @@ describe('od comment CLI HTTP/SQLite route integration', () => {
       note: exactNote, status: 'open', authorMemberId: OWNER,
     });
 
+    const beforeRejectedCreate = getPreviewComment(db!, PROJECT, CONVERSATION, created.id);
+    expect(beforeRejectedCreate).not.toBeNull();
+    const auditBeforeRejectedCreate = requestAudit.length;
     const rejectedCreate = await runCli(['comment', 'create', PROJECT, CONVERSATION, '--target', JSON.stringify(target), '--prompt-file', oversizedPath, ...common]);
     expect(rejectedCreate.code).not.toBe(0);
     const rejectedCreateError = JSON.parse(rejectedCreate.stderr);
     expect(rejectedCreateError).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
     expect(rejectedCreateError).not.toMatchObject({ error: { code: 'INVALID_COMMENT' } });
-    expect(requestAudit.at(-1)).toMatchObject({
+    expect(requestAudit).toHaveLength(auditBeforeRejectedCreate + 1);
+    expect(requestAudit[auditBeforeRejectedCreate]).toMatchObject({
       method: 'POST',
       path: `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments`,
       body: { note: oversizedNote },
     });
     expect(listPreviewComments(db!, PROJECT, CONVERSATION)).toHaveLength(1);
+    expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toEqual(beforeRejectedCreate);
 
-    const update = await runCli(['comment', 'update', PROJECT, CONVERSATION, created.id, '--target', JSON.stringify(target), '--prompt-file', exactPath, ...common]);
+    const update = await runCli(['comment', 'update', PROJECT, CONVERSATION, created.id, '--target', JSON.stringify(target), '--prompt-file', exactUpdatePath, ...common]);
     expect(update.code).toBe(0);
     const status = await runCli(['comment', 'status', PROJECT, CONVERSATION, created.id, '--status', 'resolved', ...common]);
     expect(status.code).toBe(0);
     expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toMatchObject({
-      note: exactNote, status: 'resolved', authorMemberId: OWNER,
+      note: exactUpdateNote, status: 'resolved', authorMemberId: OWNER,
     });
 
+    const beforeRejectedUpdate = getPreviewComment(db!, PROJECT, CONVERSATION, created.id);
+    expect(beforeRejectedUpdate).not.toBeNull();
+    const auditBeforeRejectedUpdate = requestAudit.length;
     const rejectedUpdate = await runCli(['comment', 'update', PROJECT, CONVERSATION, created.id, '--target', JSON.stringify(target), '--prompt-file', oversizedPath, ...common]);
     expect(rejectedUpdate.code).not.toBe(0);
     const rejectedUpdateError = JSON.parse(rejectedUpdate.stderr);
     expect(rejectedUpdateError).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
     expect(rejectedUpdateError).not.toMatchObject({ error: { code: 'INVALID_COMMENT' } });
-    expect(requestAudit.at(-1)).toMatchObject({
+    expect(requestAudit).toHaveLength(auditBeforeRejectedUpdate + 1);
+    expect(requestAudit[auditBeforeRejectedUpdate]).toMatchObject({
       method: 'POST',
       path: `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments`,
-      body: { note: oversizedNote },
+      body: { id: created.id, note: oversizedNote },
     });
-    expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toMatchObject({
-      note: exactNote, status: 'resolved', authorMemberId: OWNER,
-    });
+    expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toEqual(beforeRejectedUpdate);
   });
 
   it('rejects unauthorized and invalid CLI writes without mutation', async () => {
