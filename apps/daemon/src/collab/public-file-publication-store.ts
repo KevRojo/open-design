@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 
 type SqliteDb = Database.Database;
 
@@ -15,7 +16,12 @@ export interface PublicFilePublication {
   fileName: string;
 }
 
+/** Internal operation witness; never included in the public publication DTO. */
+export interface PublicFilePublicationRevision { slug: string; token: string }
+
 export interface PublicFilePublicationStore {
+  getRevision(scope: PublicFilePublicationScope): PublicFilePublicationRevision | null;
+  deleteIfRevisionMatches(scope: PublicFilePublicationScope, expected: PublicFilePublicationRevision): boolean;
   get(scope: PublicFilePublicationScope): PublicFilePublication | null;
   set(
     scope: PublicFilePublicationScope,
@@ -82,6 +88,7 @@ export function migratePublicFilePublications(db: SqliteDb): void {
       file_name TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
+      revision TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path)
     );
     CREATE TABLE IF NOT EXISTS public_file_stop_queue (
@@ -94,6 +101,10 @@ export function migratePublicFilePublications(db: SqliteDb): void {
       PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path, slug)
     );
   `);
+  const columns = db.prepare('PRAGMA table_info(public_file_publications)').all() as Array<{ name: string }>;
+  if (!columns.some(column => column.name === 'revision')) {
+    db.exec("ALTER TABLE public_file_publications ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 function scopeKey(scope: PublicFilePublicationScope): string {
@@ -117,8 +128,19 @@ export function createInMemoryPublicFilePublicationStore(): StopQueuePublicFileP
     scope: PublicFilePublicationScope;
     publication: PublicFilePublication;
     publishedAt: number;
+    revision: string;
   }>();
   return {
+    getRevision(scope) {
+      const entry = publications.get(scopeKey(scope));
+      return entry ? { slug: entry.publication.slug, token: entry.revision } : null;
+    },
+    deleteIfRevisionMatches(scope, expected) {
+      const key = scopeKey(scope);
+      const entry = publications.get(key);
+      if (!entry || entry.publication.slug !== expected.slug || entry.revision !== expected.token) return false;
+      return publications.delete(key);
+    },
     enqueueStop(key) {
       const id = stopTaskKey(key);
       if (!stopTasks.has(id)) {
@@ -157,6 +179,7 @@ export function createInMemoryPublicFilePublicationStore(): StopQueuePublicFileP
         scope: { ...scope },
         publication,
         publishedAt: Date.now(),
+        revision: randomUUID(),
       });
     },
     delete: (scope) => {
@@ -193,14 +216,15 @@ export function createSqlitePublicFilePublicationStore(
   const upsertRow = db.prepare(`
     INSERT INTO public_file_publications
       (resource_team_id, owner_member_id, project_id, file_path,
-       url, slug, file_name, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       url, slug, file_name, created_at, updated_at, revision)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(resource_team_id, owner_member_id, project_id, file_path)
     DO UPDATE SET
       url = excluded.url,
       slug = excluded.slug,
       file_name = excluded.file_name,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      revision = excluded.revision
   `);
   const deleteRow = db.prepare(`
     DELETE FROM public_file_publications
@@ -210,6 +234,11 @@ export function createSqlitePublicFilePublicationStore(
        AND file_path = ?
   `);
 
+  const selectRevision = db.prepare(`SELECT slug, revision AS token FROM public_file_publications
+    WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ?`);
+  const deleteRevision = db.prepare(`DELETE FROM public_file_publications
+    WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ?
+    AND slug = ? AND revision = ?`);
   // Independent of publications/projects: replacement slugs and local deletion
   // must not erase an outstanding remote stop, including exhausted diagnostics.
   const stopSelect = `SELECT resource_team_id AS resourceTeamId,
@@ -231,6 +260,12 @@ export function createSqlitePublicFilePublicationStore(
     AND owner_member_id = ? AND project_id = ? AND file_path = ? AND slug = ?`);
 
   return {
+    getRevision(scope) {
+      return selectRevision.get(scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath) as PublicFilePublicationRevision | undefined ?? null;
+    },
+    deleteIfRevisionMatches(scope, expected) {
+      return deleteRevision.run(scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath, expected.slug, expected.token).changes === 1;
+    },
     enqueueStop(key) { enqueueStop.run(...stopTaskValues(key)); },
     listStops() { return selectStops.all() as PublicFileStopTask[]; },
     listRetryableStops() { return selectRetryableStops.all(MAX_STOP_FAILURES) as PublicFileStopTask[]; },
@@ -277,6 +312,7 @@ export function createSqlitePublicFilePublicationStore(
         publication.fileName,
         timestamp,
         timestamp,
+        randomUUID(),
       );
     },
     delete(scope) {

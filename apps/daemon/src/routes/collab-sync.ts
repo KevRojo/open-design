@@ -1248,6 +1248,7 @@ export function registerCollabSyncRoutes(
   });
 
   app.post(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
+    // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.
     const params = req.params as unknown as { 0?: string; 1?: string };
     const projectId = String(params[0] ?? '');
     const filePath = normalizePublicFilePath(String(params[1] ?? ''));
@@ -1402,6 +1403,7 @@ export function registerCollabSyncRoutes(
   });
 
   app.delete(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
+    // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.
     const params = req.params as unknown as { 0?: string; 1?: string };
     const projectId = String(params[0] ?? '');
     const filePath = normalizePublicFilePath(String(params[1] ?? ''));
@@ -1437,6 +1439,8 @@ export function registerCollabSyncRoutes(
       return res.status(403).json({ error: 'WORKSPACE_PROJECT_PUBLISH_DENIED' });
     }
     const resourceId = publicFileResourceIdFor(projectId, filePath, principal);
+    const scope = publicFilePublicationScope(projectId, filePath, principal);
+    const revision = publicFilePublicationStore.getRevision(scope);
     try {
       await runVelaResourceCommand([
         'snapshot-redact',
@@ -1444,9 +1448,9 @@ export function registerCollabSyncRoutes(
         slug,
         '--json',
       ], principal.teamId);
-      publicFilePublicationStore.delete(
-        publicFilePublicationScope(projectId, filePath, principal),
-      );
+      if (revision?.slug === slug) {
+        publicFilePublicationStore.deleteIfRevisionMatches(scope, revision);
+      }
       return res.json({ ok: true, slug, fileName: filePath });
     } catch (error) {
       console.warn('[od] failed to unpublish public project file:', error);
@@ -1455,6 +1459,7 @@ export function registerCollabSyncRoutes(
   });
 
   app.get(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
+    // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.
     const params = req.params as unknown as { 0?: string; 1?: string };
     const projectId = String(params[0] ?? '');
     const filePath = normalizePublicFilePath(String(params[1] ?? ''));

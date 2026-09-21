@@ -2186,6 +2186,36 @@ describe('collab sync routes', () => {
     expect(staged?.image).toBe('image-bytes');
   });
 
+  it.each([false, true])('preserves a newer publication when old stop returns (same slug: %s)', async (sameSlug) => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-stale-stop-'));
+    tempDirs.push(dir);
+    await writeFile(path.join(dir, 'index.html'), '<h1>Original</h1>');
+    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
+    let reached!: () => void;
+    let release!: () => void;
+    const stopping = new Promise<void>(resolve => { reached = resolve; });
+    const stopped = new Promise<void>(resolve => { release = resolve; });
+    let count = 0;
+    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
+      if (args[0] === 'push') return JSON.stringify({ id: `v${++count}`, version: count });
+      if (args[0] === 'snapshot') return JSON.stringify({ slug: sameSlug ? 'A' : count === 1 ? 'A' : 'B', versionId: `v${count}` });
+      if (args[0] === 'snapshot-redact') { reached(); await stopped; return '{}'; }
+      throw new Error('unexpected command');
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    expect((await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' })).status).toBe(200);
+    const stop = api.json('/api/projects/p1/files/index.html/publish-public', { method: 'DELETE', body: { slug: 'A' } });
+    let newer: Awaited<typeof stop>;
+    try {
+      await stopping;
+      newer = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    } finally { release(); }
+    expect((await stop).status).toBe(200);
+    expect(newer!.status).toBe(200);
+    expect((await api.json('/api/projects/p1/files/index.html/publish-public')).body.publication).toEqual(newer!.body);
+    // This test protects local management state only, not cloud operation order.
+  });
+
   it('hydrates and clears public file publication state', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-public-file-'));
     tempDirs.push(dir);

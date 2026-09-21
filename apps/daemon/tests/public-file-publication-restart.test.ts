@@ -153,6 +153,8 @@ describe('public file publication restart lifecycle', () => {
     );
     const publicationStore: PublicFilePublicationStore = {
       get: () => null,
+      getRevision: () => null,
+      deleteIfRevisionMatches: () => false,
       set: () => {
         throw new Error('sqlite disk full');
       },
@@ -204,6 +206,8 @@ describe('public file publication restart lifecycle', () => {
     });
     const publicationStore: PublicFilePublicationStore = {
       get: () => null,
+      getRevision: () => null,
+      deleteIfRevisionMatches: () => false,
       set: () => {
         throw new Error('sqlite disk full');
       },
