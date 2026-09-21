@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
+import { SharePanelHeader } from './share/SharePanelHeader';
 import shareEntryStyles from './share/ShareEntry.module.css';
 import { AnchoredMenuShell } from './chat/AnchoredMenuShell';
 import { createPortal, flushSync } from 'react-dom';
@@ -17233,6 +17234,12 @@ function HtmlViewer({
                     onAnchorHidden={closeDeployMenu}
                   >
                     {unifiedActionTab === 'share' && rawCanShare ? (
+                      <>
+                      <SharePanelHeader
+                        title={t('fileViewer.unifiedShareTab')}
+                        closeLabel={t('common.close')}
+                        onClose={closeDeployMenu}
+                      />
                       <ShareTab
                         menuOrigin={menuOrigin}
                         workspaceContext={workspaceContext}
@@ -17267,6 +17274,7 @@ function HtmlViewer({
                         canOpenSharePage={canOpenSharePage}
                         shareLinkStatusHint={shareLinkStatusHint}
                       />
+                      </>
                     ) : null}
                     {unifiedActionTab === 'export' && rawCanDownload ? (
                       <div className="chrome-unified-panel">

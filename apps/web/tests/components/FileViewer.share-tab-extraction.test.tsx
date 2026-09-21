@@ -175,11 +175,13 @@ describe('Z11a · ShareTab 搬动前的 DOM 基线', () => {
   it('个人工作区:面板只有自有托管部署那一段,逐字节不变', async () => {
     const panel = await openSharePanel(null);
     expect(panel.innerHTML).toBe(baseline('share-panel.personal.html'));
+    expect(screen.getByRole('heading', { name: 'Share', level: 2 })).toBeVisible();
   });
 
   it('团队工作区:可见范围 + 发布两段也在,逐字节不变', async () => {
     const panel = await openSharePanel(teamContext());
     expect(panel.innerHTML).toBe(baseline('share-panel.team.html'));
+    expect(screen.getByRole('heading', { name: 'Share', level: 2 })).toBeVisible();
   });
 
   it('团队基线确实比个人基线多出那两段(否则上一条在裸奔)', () => {
@@ -213,6 +215,32 @@ describe('Z11a · ShareTab 搬动前的 DOM 基线', () => {
       '两枚按钮被拆到了不同的外壳里',
     ).toBe(toolbarAction('Export').parentElement);
     expect(bar!.closest('.share-menu'), '按钮外壳脱离了 .share-menu').not.toBeNull();
+  });
+});
+
+describe('Shared share shell header', () => {
+  it.each([
+    ['toolbar', false], ['toolbar', true], ['artifact-card', false], ['artifact-card', true],
+  ] as const)('%s published=%s closes and reopens without changing publication', async (origin, published) => {
+    const fetchMock = stubFetch(published);
+    renderViewer(teamContext(), origin === 'artifact-card'
+      ? { shareRequest: { nonce: 701, anchorId: 'header-card' } } : {});
+    if (origin === 'toolbar') fireEvent.click(toolbarAction('Share'));
+    if (published) await screen.findByRole('button', { name: /stop sharing/i });
+    else await screen.findByRole('menuitem', { name: /Generate and copy link/i });
+    const heading = await screen.findByRole('heading', { name: 'Share', level: 2 });
+    expect(heading.parentElement?.nextElementSibling).toHaveClass('chrome-unified-panel--share');
+    const close = heading.parentElement!.querySelector<HTMLButtonElement>('button')!;
+    expect(close).toHaveAccessibleName('Close');
+    expect(close).toBeEnabled();
+    fireEvent.click(close);
+    expect(screen.queryByRole('heading', { name: 'Share' })).toBeNull();
+    expect(document.querySelector('.chrome-unified-panel--share')).toBeNull();
+    fireEvent.click(toolbarAction('Share'));
+    await screen.findByRole('heading', { name: 'Share' });
+    const publishRequests = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input).includes('publish-public') && ['POST', 'DELETE'].includes(init?.method ?? 'GET'));
+    expect(publishRequests).toEqual([]);
   });
 });
 
@@ -324,6 +352,7 @@ describe('Z11a · 基线守不住、但必须守住的几条', () => {
       expect(document.querySelector('.chrome-unified-panel--share'), '换页签后分享那一份还在').toBeNull(),
     );
     expect(document.querySelectorAll('.chrome-unified-popover'), '叠出了第二块弹层').toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Share' })).toBeNull();
   });
 
   it('面板挂在预览区容器内,不是 body 级 dialog(负向)', async () => {

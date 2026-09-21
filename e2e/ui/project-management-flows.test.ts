@@ -2756,6 +2756,28 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   }
   await expect(menu.locator('.chrome-unified-panel--share')).toHaveCSS('padding', '0px');
   await expect(menu.locator('.chrome-unified-panel--share')).toHaveCSS('gap', '12px');
+  const heading = menu.getByRole('heading', { name: 'Share', level: 2 });
+  await expect(heading).toBeVisible();
+  for (const [property, value] of Object.entries({ 'font-size': '15px', 'line-height': '22px', 'font-weight': '600', margin: '0px' })) {
+    await expect(heading).toHaveCSS(property, value);
+  }
+  const header = heading.locator('..');
+  for (const [property, value] of Object.entries({ 'min-height': '24px', gap: '12px', 'align-items': 'center', 'justify-content': 'space-between' })) {
+    await expect(header).toHaveCSS(property, value);
+  }
+  const closeShare = menu.getByRole('button', { name: 'Close', exact: true });
+  for (const [property, value] of Object.entries({
+    width: '20px', height: '20px', padding: '3px', 'border-top-width': '0px', 'border-radius': '5px',
+    color: 'rgb(133, 133, 133)', 'background-color': 'rgba(0, 0, 0, 0)',
+  })) {
+    await expect(closeShare).toHaveCSS(property, value);
+  }
+  await test.info().attach('share-header-first', { body: await page.screenshot(), contentType: 'image/png' });
+  await closeShare.focus();
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await secondShare.click();
+  await expect(heading).toBeVisible();
   const shareLink = menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true });
   await expect(shareLink).toBeVisible();
   await expect(shareLink).toBeEnabled();
@@ -2779,12 +2801,28 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   // S7 HTTP failure fixture, not a real cloud failure. Only the production API
   // response is mocked; the product module and its CSS remain unmodified.
   let publishAttempts = 0;
+  let releaseFirstPublish!: () => void;
+  const firstPublishGate = new Promise<void>(resolve => { releaseFirstPublish = resolve; });
   await page.route(`**/api/projects/${projectId}/files/index.html/publish-public`, async (route) => {
     if (route.request().method() !== 'POST') { await route.continue(); return; }
     publishAttempts += 1;
+    if (publishAttempts === 1) await firstPublishGate;
     await route.fulfill({ status: 500, json: { error: 's7_fixture_internal_failure' } });
   });
   await shareLink.click();
+  try {
+    await expect(menu.getByRole('progressbar')).toBeVisible();
+    await expect(closeShare).toBeEnabled();
+    await test.info().attach('share-header-publishing', { body: await page.screenshot(), contentType: 'image/png' });
+    await closeShare.click();
+    await expect(menu).toBeHidden();
+    await secondShare.click();
+    await expect(heading).toBeVisible();
+    await expect(menu.getByRole('progressbar')).toBeVisible();
+    expect(publishAttempts).toBe(1); // Closing a shell must not cancel or restart upload.
+  } finally {
+    releaseFirstPublish();
+  }
   const failure = menu.getByRole('status');
   await expect(failure).toHaveText('Could not create the share link. Try again, or use a deploy option below.');
   await expect(failure).not.toContainText('s7_fixture_internal_failure');
