@@ -16,6 +16,7 @@ import type {
   WorkspaceCollabContext,
 } from '@open-design/contracts';
 import { CollabCloudError, type CollabCloudClient } from '../integrations/collab-cloud.js';
+import type { SyncedCommentMergeResult } from '../db.js';
 import type { WorkspaceContextProvider } from './workspace-context.js';
 import type { CommentRelayScope } from './comment-relay-scope.js';
 import type {
@@ -89,13 +90,13 @@ export interface CollabCloudServiceDeps {
   resolveLocalConversationId: (projectId: string) => string | null;
   /**
    * Merge one pulled comment into local storage, idempotently by comment id.
-   * Returns true when a new row was inserted (false when it already existed).
+   * Acknowledge changed or safely unchanged state; throw on persistence failure.
    */
   mergeComment: (input: {
     projectId: string;
     conversationId: string;
     comment: CollabCloudComment;
-  }) => boolean;
+  }) => SyncedCommentMergeResult;
   /** Poll cadence; defaults to the spec's foreground 5s (§D4.5). */
   pollIntervalMs?: number;
   /** Durable outbound Team-comment queue. Omitted by isolated/local callers. */
@@ -790,7 +791,11 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     }
     let inserted = 0;
     for (const comment of comments) {
-      if (deps.mergeComment({ projectId, conversationId, comment })) inserted += 1;
+      const outcome = deps.mergeComment({ projectId, conversationId, comment });
+      if (outcome === 'changed') inserted += 1;
+      else if (outcome !== 'unchanged') {
+        throw new Error('Comment persistence did not acknowledge the pulled record');
+      }
     }
     etags.set(responseCursorKey, result.etag);
     cursors.set(responseCursorKey, result.latestSeq);

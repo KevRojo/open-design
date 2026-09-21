@@ -138,7 +138,7 @@ describe('durable Team comment relay outbox', () => {
       commentOutbox: createCommentRelayOutboxStore(db, () => 0),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 0,
     });
 
@@ -278,7 +278,7 @@ describe('durable Team comment relay outbox', () => {
       validateCommentRelayProjectBinding: (record) => commentRelayLocalBindingMatches(record, binding),
       resolveCommentRelayWorkspaceContext: async () => owner,
       listRemoteProjectRelayBindings: async () => [],
-      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 100, retryDelayMs: () => 0,
     });
     expect(first.enqueueComment(comment({ authorMemberId: owner.workspaceMemberId }), owner)).toBe(true);
@@ -303,7 +303,7 @@ describe('durable Team comment relay outbox', () => {
       validateCommentRelayProjectBinding: (record) => commentRelayLocalBindingMatches(record, binding),
       resolveCommentRelayWorkspaceContext: async () => owner,
       listRemoteProjectRelayBindings: async () => [],
-      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 100, retryDelayMs: () => 0,
     });
     await restarted.flushPendingComments();
@@ -332,7 +332,7 @@ describe('durable Team comment relay outbox', () => {
       validateCommentRelayProjectBinding: (record) => commentRelayLocalBindingMatches(record, binding),
       resolveCommentRelayWorkspaceContext: async () => freshIdentity,
       listRemoteProjectRelayBindings: async () => [],
-      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 100, retryDelayMs: () => 0,
     });
     expect(service.enqueueComment(comment({ authorMemberId: owner.workspaceMemberId }), owner)).toBe(true);
@@ -365,7 +365,7 @@ describe('durable Team comment relay outbox', () => {
       validateCommentRelayProjectBinding: (record) => commentRelayLocalBindingMatches(record, binding),
       resolveCommentRelayWorkspaceContext: async () => owner,
       listRemoteProjectRelayBindings: async () => [],
-      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 100, retryDelayMs: () => 0,
     });
     await restarted.flushPendingComments();
@@ -420,7 +420,7 @@ describe('durable Team comment relay outbox', () => {
       validateCommentRelayProjectBinding: (record) => commentRelayLocalBindingMatches(record, binding),
       resolveCommentRelayWorkspaceContext: async () => owner,
       listRemoteProjectRelayBindings: async () => [],
-      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 100, retryDelayMs: () => 0,
     });
     for (const [index, filePath] of filePaths.entries()) {
@@ -468,7 +468,7 @@ describe('durable Team comment relay outbox', () => {
       },
       validateCommentRelayProjectBinding: (record) => commentRelayLocalBindingMatches(record, bindings.get(record.projectId)),
       resolveCommentRelayWorkspaceContext: async () => freshIdentity,
-      listRemoteProjectRelayBindings: async () => [], listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      listRemoteProjectRelayBindings: async () => [], listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 100, retryDelayMs: () => 0,
     });
     expect(service.enqueueComment(comment({ id: 'valid-p1', projectId: 'p1', authorMemberId: owner.workspaceMemberId }), owner)).toBe(true);
@@ -514,7 +514,7 @@ describe('durable Team comment relay outbox', () => {
           return queuedContext;
         },
         resolveLocalConversationId: () => 'conv-local',
-        mergeComment: () => false,
+        mergeComment: () => 'unchanged',
         now: () => 100,
         retryDelayMs: () => 0,
       });
@@ -549,7 +549,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 200,
       retryDelayMs: () => 0,
     });
@@ -574,7 +574,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       onCommentPushed: ({ commentId, seq }) => confirmed.push({ commentId, seq }),
       now: () => 200,
       retryDelayMs: () => 0,
@@ -606,7 +606,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 250,
       retryDelayMs: () => 0,
     });
@@ -641,7 +641,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 300,
       retryDelayMs: () => 0,
     });
@@ -682,7 +682,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => resolved,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 400,
       retryDelayMs: () => 0,
     });
@@ -732,7 +732,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 500,
       retryDelayMs: () => 0,
     });
@@ -766,7 +766,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => [],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 600,
       retryDelayMs: () => 0,
     });
@@ -798,7 +798,7 @@ describe('durable Team comment relay outbox', () => {
       }),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       resolveCommentRelayWorkspaceContext: async () => queuedContext,
       listRemoteProjectRelayBindings: async () => catalog.promise,
       onCommentPushed: ({ projectId }) => confirmed.push(projectId),
@@ -855,7 +855,7 @@ describe('durable Team comment relay outbox', () => {
       },
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_000,
       retryDelayMs: () => 0,
     }, {
@@ -933,7 +933,7 @@ describe('durable Team comment relay outbox', () => {
       resolveRemoteProjectOwnerMemberId: async () => 'project-owner',
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_000,
       retryDelayMs: () => 0,
     }, {
@@ -1009,7 +1009,7 @@ describe('durable Team comment relay outbox', () => {
       }),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_000,
       retryDelayMs: () => 0,
     }, {
@@ -1055,7 +1055,7 @@ describe('durable Team comment relay outbox', () => {
       }),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_000,
       retryDelayMs: () => 0,
     }, {
@@ -1100,7 +1100,7 @@ describe('durable Team comment relay outbox', () => {
       }),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_000,
       retryDelayMs: () => 0,
     }, {
@@ -1159,7 +1159,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => ['p1'],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_100,
       retryDelayMs: () => 0,
     }, {
@@ -1235,7 +1235,7 @@ describe('durable Team comment relay outbox', () => {
       >[0]) => commentRelayLocalBindingMatches(record, binding),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       now: () => 1_200,
       retryDelayMs: () => 0,
     }, {
@@ -1290,7 +1290,7 @@ describe('durable Team comment relay outbox', () => {
       listProjectIds: () => ['p1'],
       resolveProjectWorkspaceContext: async () => queuedContext,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       onCommentPushed: () => {
         confirmations += 1;
       },
@@ -1343,7 +1343,7 @@ describe('durable Team comment relay outbox', () => {
       resolveLocalProjectRelayBinding: () => ({ workspaceId: 'workspace-a', ownerMemberId: 'project-owner' }),
       resolveRemoteProjectOwnerMemberId: async () => 'project-owner',
       listProjectIds: () => [], resolveProjectWorkspaceContext: async () => queuedContext,
-      resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       onCommentPushed: (event) => confirmed.push(event), onError: (error) => errors.push(error),
       now: () => 1_400, retryDelayMs: () => 0,
     });
@@ -1377,7 +1377,7 @@ describe('durable Team comment relay outbox', () => {
       resolveLocalProjectRelayBinding: () => ({ workspaceId: 'workspace-a', ownerMemberId: 'project-owner' }),
       resolveRemoteProjectOwnerMemberId: async () => 'project-owner',
       listProjectIds: () => [], resolveProjectWorkspaceContext: async () => queuedContext,
-      resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 1_500, retryDelayMs: () => 0,
     });
     service.enqueueComment(comment({ note: 'old' }), queuedContext);
@@ -1409,7 +1409,7 @@ describe('durable Team comment relay outbox', () => {
       resolveLocalProjectRelayBinding: () => ({ workspaceId: 'workspace-a', ownerMemberId: 'project-owner' }),
       resolveRemoteProjectOwnerMemberId: async () => 'project-owner',
       listProjectIds: () => [], resolveProjectWorkspaceContext: async () => queuedContext,
-      resolveLocalConversationId: () => 'conv-local', mergeComment: () => false,
+      resolveLocalConversationId: () => 'conv-local', mergeComment: () => 'unchanged',
       now: () => 1_600, retryDelayMs: () => 0,
     });
     service.enqueueComment(comment(), queuedContext);

@@ -4297,6 +4297,18 @@ export function deleteSyncedPreviewComment(
   return result.changes > 0;
 }
 
+export type SyncedCommentMergeResult = 'changed' | 'unchanged';
+
+function syncedCommentLabel(incoming: unknown, stored: unknown, elementId: unknown): string {
+  const nonBlank = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  const element = nonBlank(elementId);
+  // A label describes the target for display, not identity. Losing a real
+  // comment for a missing display string is worse than using a generic name.
+  return nonBlank(incoming) ?? nonBlank(stored)
+    ?? (element && !/^path-\d+(?:-\d+)*$/.test(element) ? element : 'Annotation');
+}
+
 /**
  * Merge one collab-cloud comment into local `preview_comments`. The cloud
  * comment's id is used verbatim as the local id (it is the author daemon's own
@@ -4315,16 +4327,17 @@ export function deleteSyncedPreviewComment(
  * getProjectCommentAnchorConversationId);
  * the cloud comment's own conversationId is not a valid FK here. It is only used
  * when inserting a new row — an in-place update keeps the row's existing
- * conversation. Returns true when local state changed (insert, update, or delete).
+ * conversation. Returns an explicit changed/unchanged acknowledgement. Failures
+ * throw so the caller cannot acknowledge a batch it did not persist.
  */
 export function mergeSyncedPreviewComment(
   db: SqliteDb,
   projectId: string,
   conversationId: string,
   comment: CollabCloudComment,
-): boolean {
+): SyncedCommentMergeResult {
   if (comment.deleted) {
-    return deleteSyncedPreviewComment(db, projectId, comment.id);
+    return deleteSyncedPreviewComment(db, projectId, comment.id) ? 'changed' : 'unchanged';
   }
   const now = Date.now();
   const slideIndex = Number.isFinite(comment.slideIndex)
@@ -4363,15 +4376,16 @@ export function mergeSyncedPreviewComment(
     : undefined;
   const authorKey = typeof comment.authorKey === 'string' ? comment.authorKey : undefined;
   const existing = db
-    .prepare(`SELECT updated_at AS updatedAt FROM preview_comments WHERE id = ? AND project_id = ?`)
+    .prepare(`SELECT updated_at AS updatedAt, label FROM preview_comments WHERE id = ? AND project_id = ?`)
     .get(comment.id, projectId) as DbRow | undefined;
+  const label = syncedCommentLabel(comment.label, existing?.label, comment.elementId);
   if (existing) {
     // Last-writer-wins: only apply a strictly-newer edit. Keeps the existing
     // row's conversation/created_at, refreshes mutable content/status/anchor
     // state, and updates author fields only when the incoming wire payload
     // explicitly carries each trusted field. Legacy payloads cannot erase them.
-    if (updatedAt <= Number(existing.updatedAt ?? 0)) return false;
-    db.prepare(
+    if (updatedAt <= Number(existing.updatedAt ?? 0)) return 'unchanged';
+    const result = db.prepare(
       `UPDATE preview_comments SET
          selector = ?, label = ?, text = ?, position_json = ?, html_hint = ?,
          selection_kind = ?, member_count = ?, pod_members_json = ?, style_json = ?,
@@ -4386,7 +4400,7 @@ export function mergeSyncedPreviewComment(
        WHERE id = ? AND project_id = ?`,
     ).run(
       comment.selector,
-      comment.label,
+      label,
       typeof comment.text === 'string' ? comment.text : '',
       JSON.stringify(comment.position ?? { x: 0, y: 0, width: 0, height: 0 }),
       typeof comment.htmlHint === 'string' ? comment.htmlHint : '',
@@ -4416,10 +4430,11 @@ export function mergeSyncedPreviewComment(
       comment.id,
       projectId,
     );
-    return true;
+    if (result.changes !== 1) throw new Error('Synced comment update was not persisted');
+    return 'changed';
   }
-  // New comment. INSERT OR IGNORE guards against a rare id collision without
-  // throwing.
+  // Same-project replay is handled above. All other insert failures, including
+  // an id owned by another project, must throw instead of acknowledging loss.
   //
   // pin_seq is taken straight from the wire's `seq` — the collab-cloud's own
   // globally-serialized push sequence for this project (see
@@ -4447,7 +4462,7 @@ export function mergeSyncedPreviewComment(
   }
   const result = db
     .prepare(
-      `INSERT OR IGNORE INTO preview_comments
+      `INSERT INTO preview_comments
          (id, project_id, conversation_id, file_path, element_id, selector, label,
           text, position_json, html_hint, selection_kind, member_count, pod_members_json,
           style_json, attachments_json, slide_index, slide_key, note, status, created_at, updated_at,
@@ -4462,7 +4477,7 @@ export function mergeSyncedPreviewComment(
       comment.filePath,
       comment.elementId,
       comment.selector,
-      comment.label,
+      label,
       typeof comment.text === 'string' ? comment.text : '',
       JSON.stringify(comment.position ?? { x: 0, y: 0, width: 0, height: 0 }),
       typeof comment.htmlHint === 'string' ? comment.htmlHint : '',
@@ -4489,7 +4504,8 @@ export function mergeSyncedPreviewComment(
       1,
       createdAt,
     );
-  return result.changes > 0;
+  if (result.changes !== 1) throw new Error('Synced comment insert was not persisted');
+  return 'changed';
 }
 
 export function getProjectCommentReadState(
