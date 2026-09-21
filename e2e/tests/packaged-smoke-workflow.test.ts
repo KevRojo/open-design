@@ -2611,6 +2611,16 @@ process.stdin.on("end", () => {
     expect(workflowJob(workflow, "publish")).not.toContain("build_linux_x64");
   });
 
+  it("[P2] confines the mac x64 DMG probe to nonpublishing diagnostics", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    expect(workflow).toContain("      mac_x64_dmg_probe:");
+    expect(workflow).toContain("        default: false");
+    const build = workflowJob(workflow, "build_mac_x64");
+    expect(build).toContain("- name: Prepare mac_x64 DMG probe\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish }}");
+    expect(build).toContain("- name: Replay mac_x64 DMG copy\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish && steps.mac_x64_tools_pack_build.outcome == 'success' }}");
+    expect(build).toContain("dmg-probe/phases.jsonl");
+  });
+
   it("[P2] preserves stable linux AppImage smoke reports for release publication", async () => {
     const workflow = await readFile(releaseStableWorkflowPath, "utf8");
     const linuxBuildStep = workflow.match(

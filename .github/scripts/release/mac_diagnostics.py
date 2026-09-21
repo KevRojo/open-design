@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -54,6 +55,15 @@ def sample() -> dict[str, object]:
     memory = next((line for line in top.splitlines() if line.startswith("PhysMem:")), "")
     disk = probe(["iostat", "-d", "-w", "1", "-c", "2"])
     mounts = probe(["mount"], max_output=None)
+    mounted_images = [line for line in mounts.splitlines() if " on /Volumes/" in line]
+    volume_space = []
+    for line in mounted_images:
+        match = re.search(r" on (/Volumes/.+?) \(", line)
+        if match:
+            volume_space.append({
+                "path": match.group(1),
+                "df": probe(["df", "-k", match.group(1)], timeout=2),
+            })
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "logicalCpus": os.cpu_count(),
@@ -62,12 +72,14 @@ def sample() -> dict[str, object]:
         "memory": memory,
         "disk": disk,
         "spotlight": probe(["mdutil", "-sa"]),
-        "mountedImages": [line for line in mounts.splitlines() if " on /Volumes/" in line],
+        "mountedImages": mounted_images,
+        "volumeSpace": volume_space,
         "processes": processes(),
     }
 
 
 def monitor(output: Path, interval: float, stopped: threading.Event) -> None:
+    sampled_pids: set[str] = set()
     with output.open("a", encoding="utf-8", buffering=1) as stream:
         while not stopped.is_set():
             observation = sample()
@@ -85,6 +97,25 @@ def monitor(output: Path, interval: float, stopped: threading.Event) -> None:
                 file=sys.stderr,
                 flush=True,
             )
+            stack_candidates = observation["processes"] if os.environ.get("OD_DMG_STACK_PROBE") == "1" else ()
+            for row in stack_candidates:
+                if row["command"] != "ditto" or not str(row["state"]).startswith("U"):
+                    continue
+                pid = str(row["pid"])
+                if pid in sampled_pids:
+                    continue
+                sampled_pids.add(pid)
+                stack_path = output.with_name(f"{output.stem}-ditto-{pid}.sample.txt")
+                try:
+                    result = subprocess.run(
+                        ["sample", pid, "1", "-file", str(stack_path)],
+                        capture_output=True, text=True, timeout=8, check=False,
+                    )
+                    outcome = f"exit={result.returncode}"
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    outcome = f"error={type(error).__name__}"
+                print(f"[mac-resource] ditto-stack pid={pid} {outcome} path={stack_path}",
+                      file=sys.stderr, flush=True)
             stopped.wait(interval)
 
 
