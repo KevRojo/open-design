@@ -722,6 +722,42 @@ describe("shared display lifecycle", () => {
 		expect(result.current.isCurrent(generation)).toBe(true);
 	});
 
+	// The other half of hiding, which the case above does not reach: a lease that
+	// lapses WHILE the page is hidden. `armExpiry` does not consult
+	// `document.hidden` — a grant retires on the server's deadline whether anyone
+	// is watching or not — so the return has nothing left to revalidate and must
+	// go through `wake`, exactly once, producing a genuinely new presentation.
+	//
+	// `generation` is asserted as changed rather than as a number: this path steps
+	// it three times (the expiry `revoke`, `wake`'s own `revoke`, and the new
+	// lease failing `same`), and pinning the count would pin the route instead of
+	// the outcome.
+	it("retires a lease that lapses while the page is hidden, then rebuilds on return", async () => {
+		const load = vi.fn<Load>().mockResolvedValue({ kind: "decision", value: first, key: "same", validForMs: 60_000 });
+		const { result } = renderHook(() => useTouchpointLifecycle({ enabled: true, identity: "production", load }));
+		await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+		const generation = result.current.generation;
+		expect(result.current.current).toBe(first);
+
+		const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+		act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+		await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+		expect(result.current.current).toBeNull();
+		expect(result.current.isCurrent(generation)).toBe(false);
+		// The thirty-second ticks inside that span are fenced, so nothing was asked.
+		const callsWhileHidden = load.mock.calls.length;
+		expect(callsWhileHidden).toBe(1);
+
+		hidden.mockReturnValue(false);
+		await act(async () => {
+			document.dispatchEvent(new Event("visibilitychange"));
+			await vi.advanceTimersByTimeAsync(0);
+		});
+		expect(load.mock.calls.length).toBe(callsWhileHidden + 1);
+		expect(result.current.current).toBe(first);
+		expect(result.current.generation).not.toBe(generation);
+	});
+
 	it("closes at once when a recovery revalidation carries the server's own withdrawal", async () => {
 		const withdrawal = Object.assign(new Error("touchpoint_load_failed"), { touchpointWithdrawal: true });
 		const load = vi.fn<Load>().mockResolvedValueOnce({ kind: "decision", value: first, key: "same", validForMs: 60_000 }).mockRejectedValue(withdrawal);
