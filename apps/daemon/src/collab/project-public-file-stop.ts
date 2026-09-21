@@ -30,7 +30,7 @@ export function createProjectPublicFileStop(store: StopQueuePublicFilePublicatio
       } catch { /* Persist only the original still-current stop intent below. */ }
       if (!stopped) {
         // Never enqueue an old failure against a replacement stable alias.
-        if (matches()) store.enqueueStop(key);
+        if (matches()) store.enqueueStop(key, revision);
         pending = true;
         continue;
       }

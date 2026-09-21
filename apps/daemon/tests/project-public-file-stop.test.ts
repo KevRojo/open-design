@@ -50,6 +50,16 @@ it('rejects deletion if a new file appears while stopping', async () => {
   await expect(f.run(scope)).rejects.toThrow('PUBLIC_FILE_STOP_PENDING');
   expect(f.store.listByProject(scope).map((row) => row.slug)).toEqual(['new']);
 });
+it('queues the current failed deletion intent after the same slug was republished', async () => {
+  const f = setup(); const target = { ...scope, filePath: 'index.html', slug: 'a' };
+  f.store.set(target, publication('a')); f.store.enqueueStop(target);
+  for (let i = 0; i < 4; i++) f.store.recordStopFailure(target);
+  f.store.set(target, publication('a')); const current = f.store.getRevision(target)!;
+  f.stop.mockRejectedValue(new Error('offline'));
+  await expect(f.run(scope)).rejects.toThrow('PUBLIC_FILE_STOP_PENDING');
+  expect(f.store.listRetryableStops()).toEqual([{ ...target, publicationRevision: current.token, failureCount: 1 }]);
+});
+
 it('does nothing for a project without publications', async () => {
   const f = setup(); await f.run(scope); expect(f.prepare).not.toHaveBeenCalled();
 });
