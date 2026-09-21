@@ -373,6 +373,16 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
 
   await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
+  const floatingComposer = page.getByTestId('comment-popover');
+  for (const [property, value] of Object.entries({
+    padding: '12px', 'border-radius': '10px',
+    'border-top-width': '1px', 'border-top-color': 'rgba(0, 0, 0, 0.05)',
+    'background-color': 'rgb(255, 255, 255)', 'backdrop-filter': 'none',
+    'box-shadow': 'rgba(0, 0, 0, 0.07) 0px 6px 24px 0px',
+  })) {
+    await expect(floatingComposer).toHaveCSS(property, value);
+  }
+  await test.info().attach('comment-composer-surface', { body: await page.screenshot(), contentType: 'image/png' });
   await captureLane4CommentState(page, '05-input-element-selected');
   // A floating sidebar covers the toolbar. With a composer open, hiding the
   // sidebar preserves the selected comment tool, exposing its real hover state.

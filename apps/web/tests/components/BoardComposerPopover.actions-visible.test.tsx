@@ -31,10 +31,11 @@ const target: PreviewCommentSnapshot = {
   selectionKind: 'element',
 };
 
-function renderPopover() {
+function renderPopover(docked = false) {
   return render(
     <BoardComposerPopover
       target={target}
+      docked={docked}
       existing={null}
       draft="Tighten this heading"
       notes={[]}
@@ -55,6 +56,10 @@ function renderPopover() {
 }
 
 describe('BoardComposerPopover action row', () => {
+  it('leaves docked cards on their existing host surface', () => {
+    renderPopover(true);
+    expect(screen.getByTestId('comment-popover').className).not.toContain('surface');
+  });
   it('renders the action row', () => {
     renderPopover();
     expect(screen.getByTestId('comment-add-send')).toBeTruthy();
@@ -81,5 +86,6 @@ describe('BoardComposerPopover action row', () => {
     // The host caps the card to the space left in the stage; the fix has to
     // survive that cap rather than depend on the card being tall enough.
     expect(popover.style.maxHeight).not.toBe('');
+    expect(popover.className).toContain('surface');
   });
 });
