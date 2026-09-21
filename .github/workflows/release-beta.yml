@@ -1096,7 +1096,8 @@ jobs:
           python3 .github/scripts/release/mac_diagnostics.py \
             --output "$RUNNER_TEMP/release-build/mac_x64/replay-resources.jsonl" \
             -- python3 .github/scripts/release/dmg_probe.py replay \
-              --trace-dir "$RUNNER_TEMP/release-build/mac_x64/dmg-probe" --count 2
+              --trace-dir "$RUNNER_TEMP/release-build/mac_x64/dmg-probe" \
+              --count 3 --filesystem-control
       - name: Preserve mac_x64 runner diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
@@ -1109,6 +1110,8 @@ jobs:
             ${{ runner.temp }}/release-build/mac_x64/*-ditto-*.sample.txt
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/phases.jsonl
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/preflight.jsonl
+            ${{ runner.temp }}/release-build/mac_x64/dmg-probe/replay-results.jsonl
+            ${{ runner.temp }}/release-build/mac_x64/dmg-probe/replay-*-settings.json
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/fs-usage*.log
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/settings.json
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/invocation.json

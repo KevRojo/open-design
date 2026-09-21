@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -187,7 +188,61 @@ def trace(argv: list[str]) -> None:
             fs_error.close()
 
 
-def replay(trace_dir: Path, count: int, zip_control: bool, pack_root: Path | None) -> None:
+def validate_replay(output: Path, source_app: Path, expected_filesystem: str) -> dict[str, object]:
+    with tempfile.TemporaryDirectory(prefix="od-dmg-replay-") as mount_root:
+        mount_point = Path(mount_root) / "volume"
+        mount_point.mkdir()
+        attached = False
+        try:
+            subprocess.run(
+                ["hdiutil", "attach", str(output), "-nobrowse", "-readonly", "-mountpoint", str(mount_point)],
+                check=True, capture_output=True, text=True, timeout=60,
+            )
+            attached = True
+            candidate_app = mount_point / source_app.name
+            if not candidate_app.is_dir():
+                raise ValueError(f"replay image is missing {source_app.name}")
+            info = subprocess.run(
+                ["diskutil", "info", str(mount_point)], check=True, capture_output=True, text=True, timeout=30,
+            ).stdout
+            filesystem_line = next(
+                (line.split(":", 1)[1].strip() for line in info.splitlines() if "File System Personality:" in line),
+                "unknown",
+            )
+            if expected_filesystem == "APFS" and filesystem_line != "APFS":
+                raise ValueError(f"expected APFS replay image, got {filesystem_line}")
+            if expected_filesystem == "HFS+" and "HFS" not in filesystem_line:
+                raise ValueError(f"expected HFS+ replay image, got {filesystem_line}")
+            subprocess.run(
+                ["codesign", "--verify", "--deep", "--strict", str(candidate_app)],
+                check=True, capture_output=True, text=True, timeout=120,
+            )
+            stapler = subprocess.run(
+                ["xcrun", "stapler", "validate", str(candidate_app)],
+                check=False, capture_output=True, text=True, timeout=120,
+            )
+            if stapler.returncode:
+                raise RuntimeError(f"stapler validation failed: {stapler.stderr[-500:]}")
+            file_count = sum(1 for path in candidate_app.rglob("*") if path.is_file() or path.is_symlink())
+            source_file_count = sum(1 for path in source_app.rglob("*") if path.is_file() or path.is_symlink())
+            if file_count != source_file_count:
+                raise ValueError(f"replay image file count changed: source={source_file_count}, image={file_count}")
+            return {"filesystem": filesystem_line, "fileCount": file_count, "codesign": "valid", "stapler": "valid"}
+        finally:
+            if attached:
+                subprocess.run(
+                    ["hdiutil", "detach", str(mount_point), "-quiet"],
+                    check=False, capture_output=True, text=True, timeout=30,
+                )
+
+
+def replay(
+    trace_dir: Path,
+    count: int,
+    zip_control: bool,
+    filesystem_control: bool,
+    pack_root: Path | None,
+) -> None:
     if count < 1 or count > 3:
         raise ValueError("replay count must be between 1 and 3")
     invocation = json.loads((trace_dir / "invocation.json").read_text(encoding="utf-8"))
@@ -209,10 +264,21 @@ def replay(trace_dir: Path, count: int, zip_control: bool, pack_root: Path | Non
     zip_binary = (pack_root / "node_modules/7zip-bin/mac/x64/7za") if pack_root else None
     if zip_control and (zip_binary is None or not zip_binary.is_file() or not source_app.is_dir()):
         raise ValueError("zip control requires the installed 7za binary and source app")
-    for number in range(1, count + 1):
+    if filesystem_control:
+        if count != 3:
+            raise ValueError("filesystem control requires exactly 3 replays")
+        variants = (("hfs", "HFS+"), ("apfs", "APFS"), ("hfs", "HFS+"))
+    else:
+        variants = tuple(("expanded" if number == 1 else "original", "") for number in range(1, count + 1))
+    for number, (variant, filesystem) in enumerate(variants, start=1):
         output = trace_dir / f"replay-{number}.dmg"
-        variant = ("concurrent-zip" if number in (1, 3) else "solo") if zip_control else ("expanded" if number == 1 else "original")
         replay_settings = expanded_settings if variant == "expanded" else settings
+        if zip_control:
+            variant = "concurrent-zip" if number in (1, 3) else "solo"
+        if filesystem_control:
+            controlled = {**expanded, "filesystem": filesystem}
+            replay_settings = trace_dir / f"replay-{number}-{variant}-settings.json"
+            replay_settings.write_text(json.dumps(controlled) + "\n", encoding="utf-8")
         environment = {**os.environ, "OD_DMG_TRACE_TAG": f"replay-{number}-{variant}"}
         started = time.monotonic()
         zip_output = trace_dir / f"replay-{number}-parallel.zip"
@@ -227,11 +293,25 @@ def replay(trace_dir: Path, count: int, zip_control: bool, pack_root: Path | Non
                 time.sleep(2)
             subprocess.run([str(wrapper), "-s", str(replay_settings), invocation["volume"], str(output)],
                            env=environment, check=True, timeout=240)
+            build_duration_ms = round((time.monotonic() - started) * 1000)
             if zip_process is not None:
                 _, zip_stderr = zip_process.communicate(timeout=120)
                 if zip_process.returncode:
                     raise RuntimeError(f"parallel 7za failed: {zip_stderr[-500:]}")
-            print(f"[dmg-probe] replay={number} variant={variant} durationMs={round((time.monotonic() - started) * 1000)}", flush=True)
+            validation_started = time.monotonic()
+            validation = validate_replay(output, source_app, filesystem) if filesystem_control else {}
+            record = {
+                "replay": number,
+                "variant": variant,
+                "configuredFilesystem": filesystem or None,
+                "size": json.loads(replay_settings.read_text(encoding="utf-8"))["size"],
+                "buildDurationMs": build_duration_ms,
+                "validationDurationMs": round((time.monotonic() - validation_started) * 1000),
+                **validation,
+            }
+            with (trace_dir / "replay-results.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, separators=(",", ":")) + "\n")
+            print(f"[dmg-probe] {record}", flush=True)
         finally:
             if zip_process is not None and zip_process.poll() is None:
                 zip_process.kill()
@@ -251,6 +331,7 @@ def main() -> None:
     replay_parser.add_argument("--trace-dir", type=Path, required=True)
     replay_parser.add_argument("--count", type=int, default=2)
     replay_parser.add_argument("--zip-control", action="store_true")
+    replay_parser.add_argument("--filesystem-control", action="store_true")
     replay_parser.add_argument("--pack-root", type=Path)
     subparsers.add_parser("trace")
     args, remainder = parser.parse_known_args()
@@ -261,7 +342,7 @@ def main() -> None:
     elif args.command == "replay":
         if remainder:
             parser.error(f"unexpected arguments: {remainder}")
-        replay(args.trace_dir, args.count, args.zip_control, args.pack_root)
+        replay(args.trace_dir, args.count, args.zip_control, args.filesystem_control, args.pack_root)
     else:
         trace(remainder)
 

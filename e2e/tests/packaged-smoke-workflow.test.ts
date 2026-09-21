@@ -2619,6 +2619,8 @@ process.stdin.on("end", () => {
     const build = workflowJob(workflow, "build_mac_x64");
     expect(build).toContain("- name: Prepare mac_x64 DMG probe\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish }}");
     expect(build).toContain("- name: Replay mac_x64 DMG copy\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish && steps.mac_x64_tools_pack_build.outcome == 'success' }}");
+    expect(build).toContain("--count 3 --filesystem-control");
+    expect(build).toContain("dmg-probe/replay-results.jsonl");
     expect(build).toContain("dmg-probe/phases.jsonl");
     expect(build).toContain("dmg-probe/preflight.jsonl");
     expect(build).toContain("dmg-probe/fs-usage*.log");
