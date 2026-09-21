@@ -352,7 +352,19 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await waitForLoadingToClear(page);
   await expect(artifactPreview(page)).toBeVisible();
 
+  const commentEntry = page.getByTestId('comment-panel-toggle');
+  await expect(commentEntry).toHaveAttribute('aria-pressed', 'false');
+  for (const [property, value] of Object.entries({
+    height: '30px', 'min-width': '42px', padding: '0px 8px', gap: '5px',
+    'border-top-width': '0px', 'border-radius': '6px',
+    'background-color': 'rgb(243, 243, 244)', color: 'rgb(51, 51, 51)',
+    'font-size': '12px', 'font-weight': '700',
+  })) {
+    await expect(commentEntry).toHaveCSS(property, value);
+  }
   await enterPreviewCommentMode(page);
+  await expect(commentEntry).toHaveAttribute('aria-pressed', 'true');
+  await expect(commentEntry).toHaveCSS('background-color', 'rgb(228, 228, 230)');
   const sidePanel = page.getByTestId('comment-side-panel');
   await expect(sidePanel).toBeVisible();
   await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(0);
@@ -362,6 +374,17 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
   await captureLane4CommentState(page, '05-input-element-selected');
+  // A floating sidebar covers the toolbar. With a composer open, hiding the
+  // sidebar preserves the selected comment tool, exposing its real hover state.
+  await sidePanel.getByRole('button', { name: 'Hide Comments', exact: true }).click();
+  await expect(sidePanel).not.toBeVisible();
+  await expect(page.getByTestId('comment-popover')).toBeVisible();
+  await expect(commentEntry).toHaveAttribute('aria-pressed', 'true');
+  await commentEntry.hover();
+  await expect(commentEntry).toHaveCSS('background-color', 'rgb(228, 228, 230)');
+  await captureLane4CommentState(page, 'r-entry-selected-hover');
+  await page.getByTestId('comment-popover-view-all').click();
+  await expect(sidePanel).toBeVisible();
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toBeVisible();
