@@ -16,11 +16,19 @@
 import { createHash } from 'node:crypto';
 import express from 'express';
 import fs from 'node:fs';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigPrefs } from '../src/app-config.js';
@@ -215,6 +223,32 @@ const decide = async () => {
   return { status: response.status, text: await response.text() };
 };
 
+const decisionUrl = () =>
+  `${baseUrl}/api/touchpoints/production-runtime?placementKey=${PLACEMENT}&locale=${LOCALE}`;
+
+/**
+ * The same request `decide` makes, over a raw client rather than `fetch`.
+ *
+ * `fetch` transparently decompresses, which would hide the difference between
+ * a body this proxy forwarded still compressed and one it expanded itself.
+ */
+const rawDecide = () =>
+  new Promise<{ status: number; headers: IncomingHttpHeaders; body: Buffer }>((resolve, reject) => {
+    const request = httpRequest(decisionUrl(), (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () =>
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks),
+        }),
+      );
+    });
+    request.on('error', reject);
+    request.end();
+  });
+
 const blobsDir = () => path.join(dataDir, 'touchpoint-content-cache', 'blobs');
 /** The file a digest names, so a case can damage one specific blob rather than whichever one readdir happens to list first. */
 const blobFile = (value: string) => path.join(blobsDir(), value.slice('sha256:'.length));
@@ -379,6 +413,72 @@ describe('daemon touchpoint content assembly', () => {
       heldContentId: 'someone-elses',
       heldContentLocale: 'fr-FR',
     });
+  });
+
+  // Before this route began reading bodies it forwarded them as a stream, so
+  // its memory was bounded by the socket. Buffering to assemble gave that up;
+  // these two cases put a ceiling back on it. The daemon is a privileged local
+  // process and `gunzipSync` is synchronous, so an unbounded expansion costs
+  // the whole app its event loop, not just this request.
+  it('refuses to expand a decision body it could never assemble', async () => {
+    // Valid JSON, so nothing but the size limit can reject it, and ~1000:1
+    // compressed, so the buffering ceiling is never the thing under test here.
+    const bomb = zlib.gzipSync(
+      Buffer.from(JSON.stringify({ ...FULL_RESPONSE, filler: 'a'.repeat(16 * 1024 * 1024) })),
+    );
+    expect(bomb.byteLength).toBeLessThan(1024 * 1024);
+    upstreamHandler = (_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.setHeader('content-encoding', 'gzip');
+      res.end(bomb);
+    };
+
+    const response = await rawDecide();
+    // Handed back exactly as upstream framed it: still compressed, still small.
+    expect(response.headers['content-encoding']).toBe('gzip');
+    expect(response.body.byteLength).toBeLessThan(1024 * 1024);
+  });
+
+  it('streams a decision body too large to assemble instead of holding it', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Past the point where the body could still be a package the browser would
+    // accept, so there is nothing left to assemble out of it.
+    const oversized = Buffer.alloc(9 * 1024 * 1024, 0x20);
+    upstreamHandler = (_req, res) => {
+      res.on('error', () => {
+        /* the caller may be gone by the time this finishes; that is fine */
+      });
+      res.setHeader('content-type', 'application/json');
+      res.write(oversized);
+      void released.then(() => {
+        try {
+          res.end('{}');
+        } catch {
+          /* already closed */
+        }
+      });
+    };
+
+    const firstChunkBytes = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest(decisionUrl(), (response) => {
+        response.once('error', () => undefined);
+        response.once('data', (chunk: Buffer) => {
+          resolve(chunk.byteLength);
+          response.destroy();
+        });
+      });
+      request.on('error', reject);
+      request.setTimeout(5_000, () => {
+        request.destroy(
+          new Error('the daemon sent nothing to its caller before upstream finished'),
+        );
+      });
+      request.end();
+    }).finally(release);
+    expect(firstChunkBytes).toBeGreaterThan(0);
   });
 
   it('never splices a content version the server did not trim for', async () => {
