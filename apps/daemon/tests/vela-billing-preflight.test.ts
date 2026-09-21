@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+
+const { runVelaCommandMock } = vi.hoisted(() => ({
+  runVelaCommandMock: vi.fn(),
+}));
+
+vi.mock('../src/integrations/vela-command.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/integrations/vela-command.js')>()),
+  runVelaCommand: runVelaCommandMock,
+}));
+
 import {
+  BILLING_PREFLIGHT_TIMEOUT_MS,
   fetchVelaBillingPreflight,
   parseBillingPreflight,
 } from '../src/integrations/vela-billing.js';
@@ -82,5 +93,16 @@ describe('Vela billing preflight adapter', () => {
         },
       }),
     ).rejects.toThrow('403');
+  });
+  it('bounds the default preflight spawn so a hung CLI cannot pin recovery', async () => {
+    runVelaCommandMock.mockReset();
+    runVelaCommandMock.mockResolvedValue(JSON.stringify(preview));
+
+    expect(await fetchVelaBillingPreflight('ws', 'model')).toEqual(preview);
+
+    expect(runVelaCommandMock).toHaveBeenCalledWith(
+      ['billing', 'preflight', '--workspace-id', 'ws', '--format', 'json', '--model', 'model'],
+      expect.objectContaining({ timeoutMs: BILLING_PREFLIGHT_TIMEOUT_MS }),
+    );
   });
 });

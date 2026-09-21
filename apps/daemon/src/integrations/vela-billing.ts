@@ -23,6 +23,10 @@ import { runVelaCommand } from './vela-command.js';
 /** Run `vela billing <args>` and resolve its stdout. */
 export type RunVelaBilling = (args: string[]) => Promise<string>;
 
+/** Wall-clock budget for `vela billing preflight`. A hung CLI must not pin
+ * recovery polling or the workspace billing route. */
+export const BILLING_PREFLIGHT_TIMEOUT_MS = 60_000;
+
 export interface FetchVelaBillingOptions {
   /** Injectable child-process runner; defaults to spawning the vela binary. */
   run?: RunVelaBilling;
@@ -574,6 +578,7 @@ const defaultRunVelaBilling = async (
         VELA_INVOCATION_SOURCE: 'open-design',
       },
       maxBuffer: 4 * 1024 * 1024,
+      ...(args[0] === 'preflight' ? { timeoutMs: BILLING_PREFLIGHT_TIMEOUT_MS } : {}),
       onStderr: (value) => {
         stderr = value;
       },
