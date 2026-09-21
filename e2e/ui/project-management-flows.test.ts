@@ -2749,6 +2749,10 @@ for (const published of [false, true]) {
     await expect(privateOption).toHaveCSS('background-color', 'rgb(242, 242, 244)');
     await expect(privateOption).toHaveCSS('color', 'rgb(31, 31, 31)');
     await expect(privateOption).toHaveAttribute('aria-selected', 'false');
+    await trigger.hover();
+    await expect(privateOption).toHaveCSS('color', 'rgb(73, 73, 73)');
+    await expect(selected).toHaveAttribute('aria-selected', 'true');
+    await expect(selected).toHaveCSS('background-color', 'rgb(242, 242, 244)');
     await test.info().attach(`team-scope-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
     await trigger.click();
     await expect(menu.getByRole('listbox')).toBeHidden();
