@@ -3078,16 +3078,23 @@ process.stdin.on("end", () => {
       .filter((id): id is string => id != null);
 
     // Guard the guard: an empty list would make every assertion below vacuous.
-    expect(exemptedSmokeStepIds).toEqual(["mac_arm64_smoke", "win_x64_smoke"]);
+    expect(exemptedSmokeStepIds).toEqual([
+      "mac_arm64_smoke",
+      "mac_x64_smoke",
+      "win_x64_smoke",
+    ]);
 
     for (const stepId of exemptedSmokeStepIds) {
       const reportStep = steps.find((step) =>
         step.includes(`RELEASE_SMOKE_OUTCOME: \${{ steps.${stepId}.outcome }}`),
       );
       expect(reportStep, `no report step consumes ${stepId}.outcome`).toBeDefined();
-      expect(reportStep).toContain(stepId === "win_x64_smoke"
+      const reportCommand = stepId === "win_x64_smoke"
         ? 'node "$env:RELEASE_EXECUTOR_ROOT\\release\\dist\\index.mjs" write-report'
-        : "pnpm exec tools-release write-report");
+        : stepId === "mac_x64_smoke"
+          ? 'node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" write-report'
+          : "pnpm exec tools-release write-report";
+      expect(reportStep).toContain(reportCommand);
       expect(reportStep).toContain('RELEASE_SMOKE_EXEMPT: "true"');
       expect(reportStep).toContain("!cancelled()");
       expect(reportStep).toContain(`steps.${stepId === "win_x64_smoke" ? "win" : stepId.replace(/_smoke$/, "")}_tools_pack_build.outcome == 'success'`);
