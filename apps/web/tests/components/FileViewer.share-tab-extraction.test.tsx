@@ -227,6 +227,18 @@ describe('Z11a · ShareTab 搬动前的 DOM 基线', () => {
 });
 
 describe('Shared share shell header', () => {
+  it.each([false, true])('puts workspace scope after the public action and before deployment, published=%s', async published => {
+    stubFetch(published);
+    renderViewer(teamContext());
+    fireEvent.click(toolbarAction('Share'));
+    const action = published
+      ? await screen.findByRole('button', { name: /copy share link/i })
+      : await screen.findByRole('menuitem', { name: /Generate and copy link/i });
+    const scope = screen.getByText('Share project in workspace');
+    const deploy = screen.getByRole('menuitem', { name: /Deploy to Vercel/i });
+    expect(action.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scope.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
   it.each([
     ['toolbar', false], ['toolbar', true], ['artifact-card', false], ['artifact-card', true],
   ] as const)('%s published=%s closes and reopens without changing publication', async (origin, published) => {

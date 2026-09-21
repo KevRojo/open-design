@@ -97,80 +97,6 @@ export function ShareTab({
 }) {
   return (
                       <div className={`chrome-unified-panel chrome-unified-panel--share ${styles.panel}`}>
-                      {/* Team-only, same as ReactComponentViewer's copy of this card above —
-                          see the comment there (recvq5bM78HWCE). */}
-                      {menuOrigin === 'toolbar' && workspaceContextHasTeamIdentity(workspaceContext) ? (
-                      <>
-                      <div className={styles.scopeHeading}>
-                        <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
-                          <span>{t('fileViewer.workspaceShareTitle')}</span>
-                        </div>
-                        <p className={styles.scopeDescription}>
-                          {shareAccess === 'private'
-                            ? t('fileViewer.workspaceSharePrivateDescription')
-                            : t('fileViewer.workspaceShareWorkspaceDescription')}
-                        </p>
-                      </div>
-                      <div className="chrome-access-select">
-                          <button
-                            type="button"
-                            className="chrome-access-trigger"
-                            aria-haspopup="listbox"
-                            aria-expanded={shareAccessMenuOpen}
-                            disabled={shareAccessBusy || viewerOnly}
-                            onClick={() => setShareAccessMenuOpen((v) => !v)}
-                          >
-                            <span className="share-menu-icon">
-                              {/* recvqaVLC3MNaQ: same spinner-over-disabled fix as the
-                                  ReactComponentViewer copy of this card above. */}
-                              <RemixIcon
-                                name={
-                                  shareAccessBusy
-                                    ? 'loader-4-line'
-                                    : shareAccess === 'private'
-                                      ? 'lock-line'
-                                      : 'team-line'
-                                }
-                                size={16}
-                                className={shareAccessBusy ? 'icon-spin' : undefined}
-                              />
-                            </span>
-                            <span>
-                              {shareAccess === 'private'
-                                ? t('fileViewer.workspaceAccessPrivate')
-                                : t('fileViewer.workspaceAccessMembers')}
-                            </span>
-                            <RemixIcon name="arrow-down-s-line" size={16} />
-                          </button>
-                          {shareAccessMenuOpen ? (
-                            <div className="chrome-access-options" role="listbox">
-                              {([
-                                ['private', 'lock-line', t('fileViewer.workspaceAccessPrivate')],
-                                ['workspace', 'team-line', t('fileViewer.workspaceAccessMembers')],
-                              ] as const).map(([value, icon, label]) => (
-                                <button
-                                  key={value}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={shareAccess === value}
-                                  className={shareAccess === value ? 'is-active' : undefined}
-                                  disabled={shareAccessBusy || viewerOnly}
-                                  onClick={() => void setWorkspaceShareAccess(value)}
-                                >
-                                  <span className="share-menu-icon"><RemixIcon name={icon} size={16} /></span>
-                                  <span>{label}</span>
-                                  {shareAccess === value ? (
-                                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                                      <path d="m3 8 3 3 7-7" />
-                                    </svg>
-                                  ) : null}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </>
-                      ) : null}
                       {canPublishPublic ? (
                       <>
                       {filePublished && publishProgress !== null ? (
@@ -290,6 +216,80 @@ export function ShareTab({
                           <span>{t(publishFailureKey)}</span>
                         </p>
                       ) : null}
+                      </>
+                      ) : null}
+                      {/* Team-only, same as ReactComponentViewer's copy of this card above —
+                          see the comment there (recvq5bM78HWCE). */}
+                      {menuOrigin === 'toolbar' && workspaceContextHasTeamIdentity(workspaceContext) ? (
+                      <>
+                      <div className={styles.scopeHeading}>
+                        <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
+                          <span>{t('fileViewer.workspaceShareTitle')}</span>
+                        </div>
+                        <p className={styles.scopeDescription}>
+                          {shareAccess === 'private'
+                            ? t('fileViewer.workspaceSharePrivateDescription')
+                            : t('fileViewer.workspaceShareWorkspaceDescription')}
+                        </p>
+                      </div>
+                      <div className="chrome-access-select">
+                          <button
+                            type="button"
+                            className="chrome-access-trigger"
+                            aria-haspopup="listbox"
+                            aria-expanded={shareAccessMenuOpen}
+                            disabled={shareAccessBusy || viewerOnly}
+                            onClick={() => setShareAccessMenuOpen((v) => !v)}
+                          >
+                            <span className="share-menu-icon">
+                              {/* recvqaVLC3MNaQ: same spinner-over-disabled fix as the
+                                  ReactComponentViewer copy of this card above. */}
+                              <RemixIcon
+                                name={
+                                  shareAccessBusy
+                                    ? 'loader-4-line'
+                                    : shareAccess === 'private'
+                                      ? 'lock-line'
+                                      : 'team-line'
+                                }
+                                size={16}
+                                className={shareAccessBusy ? 'icon-spin' : undefined}
+                              />
+                            </span>
+                            <span>
+                              {shareAccess === 'private'
+                                ? t('fileViewer.workspaceAccessPrivate')
+                                : t('fileViewer.workspaceAccessMembers')}
+                            </span>
+                            <RemixIcon name="arrow-down-s-line" size={16} />
+                          </button>
+                          {shareAccessMenuOpen ? (
+                            <div className="chrome-access-options" role="listbox">
+                              {([
+                                ['private', 'lock-line', t('fileViewer.workspaceAccessPrivate')],
+                                ['workspace', 'team-line', t('fileViewer.workspaceAccessMembers')],
+                              ] as const).map(([value, icon, label]) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={shareAccess === value}
+                                  className={shareAccess === value ? 'is-active' : undefined}
+                                  disabled={shareAccessBusy || viewerOnly}
+                                  onClick={() => void setWorkspaceShareAccess(value)}
+                                >
+                                  <span className="share-menu-icon"><RemixIcon name={icon} size={16} /></span>
+                                  <span>{label}</span>
+                                  {shareAccess === value ? (
+                                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                                      <path d="m3 8 3 3 7-7" />
+                                    </svg>
+                                  ) : null}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
                       </>
                       ) : null}
                       {menuOrigin === 'toolbar' ? (
