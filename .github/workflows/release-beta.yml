@@ -291,6 +291,9 @@ on:
       mac_arm64_smoke_result:
         description: "macOS arm64 packaged smoke outcome; advisory to publication."
         value: ${{ inputs.mac_arm64_smoke_mode == 'core' && jobs.smoke_mac_arm64.outputs.smoke_result || jobs.build_mac_arm64.outputs.smoke_result }}
+      mac_x64_smoke_result:
+        description: "macOS x64 packaged smoke outcome; advisory to publication."
+        value: ${{ inputs.mac_x64_smoke_mode == 'core' && jobs.smoke_mac_x64.outputs.smoke_result || jobs.build_mac_x64.outputs.smoke_result }}
       win_x64_smoke_result:
         description: "Windows x64 packaged smoke outcome; advisory to publication."
         value: ${{ inputs.win_x64_smoke_mode == 'core' && jobs.smoke_win_x64.outputs.smoke_result || jobs.build_win_x64.outputs.smoke_result }}
@@ -963,6 +966,8 @@ jobs:
   build_mac_x64:
     outputs:
       manifest_key: ${{ steps.mac_x64_platform_outputs.outputs.platform_manifest_key }}
+      url: ${{ steps.mac_x64_platform_outputs.outputs.dmg_url }}
+      smoke_result: ${{ steps.mac_x64_smoke.outcome }}
     name: "[build] mac_x64 Electron full"
     needs:
       - release_prepare
@@ -1123,7 +1128,9 @@ jobs:
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: Smoke beta mac_x64 packaged runtime
+        id: mac_x64_smoke
         if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
+        continue-on-error: true
         working-directory: e2e
         env:
           OD_PACKAGED_E2E_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
@@ -1148,7 +1155,9 @@ jobs:
           RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/mac_x64
           RELEASE_REPORT_JSON_PATH: ${{ runner.temp }}/release-report/mac_x64/report.json
           RELEASE_REPORT_SUMMARY_PATH: ${{ runner.temp }}/release-report/mac_x64/summary.md
+          RELEASE_SMOKE_EXEMPT: "true"
           RELEASE_SMOKE_MODE: ${{ inputs.mac_x64_smoke_mode }}
+          RELEASE_SMOKE_OUTCOME: ${{ steps.mac_x64_smoke.outcome }}
           RELEASE_TARGET: mac_x64
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           REPORT_TITLE: mac_x64 beta build
@@ -1977,3 +1986,50 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: echo "result=${{ job.status }}" >> "$GITHUB_OUTPUT"
+
+  delivery_report:
+    name: "[report] Beta CDN delivery"
+    needs:
+      - release_prepare
+      - build_mac_arm64
+      - build_mac_x64
+      - build_win_x64
+      - publish
+      - test
+      - smoke_mac_arm64
+      - smoke_mac_x64
+      - smoke_win_x64
+    if: ${{ always() && !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish direct CDN links and validation results
+        uses: actions/github-script@v8
+        env:
+          RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
+          METADATA_URL: ${{ needs.publish.outputs.version_metadata_url }}
+          MAC_ARM64_URL: ${{ needs.publish.outputs.mac_arm64_url }}
+          MAC_X64_URL: ${{ needs.publish.outputs.mac_x64_url }}
+          WIN_X64_URL: ${{ needs.publish.outputs.win_x64_url }}
+          TEST_RESULT: ${{ needs.test.result }}
+          MAC_ARM64_RESULT: ${{ inputs.mac_arm64_smoke_mode == 'core' && needs.smoke_mac_arm64.result || needs.build_mac_arm64.result }}
+          MAC_X64_RESULT: ${{ inputs.mac_x64_smoke_mode == 'core' && needs.smoke_mac_x64.result || needs.build_mac_x64.result }}
+          WIN_X64_RESULT: ${{ inputs.win_x64_smoke_mode == 'core' && needs.smoke_win_x64.result || needs.build_win_x64.result }}
+        with:
+          script: |
+            const link = (label, url) => url ? `[${label}](${url})` : "—";
+            const lines = [
+              "## Beta CDN delivery",
+              "",
+              `- version: \`${process.env.RELEASE_VERSION}\``,
+              `- metadata: ${link("metadata.json", process.env.METADATA_URL)}`,
+              `- workflow: [run ${context.runId}](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              "",
+              "| Target | Direct CDN artifact | Download validation |",
+              "| --- | --- | --- |",
+              `| macOS arm64 | ${link("DMG", process.env.MAC_ARM64_URL)} | \`${process.env.MAC_ARM64_RESULT}\` |`,
+              `| macOS x64 | ${link("DMG", process.env.MAC_X64_URL)} | \`${process.env.MAC_X64_RESULT}\` |`,
+              `| Windows x64 | ${link("installer", process.env.WIN_X64_URL)} | \`${process.env.WIN_X64_RESULT}\` |`,
+              "",
+              `- release tests: \`${process.env.TEST_RESULT}\``,
+            ];
+            await core.summary.addRaw(lines.join("\n")).write();

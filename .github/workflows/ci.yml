@@ -521,7 +521,7 @@ jobs:
         run: pnpm -C e2e exec playwright test -c playwright.config.ts ${{ matrix.files }} --grep '@critical'
 
   ui_p0:
-    name: UI P0 (${{ matrix.name }})
+    name: ${{ matrix.name }}
     needs: [plan, runners]
     if: ${{ needs.plan.outputs.ui_p0_count != '0' }}
     runs-on: ${{ matrix.shard == 'project-collab' && fromJSON(needs.runners.outputs.runs_on).ui_p0_heavy || fromJSON(needs.runners.outputs.runs_on).ui_p0 }}

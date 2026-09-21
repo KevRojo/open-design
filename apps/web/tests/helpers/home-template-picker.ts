@@ -17,7 +17,8 @@ export async function pickHomeTemplate(id: string): Promise<void> {
     return;
   }
   fireEvent.click(homeTemplateTrigger());
-  const option = screen.getByTestId('home-hero-template-menu').querySelector(`[data-chip="${id}"]`);
+  const menu = await screen.findByTestId('home-hero-template-menu');
+  const option = menu.querySelector(`[data-chip="${id}"]`);
   expect(option, `creation type ${id} is available in the dropdown`).not.toBeNull();
   fireEvent.click(option!);
 }
