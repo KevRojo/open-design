@@ -5152,7 +5152,11 @@ export async function startServer({
     _scope: TeamMirrorPullScope,
     _version: number,
   ): Promise<void> => {};
-  const publicFilePublicationStore = createSqlitePublicFilePublicationStore(db);
+  // The store is already bound earlier in this same scope (see the
+  // `createSqlitePublicFilePublicationStore` call above, next to the
+  // design-system backfill). Re-declaring it here is what a merge produced when
+  // two lanes each added their own binding in different hunks: git saw no
+  // conflict, and `tsc` did not object — only esbuild did, at transform time.
   // TODO(B12): supply the real Go binding-stop adapter, with credentials pinned
   // to the queued principal. Never substitute snapshot-redact or report success.
   const retryPublicFileStopsAtStartup = createPublicFileStopStartup(publicFilePublicationStore, null);
