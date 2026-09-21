@@ -32,9 +32,10 @@
  *   is keyed by (`(team_id, project_id, seq)`), so carrying it in the path
  *   lets the share page ask for a project's comments without first resolving
  *   the snapshot back to a project.
- * - `slug` is the opaque, immutable public snapshot key
- *   (`resource_hub.snapshots.slug`). It identifies WHICH published version is
- *   being viewed; re-publishing mints a new slug.
+ * - `slug` is the opaque public share key. It is a STABLE alias, not a
+ *   snapshot address: updating a share advances what it points at, so the
+ *   link a person was sent keeps working and shows the current version on
+ *   their next load. Stop-then-resume restores the same slug.
  *
  * `/cloud/` is the DEPLOYMENT base path (`VITE_APP_BASE_PATH`), not part of
  * the application route, so it is deliberately absent from what this module
@@ -550,18 +551,30 @@ export function buildShareCommentsUrl(input: {
 export const PUBLIC_SNAPSHOT_PATH_PREFIX = '/api/v1/public/snapshots';
 
 /**
- * A published snapshot is immutable and a re-publish mints a NEW slug, so a
- * share link addresses one version forever.
+ * An OPEN share page does not poll for a newer snapshot. The viewer refreshes.
  *
- * P0 deliberately has no "this page discovers a newer snapshot" transport.
- * The owner who re-publishes shares the new link. Building discovery would
- * mean a live share URL could start serving different bytes than the person
- * who sent it saw, which is the property `resource_hub.snapshots` was
- * designed to rule out ("Public, immutable, read-only capture of one
- * version").
+ * ## The link is stable; what it points at moves
  *
- * This constant exists so the absence is a recorded decision rather than a
- * gap someone fills in with a version poll.
+ * A snapshot is immutable, but the share link is NOT a snapshot address — it
+ * is a stable alias whose pointer the owner advances when they update. The
+ * toast after a successful update says as much: "viewers see the latest
+ * version after refreshing". A failed update leaves the server-side pointer
+ * where it was, which is only a meaningful guarantee because there IS a
+ * pointer. Stop-then-resume likewise restores the SAME link and mints no new
+ * snapshot.
+ *
+ * So a share URL keeps working across updates, and a viewer who reloads gets
+ * the current version. What P0 does not build is the transport that would let
+ * a page ALREADY OPEN notice the change on its own — no version poll, no
+ * second request to compare versions, no push.
+ *
+ * The distinction is easy to collapse and expensive to get wrong in either
+ * direction: read it as "one link, one version forever" and the update flow
+ * looks impossible; read it as "the page keeps itself current" and every
+ * share page grows a polling loop nobody asked for.
+ *
+ * This constant exists so the absence stays a recorded decision rather than a
+ * gap someone fills in with that loop.
  */
 export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = false;
 
