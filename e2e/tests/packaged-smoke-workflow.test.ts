@@ -382,7 +382,7 @@ describe("packaged smoke workflow", () => {
     // an unrelated failed validation job must not discard those results.
     expect(cacheResults).toContain("needs: validate");
     expect(cacheResults).toContain("!cancelled() && github.event_name == 'workflow_dispatch'");
-    expect(cacheResults).toContain("github.ref == 'refs/heads/feat/plan-foundation'");
+    expect(cacheResults).toContain("github.ref_name == github.event.repository.default_branch");
     expect(cacheResults).toContain("inputs.workloads != ''");
     expect(cacheResults).not.toContain("needs.validate.result == 'success'");
     expect(ci).toContain('run: test "$PUBLICATION_RESULT" = success');

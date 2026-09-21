@@ -1623,8 +1623,6 @@ def admit_command(args: argparse.Namespace, contract: ConvergenceContract) -> in
         if entry[field] != expected:
             raise ConfigError(f"convergence handoff {field} differs from workflow_run")
     workflow = contract.workflow(entry["workflow"])
-    if entry["policy"] != workflow.policy:
-        raise ConfigError("convergence handoff policy differs from trusted policy")
     base_sha = entry["base_sha"]
     head_sha = entry["head_sha"]
     subprocess.run(
@@ -1641,6 +1639,8 @@ def admit_command(args: argparse.Namespace, contract: ConvergenceContract) -> in
     elif git_differs("HEAD", base_sha, control_paths):
         reason = "producer-control-plane-superseded"
         publish = False
+    elif entry["policy"] != workflow.policy:
+        raise ConfigError("convergence handoff policy differs from trusted policy")
     if publish:
         tree = authenticated_source_tree(entry, payload)
         root = args.root.resolve() if args.root else repository_root(__file__)
@@ -1941,15 +1941,22 @@ def local_execution_evidence(
 
 
 def require_isolated_candidate(candidate: dict[str, Any]) -> None:
-    """Task-scoped authorization, deliberately not a production trust override."""
+    """Authorize same-run publication for an explicitly trusted manual source."""
+    payload = event_payload()
+    workflow = candidate.get("workflow")
+    default_branch = payload.get("repository", {}).get("default_branch", "")
+    authorized_sources = {
+        "ci": ("ci-v2", f"refs/heads/{default_branch}"),
+        "release-beta": ("beta-isolated-v1", "refs/heads/feat/plan-foundation"),
+    }
+    authorized = authorized_sources.get(workflow)
     if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
             or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
-            or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"):
-        raise ConfigError("isolated publication requires the authorized manual branch")
-    context = producer_context(event_payload())
-    authorized_policies = {"ci": "ci-isolated-v1", "release-beta": "beta-isolated-v1"}
-    if (candidate.get("workflow") not in authorized_policies
-            or candidate.get("policy") != authorized_policies[candidate["workflow"]]
+            or authorized is None
+            or os.environ.get("GITHUB_REF") != authorized[1]):
+        raise ConfigError("isolated publication requires an authorized manual source")
+    context = producer_context(payload)
+    if (candidate.get("policy") != authorized[0]
             or candidate.get("repositoryId") != context["repositoryId"]
             or candidate.get("repository") != context["repository"]):
         raise ConfigError("isolated candidate repository/workflow/policy differs")

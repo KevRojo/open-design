@@ -643,7 +643,7 @@ for mode in ("enforce", "shadow"):
     expect(readFileSync(path.join(fixture.root, "github-output.txt"), "utf8")).toContain("expects_contributions=false");
   });
 
-  test("admits only the named beta policy under the existing isolated branch authorization", () => {
+  test("admits only named policies from their authorized manual branches", () => {
     const fixture = createRepository();
     const result = spawnSync("python3", ["-c", `
 import copy, os, sys
@@ -651,7 +651,7 @@ from unittest.mock import patch
 sys.path.insert(0, sys.argv[1])
 import convergence as c
 with patch.dict(os.environ, {"GITHUB_EVENT_NAME":"workflow_dispatch", "GITHUB_REPOSITORY":"nexu-io/open-design", "GITHUB_REF":"refs/heads/feat/plan-foundation", "GITHUB_REPOSITORY_ID":"42", "GITHUB_RUN_ID":"12", "GITHUB_RUN_ATTEMPT":"1"}):
-    with patch("convergence.event_payload", return_value={"repository":{"id":42}}):
+    with patch("convergence.event_payload", return_value={"repository":{"id":42,"default_branch":"main"}}):
         context = c.producer_context(c.event_payload())
         candidate = {**context, "workflow":"release-beta", "policy":"beta-isolated-v1"}
         with patch("convergence.prepare_publication") as validation:
@@ -666,6 +666,13 @@ with patch.dict(os.environ, {"GITHUB_EVENT_NAME":"workflow_dispatch", "GITHUB_RE
                 try: c.require_isolated_candidate(forged)
                 except c.ConfigError: pass
                 else: raise AssertionError("accepted " + mutation)
+        ci_candidate = {**context, "workflow":"ci", "policy":"ci-v2"}
+        with patch.dict(os.environ, {"GITHUB_REF":"refs/heads/main"}), patch("convergence.prepare_publication") as validation:
+            c.require_isolated_candidate(ci_candidate)
+            validation.assert_called_once()
+        try: c.require_isolated_candidate(ci_candidate)
+        except c.ConfigError: pass
+        else: raise AssertionError("accepted CI publication outside the default branch")
 `, path.dirname(convergenceScript)], { cwd: fixture.root, encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
   });
@@ -1058,16 +1065,18 @@ print("snapshot and candidate binding passed")
   test("rejects isolated writes from unauthorized branches before loading storage credentials", () => {
     const fixture = createRepository();
     const candidatePath = path.join(fixture.root, "candidate.json");
+    const eventPath = path.join(fixture.root, "event.json");
     writeFileSync(candidatePath, JSON.stringify(candidate({})));
+    writeFileSync(eventPath, JSON.stringify({ repository: { id: 42, default_branch: "main" } }));
     const result = spawnSync("python3", [convergenceScript, "publish", "--isolated",
       "--candidate", candidatePath, "--output-dir", path.join(fixture.root, "published"),
       "--products-root", path.join(fixture.root, "products")], {
       cwd: fixture.root, encoding: "utf8", env: { ...process.env,
         GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "nexu-io/open-design",
-        GITHUB_REF: "refs/heads/main" },
+        GITHUB_REF: "refs/heads/topic", GITHUB_EVENT_PATH: eventPath },
     });
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("authorized manual branch");
+    expect(result.stderr).toContain("authorized manual source");
     expect(result.stderr).not.toContain("storage is missing");
   });
   test("isolates local declarations from admission controls and rejects stale identity schemas", () => {
@@ -1256,9 +1265,25 @@ root = Path(sys.argv[2])
 args = argparse.Namespace(root=root, isolated=False, handoff_root=Path(sys.argv[3]))
 contract = c.ConvergenceContract(root / "convergence.json")
 candidate_path = args.handoff_root / "handoff/convergence/ci-results/candidate.json"
+metadata_path = candidate_path.parent / "metadata.json"
 original = json.loads(candidate_path.read_text())
 with patch("convergence.run_jobs", return_value=json.loads((root / "jobs.json").read_text())):
     assert c.admit_command(args, contract) == 0
+    metadata = json.loads(metadata_path.read_text())
+    metadata["policy"] = "next-v1"
+    metadata_path.write_text(json.dumps(metadata))
+    next_candidate = copy.deepcopy(original)
+    next_candidate["policy"] = "next-v1"
+    candidate_path.write_text(json.dumps(next_candidate))
+    with patch("convergence.git_differs", return_value=True):
+        assert c.admit_command(args, contract) == 0
+    with patch("convergence.git_differs", return_value=False):
+        try: c.admit_command(args, contract)
+        except c.ConfigError: pass
+        else: raise AssertionError("admission accepted a policy mismatch without a control-plane change")
+    metadata["policy"] = "test-v1"
+    metadata_path.write_text(json.dumps(metadata))
+    candidate_path.write_text(json.dumps(original))
     for field in ("digest", "executionClass", "treeSha", "workload"):
         forged = copy.deepcopy(original)
         receipt = forged["results"][0]["receipt"]
@@ -1270,7 +1295,6 @@ with patch("convergence.run_jobs", return_value=json.loads((root / "jobs.json").
             for result in forged["results"]: result["receipt"]["validated"]["treeSha"] = "f" * 40
         forged["results"][0]["key"] = c.result_key(42, "ci", "test-v1", receipt["workload"], receipt["digest"])
         candidate_path.write_text(json.dumps(forged))
-        metadata_path = candidate_path.parent / "metadata.json"
         metadata = json.loads(metadata_path.read_text())
         metadata["tree_sha"] = forged["provenance"]["treeSha"]
         metadata_path.write_text(json.dumps(metadata))

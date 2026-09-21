@@ -86,10 +86,10 @@ declarations stay in `convergence.json`, scheduling stays in `ci.yml`, and the
 validation job collects per-workload success without softening its gate. The
 trusted writer independently checks the attempt's job/step evidence and source
 tree and recalculates identities. Do not create stage-named
-workflow/config files for validation. The current `ci-isolated-v1` policy and
-manual callable path in `convergence.atom.yml` are task-scoped to the explicitly
-authorized `feat/plan-foundation` branch. They do not relax production
-`workflow_run`/default-branch admission and must be revisited before landing.
+workflow/config files for validation. The callable path in
+`convergence.atom.yml` publishes selected CI results only for a manual run on
+the repository default branch. PR and merge-queue runs retain the separate
+trusted `workflow_run` admission path.
 
 Product workloads may declare `batches` in their existing workflow configuration.
 Each entry binds one workload, a business execution request, and a product name.

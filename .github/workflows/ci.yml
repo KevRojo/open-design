@@ -1219,7 +1219,7 @@ jobs:
   cache_results:
     name: '[cache] Isolated successful CI results'
     needs: validate
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && inputs.workloads != '' }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch && inputs.workloads != '' }}
     uses: ./.github/workflows/convergence.atom.yml
     secrets: inherit
 

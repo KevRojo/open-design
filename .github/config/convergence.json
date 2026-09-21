@@ -115,7 +115,7 @@
   },
   "workflows": {
     "ci": {
-      "policy": "ci-isolated-v1",
+      "policy": "ci-v2",
       "workloads": {
         "platform_build": {
           "success": { "[build] packages/platform": ["[build] Platform public package"] },

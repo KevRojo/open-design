@@ -52,19 +52,17 @@ concurrency:
 
 jobs:
   isolated:
-    name: '[cache] Authorized manual workload results'
+    name: '[cache] Default-branch manual workload results'
     outputs:
       requests: ${{ steps.publish.outputs.requests }}
       sources: ${{ steps.publish.outputs.sources }}
     if: >-
       ${{ !cancelled() && github.event_name == 'workflow_dispatch'
         && github.repository == 'nexu-io/open-design'
-        && github.ref == 'refs/heads/feat/plan-foundation' }}
+        && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      # Explicit task authorization only. The production job below still uses
-      # default-branch code and its original PR/merge-group admission checks.
       - name: '[prepare] Authorized source snapshot'
         uses: actions/checkout@v6.0.2
         with:
