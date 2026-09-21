@@ -3,8 +3,7 @@
 // The workbench's top-right credits pill, for a SUBSCRIBER whose wallet reads
 // zero.
 //
-// On Go / Plus / Pro / Max the popular models the user actually works with are
-// unlimited, so the wallet only meters flagship calls. A subscriber therefore
+// On Go / Plus / Pro / Max the eligible models can use Coding Plan windows before the wallet. A subscriber therefore
 // sits at $0.00 as a normal, healthy state — and the pill rendered it as a
 // permanent alarm next to their avatar. Product ruling: hide the money for a
 // subscribed plan whose balance is exactly zero. The pill itself stays (it
@@ -127,18 +126,16 @@ describe('top-right credits pill', () => {
   });
 
   it.each(['team_basic', 'team_plus', 'team_max_yearly'])(
-    'keeps the zero balance on the team plan %s, which really is out of credits',
+    'keeps zero wallet quiet on paid team plan %s with a separate wallet row',
     (tier) => {
-      // A Team workspace has no unlimited set to fall back on: vela records
-      // in-plan usage through the `coding_plan` billing mode, which its schema
-      // constrains to personal tiers, so a Team zero is an empty wallet and
-      // hiding it would hide the reason members get blocked.
+      // Paid team seats have Coding Plan pools; team_basic remains wallet-only.
       renderRail({
         context: context({ planId: tier } as Partial<WorkspaceCollabContext>),
         billing: billing({ membershipTier: tier }),
         balanceUsd: '0',
       });
-      expect(creditsPill()?.textContent).toContain('0.00');
+      if (tier === 'team_basic') expect(creditsPill()?.textContent).toContain('0.00');
+      else expect(creditsPill()?.textContent).not.toContain('0.00');
       expect(creditsRow().textContent).toContain('$0.00');
     },
   );

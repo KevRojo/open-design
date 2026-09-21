@@ -899,6 +899,8 @@ export interface WorkspaceBillingSummary {
 }
 
 export interface WorkspaceBillingResponse {
+  /** Advisory funding/usage read. Absent on older CLIs; never infer exhausted. */
+  preflight?: WorkspaceBillingPreflight | null;
   /** Account-scoped metadata; independently nullable from workspace money. */
   summary: WorkspaceBillingSummary | null;
   /**
@@ -922,6 +924,34 @@ export interface WorkspaceBillingResponse {
    * observed for the exact workspace/member in this response.
    */
   authoritativeWorkspaceRead?: WorkspaceBillingAuthoritativeRead;
+}
+
+export interface WorkspaceBillingPreflight {
+  schemaVersion: 1;
+  workspaceId: string;
+  workspaceMemberId: string;
+  modelId: string | null;
+  generatedAt: string;
+  balanceUsd: string;
+  modelCovered: boolean | null;
+  /** Link still checks model access, quotas, free models and auto recharge. */
+  funding: 'coding_plan' | 'wallet' | 'gateway';
+  codingPlan: {
+    workspaceId: string;
+    generatedAt: string;
+    eligible: boolean;
+    tier: 'go' | 'plus' | 'pro' | 'max' | null;
+    windows: Array<{
+      policyId: string;
+      durationSeconds: number;
+      resetMode: 'activity_triggered' | 'anchored_recurring';
+      usedCredits: string;
+      limitCredits: string;
+      remainingCredits: string;
+      windowStart: string | null;
+      resetsAt: string | null;
+    }>;
+  };
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

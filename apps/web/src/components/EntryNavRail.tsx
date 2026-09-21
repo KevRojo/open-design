@@ -1,3 +1,4 @@
+import { CodingPlanUsage } from './CodingPlanUsage';
 // Team-edition entry navigation rail (Lovart/Manus-style labeled column).
 //
 // Structure — faithfully ported from the design demo
@@ -1070,8 +1071,8 @@ export function EntryTopRightCluster({
       : t('entry.billingTierFree');
   const balanceLabel = formatVelaBalanceUsd(balanceUsd);
   const balanceAmount = formatVelaBalanceAmount(balanceUsd);
-  // A subscriber's $0.00 is a healthy state (their popular models are
-  // unlimited), so the pill stays out of the way instead of alarming them.
+  // A zero wallet is not an exhausted Coding Plan. Keep the compact badge
+  // quiet; show the actual pool and wallet separately in the billing panel.
   const showCreditsBalance = shouldShowCreditsBalance({
     tier: labelTier,
     balanceUsd,
@@ -1471,6 +1472,7 @@ export function EntryTopRightCluster({
                         </button>
                       ) : null}
                     </div>
+                    <CodingPlanUsage context={context} />
                     {/* #62 (product ruling): clicking the balance jumps straight
                         to B's console dashboard for the usage detail — there is
                         NO intermediate credits popover in the client. */}
@@ -1487,7 +1489,7 @@ export function EntryTopRightCluster({
                       }}
                     >
                       <span className="entry-nav-rail__menu-credits-label">
-                        <RemixIcon name="battery-charge-line" size={14} /> {t('entry.credits')}
+                        <RemixIcon name="battery-charge-line" size={14} /> {t('billing.wallet')}
                       </span>
                       <span className="entry-nav-rail__menu-credits-value">
                         {balanceLabel ?? '—'}

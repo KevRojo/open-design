@@ -1,6 +1,14 @@
 import type { Dict } from "../types";
 
 export const zhTW: Dict = {
+  'billing.wallet': 'Wallet balance',
+  'billing.codingPlan': 'Coding Plan',
+  'billing.codingPlanUnavailable': 'Plan usage unavailable',
+  'billing.codingPlanNone': 'No Coding Plan for this workspace member',
+  'billing.codingPlanRemaining': '{remaining}% remaining · {hours}h window',
+  'billing.codingPlanReset': 'Resets {time}',
+  'billing.codingPlanUnstarted': 'Window starts with first use',
+  'billing.codingPlanFallback': 'Eligible models use the plan first, then the wallet.',
   'invite.header.eyebrow': "團隊邀請",
   'invite.loading': "正在載入邀請…",
   'invite.landing.title': "加入團隊",

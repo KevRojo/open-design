@@ -1,6 +1,14 @@
 import type { Dict } from '../types';
 
 export const en: Dict = {
+  'billing.wallet': 'Wallet balance',
+  'billing.codingPlan': 'Coding Plan',
+  'billing.codingPlanUnavailable': 'Plan usage unavailable',
+  'billing.codingPlanNone': 'No Coding Plan for this workspace member',
+  'billing.codingPlanRemaining': '{remaining}% remaining · {hours}h window',
+  'billing.codingPlanReset': 'Resets {time}',
+  'billing.codingPlanUnstarted': 'Window starts with first use',
+  'billing.codingPlanFallback': 'Eligible models use the plan first, then the wallet.',
   'invite.header.eyebrow': "Team invitation",
   'invite.loading': "Loading invitation…",
   'invite.landing.title': "Join the team",

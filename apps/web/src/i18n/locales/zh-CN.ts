@@ -1,6 +1,14 @@
 import type { Dict } from "../types";
 
 export const zhCN: Dict = {
+  'billing.wallet': '钱包余额',
+  'billing.codingPlan': '套餐额度',
+  'billing.codingPlanUnavailable': '套餐用量暂不可用',
+  'billing.codingPlanNone': '当前工作空间成员没有套餐额度',
+  'billing.codingPlanRemaining': '剩余 {remaining}% · {hours} 小时窗口',
+  'billing.codingPlanReset': '{time} 重置',
+  'billing.codingPlanUnstarted': '首次使用后开始计时',
+  'billing.codingPlanFallback': '适用模型优先使用套餐，耗尽后使用钱包。',
   'invite.header.eyebrow': "团队邀请",
   'invite.loading': "正在加载邀请…",
   'invite.landing.title': "加入团队",

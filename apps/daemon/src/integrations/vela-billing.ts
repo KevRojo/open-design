@@ -1,4 +1,5 @@
 import type {
+  WorkspaceBillingPreflight,
   WorkspaceBillingCatalog,
   WorkspaceBillingRevisionClock,
   WorkspaceBillingSnapshot,
@@ -27,6 +28,58 @@ export interface FetchVelaBillingOptions {
   run?: RunVelaBilling;
   /** Settings-selected AMR environment applied to the spawned Vela command. */
   configuredEnv?: Record<string, string>;
+}
+
+/** Missing capability is distinct from a successful empty pool. */
+export async function fetchVelaBillingPreflight(
+  workspaceId: string,
+  modelId: string | null,
+  options: FetchVelaBillingOptions = {},
+): Promise<WorkspaceBillingPreflight | null> {
+  const args = ['preflight', '--workspace-id', workspaceId, '--format', 'json'];
+  if (modelId) args.push('--model', modelId);
+  let stdout: string;
+  try {
+    stdout = await resolveVelaBillingRunner(options)(args);
+  } catch (error) {
+    if (isVelaWorkspaceAuthorizationError(error)) throw error;
+    // Old binaries, old servers and transient failures carry no quota evidence.
+    return null;
+  }
+  return parseBillingPreflight(stdout, workspaceId, modelId);
+}
+
+export function parseBillingPreflight(
+  stdout: string,
+  workspaceId: string,
+  modelId: string | null,
+): WorkspaceBillingPreflight | null {
+  try {
+    const raw = JSON.parse(stdout) as WorkspaceBillingPreflight;
+    const plan = raw.codingPlan;
+    const date = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+    const credits = (value: unknown) => typeof value === 'string' && /^\d+$/.test(value);
+    if (
+      raw.schemaVersion !== 1 || raw.workspaceId !== workspaceId ||
+      !raw.workspaceMemberId?.trim() || raw.modelId !== modelId || !date(raw.generatedAt) ||
+      typeof raw.balanceUsd !== 'string' || !/^-?\d+(\.\d+)?$/.test(raw.balanceUsd) ||
+      !['coding_plan', 'wallet', 'gateway'].includes(raw.funding) ||
+      (raw.modelCovered !== null && typeof raw.modelCovered !== 'boolean') ||
+      !plan || plan.workspaceId !== workspaceId || !date(plan.generatedAt) ||
+      typeof plan.eligible !== 'boolean' ||
+      (plan.tier !== null && !['go', 'plus', 'pro', 'max'].includes(plan.tier)) ||
+      !Array.isArray(plan.windows) || !plan.windows.every((w) =>
+          typeof w.policyId === 'string' && w.policyId.length > 0 &&
+          Number.isSafeInteger(w.durationSeconds) && w.durationSeconds > 0 &&
+          ['activity_triggered', 'anchored_recurring'].includes(w.resetMode) &&
+          credits(w.usedCredits) && credits(w.remainingCredits) && credits(w.limitCredits) &&
+          BigInt(w.limitCredits) > 0n && BigInt(w.remainingCredits) <= BigInt(w.limitCredits) &&
+          (w.windowStart === null || date(w.windowStart)) && (w.resetsAt === null || date(w.resetsAt)))
+    ) return null;
+    return raw;
+  } catch {
+    return null;
+  }
 }
 
 export class VelaWorkspaceBillingSnapshotUnsupportedError extends Error {
