@@ -2621,6 +2621,7 @@ process.stdin.on("end", () => {
     expect(build).toContain("- name: Replay mac_x64 DMG copy\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish && steps.mac_x64_tools_pack_build.outcome == 'success' }}");
     expect(build).toContain("dmg-probe/phases.jsonl");
     expect(build).toContain("dmg-probe/preflight.jsonl");
+    expect(build).toContain("dmg-probe/fs-usage*.log");
   });
 
   it("[P2] preserves stable linux AppImage smoke reports for release publication", async () => {

@@ -1109,6 +1109,7 @@ jobs:
             ${{ runner.temp }}/release-build/mac_x64/*-ditto-*.sample.txt
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/phases.jsonl
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/preflight.jsonl
+            ${{ runner.temp }}/release-build/mac_x64/dmg-probe/fs-usage*.log
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/settings.json
             ${{ runner.temp }}/release-build/mac_x64/dmg-probe/invocation.json
           if-no-files-found: ignore

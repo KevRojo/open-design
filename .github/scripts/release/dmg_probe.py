@@ -7,6 +7,7 @@ import json
 import math
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -60,6 +61,7 @@ downloadArtifact({
             "OD_DMG_TRACE_DIR": trace_dir.resolve(),
             "OD_DMG_TRACE_TAG": "primary",
             "OD_DMG_STACK_PROBE": "1",
+            "OD_DMG_FS_USAGE": "1",
         }.items():
             stream.write(f"{key}={value}\n")
     print(f"[dmg-probe] verified vendor bundle at {vendor_root}")
@@ -152,7 +154,37 @@ def trace(argv: list[str]) -> None:
     core.subprocess.check_call = timed_subprocess("check_call")
     command_line.build_dmg = traced_build
     sys.argv = ["dmgbuild", *argv]
-    command_line.main()
+    fs_usage = None
+    fs_output = None
+    fs_error = None
+    if tag == "primary" and os.environ.get("OD_DMG_FS_USAGE") == "1":
+        fs_output = (trace_dir / "fs-usage.log").open("w", encoding="utf-8")
+        fs_error = (trace_dir / "fs-usage.stderr.log").open("w", encoding="utf-8")
+        try:
+            fs_usage = subprocess.Popen(
+                ["sudo", "-n", "fs_usage", "-w", "-f", "filesys", "-t", "180", "ditto", "diskimages-helper"],
+                stdout=fs_output, stderr=fs_error,
+            )
+        except OSError as error:
+            fs_error.write(f"failed to start fs_usage: {error}\n")
+    try:
+        command_line.main()
+    finally:
+        if fs_usage is not None and fs_usage.poll() is None:
+            fs_usage.send_signal(signal.SIGINT)
+            try:
+                fs_usage.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                fs_usage.terminate()
+                try:
+                    fs_usage.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    fs_usage.kill()
+                    fs_usage.wait()
+        if fs_output is not None:
+            fs_output.close()
+        if fs_error is not None:
+            fs_error.close()
 
 
 def replay(trace_dir: Path, count: int, zip_control: bool, pack_root: Path | None) -> None:
