@@ -42,7 +42,9 @@ jobs:
         && github.event.pull_request.head.repo.full_name != github.repository)
         || vars.OD_CI_RUNNER_MODE == 'economic')
         && 'ubuntu-24.04'
-        || 'nexu-runners-small' }}
+        || (vars.OD_CI_RUNNER_MODE == 'blacksmith'
+          && 'blacksmith-4vcpu-ubuntu-2404'
+          || 'nexu-runners-small') }}
     outputs:
       runs_on: ${{ steps.runners.outputs.runs_on }}
       decision: ${{ steps.runners.outputs.decision }}

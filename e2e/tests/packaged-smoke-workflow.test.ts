@@ -1780,6 +1780,8 @@ process.stdin.on("end", () => {
     const visual = sectionBetween(workflow, "  playwright_visual:", "  merge_policy:");
 
     expect(runners).toContain("|| 'nexu-runners-small'");
+    expect(runners).toContain("vars.OD_CI_RUNNER_MODE == 'blacksmith'");
+    expect(runners).toContain("&& 'blacksmith-4vcpu-ubuntu-2404'");
     expect(runners).toContain("&& 'ubuntu-24.04'");
     expect(runners).toContain("runs_on: ${{ steps.runners.outputs.runs_on }}");
     expect(runners).toContain("decision: ${{ steps.runners.outputs.decision }}");
