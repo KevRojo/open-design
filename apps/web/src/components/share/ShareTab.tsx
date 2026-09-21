@@ -224,7 +224,7 @@ export function ShareTab({
                       <>
                       <div className={styles.scopeHeading}>
                         <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
-                          <span>{t('fileViewer.workspaceShareTitle')}</span>
+                          <span>{t('fileViewer.workspaceVisibilityTitle')}</span>
                         </div>
                         <p className={styles.scopeDescription}>
                           {shareAccess === 'private'

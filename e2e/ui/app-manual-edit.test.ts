@@ -382,7 +382,7 @@ test('[P0] @critical preview toolbar keeps share, download, comment, and zoom ac
   // This local Personal fixture deliberately has neither a Team identity nor
   // an authenticated public-publish capability. Keep this toolbar smoke about
   // the stable action surface instead of requiring a workspace-specific card.
-  await expect(shareMenu.getByText(/Share project in workspace/i)).toHaveCount(0);
+  await expect(shareMenu.getByText(/Share project in workspace|Visibility in workspace/i)).toHaveCount(0);
   await expect(shareMenu.getByText(/Publish this file/i)).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(shareMenu).toHaveCount(0);

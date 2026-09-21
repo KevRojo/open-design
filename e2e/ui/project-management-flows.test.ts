@@ -2829,6 +2829,7 @@ for (const published of [false, true]) {
     if (published) await expect(menu.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
     else await expect(menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true })).toBeVisible();
      const heading = menu.locator('.share-menu-section-label--help');
+     await expect(heading).toHaveText('Visibility in workspace');
      const publicBlock = published ? menu.locator('.chrome-publish-plain') : menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true });
      const publicBounds = (await publicBlock.boundingBox())!;
      expect((await heading.boundingBox())!.y - publicBounds.y - publicBounds.height).toBe(32);
@@ -3033,6 +3034,7 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(shareLink.locator('svg path')).toHaveAttribute('d', 'M12 15V4m-4 4 4-4 4 4M5 20h14');
   await expect(menu).not.toContainText(/Quick Share/i);
   await expect(menu).not.toContainText('Share project in workspace');
+  await expect(menu).not.toContainText('Visibility in workspace');
   await expect(menu).not.toContainText('Deploy to Vercel');
   await expect(menu).not.toContainText('Save as template');
 

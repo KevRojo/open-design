@@ -3421,6 +3421,7 @@ export const zhTW: Dict = {
   "fileViewer.unifiedExportTab": "匯出",
   "fileViewer.unifiedSendTab": "傳送到...",
   "fileViewer.openFileForHistory": "打开文件后查看历史版本",
+  "fileViewer.workspaceVisibilityTitle": "工作區內可見範圍",
   "fileViewer.workspaceShareTitle": "在工作空間中分享專案",
   "fileViewer.workspaceSharePrivateDescription": "只有你可以存取此專案。選擇工作空間成員後，即可分享給團隊。",
   "fileViewer.workspaceShareWorkspaceDescription": "此工作空間的成員可以存取此專案。",

@@ -234,7 +234,7 @@ describe('Shared share shell header', () => {
     const action = published
       ? await screen.findByRole('button', { name: /copy share link/i })
       : await screen.findByRole('menuitem', { name: /Generate and copy link/i });
-    const scope = screen.getByText('Share project in workspace');
+    const scope = screen.getByText('Visibility in workspace');
     const deploy = screen.getByRole('menuitem', { name: /Deploy to Vercel/i });
     expect(action.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scope.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

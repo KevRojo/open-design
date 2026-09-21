@@ -6758,7 +6758,7 @@ describe('FileViewer SVG artifacts', () => {
     // Share panel: actions that produce a shareable link. No file formats and
     // no save/template authoring controls.
     expect(await screen.findByRole('menu')).toBeTruthy();
-    expect(screen.getByText('Share project in workspace')).toBeTruthy();
+    expect(screen.getByText('Visibility in workspace')).toBeTruthy();
     expect(await screen.findByText('Generate and copy link')).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Generate and copy link/i })).toBeTruthy();
     expect(screen.getByText('SHARE ON YOUR OWN HOSTING')).toBeTruthy();
@@ -6844,6 +6844,7 @@ describe('FileViewer SVG artifacts', () => {
     expect(await screen.findByText('Generate and copy link')).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Generate and copy link/i })).toBeTruthy();
     expect(screen.queryByText('Share project in workspace')).toBeNull();
+    expect(screen.queryByText('Visibility in workspace')).toBeNull();
     expect(screen.queryByText('SHARE ON YOUR OWN HOSTING')).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /Deploy to Vercel/i })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /Save as template/i })).toBeNull();
@@ -6903,6 +6904,7 @@ describe('FileViewer SVG artifacts', () => {
     // workspace has no team to receive — see the dedicated test below
     // (recvq5bM78HWCE) for the card's own gating.
     expect(screen.queryByText('Share project in workspace')).toBeNull();
+    expect(screen.queryByText('Visibility in workspace')).toBeNull();
   });
 
   // recvq56lzckGtE: publishing a file from a real team workspace 403'd against
@@ -7159,6 +7161,7 @@ describe('FileViewer SVG artifacts', () => {
     expect(await screen.findByRole('menu')).toBeTruthy();
     await screen.findByText('Generate and copy link');
     expect(screen.queryByText('Share project in workspace')).toBeNull();
+    expect(screen.queryByText('Visibility in workspace')).toBeNull();
   });
 
   // recvqgif6Xa7Wb: product ruled the "no team to share with yet" bridge card
@@ -7206,7 +7209,7 @@ describe('FileViewer SVG artifacts', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /share/i }));
     expect(await screen.findByRole('menu')).toBeTruthy();
-    expect(screen.getByText('Share project in workspace')).toBeTruthy();
+    expect(screen.getByText('Visibility in workspace')).toBeTruthy();
   });
 
   it('hides the public publish entry when there is no workspace at all', async () => {
@@ -7232,6 +7235,7 @@ describe('FileViewer SVG artifacts', () => {
     expect(screen.queryByText('Generate and copy link')).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /Generate and copy link/i })).toBeNull();
     expect(screen.queryByText('Share project in workspace')).toBeNull();
+    expect(screen.queryByText('Visibility in workspace')).toBeNull();
     // recvqgif6Xa7Wb: the "no team to share with yet" bridge card that used to
     // fill this gap was product-ruled out entirely (never a designed surface —
     // see recvqae3pK5hyx/recvq6W8GX8NaH history). With neither card able to

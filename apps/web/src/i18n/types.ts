@@ -4155,6 +4155,7 @@ export interface Dict {
   'fileViewer.unifiedExportTab': string;
   'fileViewer.unifiedSendTab': string;
   'fileViewer.openFileForHistory': string;
+  'fileViewer.workspaceVisibilityTitle': string;
   'fileViewer.workspaceShareTitle': string;
   'fileViewer.workspaceSharePrivateDescription': string;
   'fileViewer.workspaceShareWorkspaceDescription': string;

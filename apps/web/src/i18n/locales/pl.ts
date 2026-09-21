@@ -3240,6 +3240,7 @@ export const pl: Dict = {
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',
   'fileViewer.openFileForHistory': 'Open a file to view version history',
+  "fileViewer.workspaceVisibilityTitle": "Widoczność w obszarze roboczym",
   'fileViewer.workspaceShareTitle': 'Share project in workspace',
   'fileViewer.workspaceSharePrivateDescription': 'Only you can access this project. Choose workspace members to share it with the team.',
   'fileViewer.workspaceShareWorkspaceDescription': 'Members of this workspace can access this project.',

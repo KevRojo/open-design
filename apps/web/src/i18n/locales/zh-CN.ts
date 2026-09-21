@@ -3412,6 +3412,7 @@ export const zhCN: Dict = {
   "fileViewer.unifiedExportTab": "导出",
   "fileViewer.unifiedSendTab": "发送到...",
   "fileViewer.openFileForHistory": "打开文件后查看历史版本",
+  "fileViewer.workspaceVisibilityTitle": "工作区内可见范围",
   "fileViewer.workspaceShareTitle": "在工作空间中分享项目",
   "fileViewer.workspaceSharePrivateDescription": "仅你可以访问此项目。选择工作空间成员后，即可分享给团队。",
   "fileViewer.workspaceShareWorkspaceDescription": "此工作空间的成员可以访问此项目。",
