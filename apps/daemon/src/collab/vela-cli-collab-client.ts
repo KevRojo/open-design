@@ -128,6 +128,8 @@ export function createVelaCliCollabClient(options: VelaCliCollabClientOptions = 
         projectId,
         '--since-seq',
         String(sinceSeq),
+        '--author-kinds',
+        'member,user',
       ], _teamId);
       const comments = Array.isArray(payload.comments)
         ? (payload.comments as CollabCloudComment[])

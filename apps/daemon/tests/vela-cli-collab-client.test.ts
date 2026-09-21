@@ -12,6 +12,30 @@ import {
   createVelaCliCollabClient,
 } from '../src/collab/vela-cli-collab-client.js';
 
+describe('Vela CLI collaboration client inbound comments', () => {
+  it.each(['team-space', 'personal-space'])('requests both author kinds without rewriting their identities in %s', async (workspaceId) => {
+    const comments = [
+      { id: 'member-comment', authorKind: 'member', authorMemberId: 'same-id', authorAppUserId: null },
+      { id: 'web-comment', authorKind: 'user', authorMemberId: null, authorAppUserId: 'same-id' },
+    ];
+    const calls: Array<{ args: string[]; workspaceId: string | undefined }> = [];
+    const client = createVelaCliCollabClient({
+      run: async (args, workspaceId) => {
+        calls.push({ args, workspaceId });
+        return JSON.stringify({ comments, latestSeq: 19 });
+      },
+    });
+
+    const result = await client.pullComments(workspaceId, 'project-1', 17);
+
+    expect(calls).toEqual([{
+      args: ['comment', 'pull', 'project-1', '--since-seq', '17', '--author-kinds', 'member,user'],
+      workspaceId,
+    }]);
+    expect(result).toEqual({ comments, latestSeq: 19, notModified: false, etag: null });
+  });
+});
+
 describe('Vela CLI collaboration client failures', () => {
   it('preserves the captured root errorCode failure emitted by Vela CLI source 927e0a62e7', async () => {
     const stdout = readFileSync(
