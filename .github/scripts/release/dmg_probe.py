@@ -24,16 +24,15 @@ const { readFileSync, realpathSync } = require('node:fs');
 const { join } = require('node:path');
 const requireBuilder = createRequire(realpathSync(join(process.argv[1], 'node_modules/electron-builder/package.json')));
 const dmgUtilSource = readFileSync(requireBuilder.resolve('dmg-builder/out/dmgUtil'), 'utf8');
-if (!dmgUtilSource.includes('87b3bb72148b11451ee90ede79cc8d59305c9173b68b0f2b50a3bea51fc4a4e2') ||
+if (!dmgUtilSource.includes('1664972f9cc2d6e8fce3b63e42cd30078aff602669c5856939c4519921200433') ||
     !dmgUtilSource.includes('CUSTOM_DMGBUILD_PATH')) {
   throw new Error('dmg-builder vendor contract changed; review diagnostic wrapper before running');
 }
-const { downloadArtifact } = requireBuilder('app-builder-lib/out/binDownload');
-downloadArtifact({
-  releaseName: 'dmg-builder@1.2.0',
+const { downloadBuilderToolset } = requireBuilder('app-builder-lib/out/util/electronGet');
+downloadBuilderToolset({
+  releaseName: 'dmg-builder@1.2.5',
   filenameWithExt: 'dmgbuild-bundle-x86_64-75c8a6c.tar.gz',
-  checksums: { 'dmgbuild-bundle-x86_64-75c8a6c.tar.gz': '87b3bb72148b11451ee90ede79cc8d59305c9173b68b0f2b50a3bea51fc4a4e2' },
-  githubOrgRepo: 'electron-userland/electron-builder-binaries',
+  checksums: { 'dmgbuild-bundle-x86_64-75c8a6c.tar.gz': '1664972f9cc2d6e8fce3b63e42cd30078aff602669c5856939c4519921200433' },
 }).then(path => process.stdout.write(path + '\n')).catch(error => { console.error(error); process.exitCode = 1; });
 """
     result = subprocess.run(
@@ -239,9 +238,7 @@ def validate_replay(output: Path, source_app: Path, expected_filesystem: str) ->
 def replay(
     trace_dir: Path,
     count: int,
-    zip_control: bool,
     filesystem_control: bool,
-    pack_root: Path | None,
 ) -> None:
     if count < 1 or count > 3:
         raise ValueError("replay count must be between 1 and 3")
@@ -261,9 +258,6 @@ def replay(
     expanded["size"] = f"{math.ceil(float(original_size[:-1]) * 1.2)}K"
     expanded_settings.write_text(json.dumps(expanded) + "\n", encoding="utf-8")
     source_app = Path(expanded["contents"][0]["path"])
-    zip_binary = (pack_root / "node_modules/7zip-bin/mac/x64/7za") if pack_root else None
-    if zip_control and (zip_binary is None or not zip_binary.is_file() or not source_app.is_dir()):
-        raise ValueError("zip control requires the installed 7za binary and source app")
     if filesystem_control:
         if count != 3:
             raise ValueError("filesystem control requires exactly 3 replays")
@@ -273,31 +267,17 @@ def replay(
     for number, (variant, filesystem) in enumerate(variants, start=1):
         output = trace_dir / f"replay-{number}.dmg"
         replay_settings = expanded_settings if variant == "expanded" else settings
-        if zip_control:
-            variant = "concurrent-zip" if number in (1, 3) else "solo"
         if filesystem_control:
-            controlled = {**expanded, "filesystem": filesystem}
+            controlled = {**json.loads(settings.read_text(encoding="utf-8")), "size": original_size,
+                          "filesystem": filesystem}
             replay_settings = trace_dir / f"replay-{number}-{variant}-settings.json"
             replay_settings.write_text(json.dumps(controlled) + "\n", encoding="utf-8")
         environment = {**os.environ, "OD_DMG_TRACE_TAG": f"replay-{number}-{variant}"}
         started = time.monotonic()
-        zip_output = trace_dir / f"replay-{number}-parallel.zip"
-        zip_process = None
         try:
-            if variant == "concurrent-zip":
-                zip_process = subprocess.Popen(
-                    [str(zip_binary), "a", "-bd", "-mx=1", "-mtc=off", "-mm=Deflate", "-mcu",
-                     str(zip_output), source_app.name],
-                    cwd=source_app.parent, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
-                )
-                time.sleep(2)
             subprocess.run([str(wrapper), "-s", str(replay_settings), invocation["volume"], str(output)],
                            env=environment, check=True, timeout=240)
             build_duration_ms = round((time.monotonic() - started) * 1000)
-            if zip_process is not None:
-                _, zip_stderr = zip_process.communicate(timeout=120)
-                if zip_process.returncode:
-                    raise RuntimeError(f"parallel 7za failed: {zip_stderr[-500:]}")
             validation_started = time.monotonic()
             validation = validate_replay(output, source_app, filesystem) if filesystem_control else {}
             record = {
@@ -313,11 +293,7 @@ def replay(
                 stream.write(json.dumps(record, separators=(",", ":")) + "\n")
             print(f"[dmg-probe] {record}", flush=True)
         finally:
-            if zip_process is not None and zip_process.poll() is None:
-                zip_process.kill()
-                zip_process.wait()
             output.unlink(missing_ok=True)
-            zip_output.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -330,9 +306,7 @@ def main() -> None:
     replay_parser = subparsers.add_parser("replay")
     replay_parser.add_argument("--trace-dir", type=Path, required=True)
     replay_parser.add_argument("--count", type=int, default=2)
-    replay_parser.add_argument("--zip-control", action="store_true")
     replay_parser.add_argument("--filesystem-control", action="store_true")
-    replay_parser.add_argument("--pack-root", type=Path)
     subparsers.add_parser("trace")
     args, remainder = parser.parse_known_args()
     if args.command == "prepare":
@@ -342,7 +316,7 @@ def main() -> None:
     elif args.command == "replay":
         if remainder:
             parser.error(f"unexpected arguments: {remainder}")
-        replay(args.trace_dir, args.count, args.zip_control, args.filesystem_control, args.pack_root)
+        replay(args.trace_dir, args.count, args.filesystem_control)
     else:
         trace(remainder)
 
