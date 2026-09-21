@@ -16,6 +16,7 @@ import {
   SHARE_COMMENTS_PATH_PREFIX,
   SHARE_SNAPSHOT_DISCOVERY_IN_P0,
   buildShareCommentsUrl,
+  hasUnreadComments,
   buildSharePath,
   hasActiveShare,
   isValidAuthorKey,
@@ -259,5 +260,72 @@ describe('share contract · public HTTP seam', () => {
    */
   it('records that snapshot discovery is deliberately absent in P0', () => {
     expect(SHARE_SNAPSHOT_DISCOVERY_IN_P0).toBe(false);
+  });
+});
+
+describe('share contract · comment read state', () => {
+  const other = (createdAt: number) => ({ createdAt, author: { authorKey: 'them' } });
+  const mine = (createdAt: number) => ({ createdAt, author: { authorKey: 'me' } });
+
+  it('lights the dot for a comment that arrived after the last open', () => {
+    expect(hasUnreadComments({
+      readState: { projectId: 'p', lastReadAt: 100 },
+      comments: [other(101)],
+      viewerAuthorKey: 'me',
+    })).toBe(true);
+  });
+
+  it('stays quiet for a comment that arrived before the last open', () => {
+    expect(hasUnreadComments({
+      readState: { projectId: 'p', lastReadAt: 100 },
+      comments: [other(99)],
+      viewerAuthorKey: 'me',
+    })).toBe(false);
+  });
+
+  /**
+   * The condition that gets forgotten. Without it, sending a comment marks
+   * your own project unread — the dot lights up for something you just did.
+   */
+  it('never lights the dot for the viewer\'s own comment', () => {
+    expect(hasUnreadComments({
+      readState: { projectId: 'p', lastReadAt: 100 },
+      comments: [mine(101)],
+      viewerAuthorKey: 'me',
+    })).toBe(false);
+  });
+
+  it('treats a never-opened project as unread once anyone else comments', () => {
+    expect(hasUnreadComments({
+      readState: undefined,
+      comments: [other(1)],
+      viewerAuthorKey: 'me',
+    })).toBe(true);
+    expect(hasUnreadComments({
+      readState: undefined,
+      comments: [mine(1)],
+      viewerAuthorKey: 'me',
+    })).toBe(false);
+  });
+
+  /**
+   * Strict comparison on purpose: a comment written in the same millisecond
+   * as the open is far more likely to be what triggered the open than
+   * something that arrived after it.
+   */
+  it('counts a comment arriving exactly at lastReadAt as seen', () => {
+    expect(hasUnreadComments({
+      readState: { projectId: 'p', lastReadAt: 100 },
+      comments: [other(100)],
+      viewerAuthorKey: 'me',
+    })).toBe(false);
+  });
+
+  it('is unread when ANY qualifying comment is, not only the newest', () => {
+    expect(hasUnreadComments({
+      readState: { projectId: 'p', lastReadAt: 100 },
+      comments: [other(101), mine(200)],
+      viewerAuthorKey: 'me',
+    })).toBe(true);
   });
 });

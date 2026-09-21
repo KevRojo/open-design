@@ -564,3 +564,65 @@ export const PUBLIC_SNAPSHOT_PATH_PREFIX = '/api/v1/public/snapshots';
  * gap someone fills in with a version poll.
  */
 export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = false;
+
+/* ------------------------------------------------------------------ *
+ * Comment read state
+ * ------------------------------------------------------------------ */
+
+/**
+ * When the viewer last opened this project's comments, as epoch ms.
+ *
+ * Persisted by the DAEMON, not by the cloud and not in browser storage: the
+ * red dot has to survive a restart, and a per-browser value would make the
+ * same person on two devices disagree about what they have already seen.
+ *
+ * ## This is NOT the number on the badge
+ *
+ * The badge shows {@link ProjectShareState.unresolvedTotal} — how many
+ * comments are still unhandled. The design draft asked for an unread count
+ * and that was declined: the shipped meaning stays. `lastReadAt` drives only
+ * whether the dot APPEARS and when it CLEARS.
+ *
+ * Keeping the two apart matters because they answer different questions.
+ * "Three comments need your attention" is true whether or not you have looked
+ * at them; "something arrived since you last looked" stops being true the
+ * moment you look. Merging them would make the badge drop to zero on open
+ * while three comments were still open.
+ */
+export interface ProjectCommentReadState {
+  projectId: string;
+  /** Epoch ms; absent means the viewer has never opened this project's comments. */
+  lastReadAt?: number;
+}
+
+/**
+ * Is there something the viewer has not seen yet?
+ *
+ * Two conditions, and the second is the one that gets forgotten: a comment
+ * the viewer wrote themselves must never light the dot. Without that, sending
+ * a comment marks your own project unread.
+ *
+ * A comment that arrived at exactly `lastReadAt` counts as SEEN. The
+ * comparison is strict on purpose — a comment written in the same
+ * millisecond as the open is far more likely to be the one that triggered
+ * the open than one that arrived after it.
+ */
+export function hasUnreadComments(input: {
+  readState: ProjectCommentReadState | null | undefined;
+  comments: ReadonlyArray<{ createdAt: number; author: { authorKey?: string } }>;
+  viewerAuthorKey: string | null;
+}): boolean {
+  const lastReadAt = input.readState?.lastReadAt;
+  return input.comments.some((comment) => {
+    if (comment.author.authorKey && comment.author.authorKey === input.viewerAuthorKey) {
+      return false;
+    }
+    return lastReadAt === undefined || comment.createdAt > lastReadAt;
+  });
+}
+
+/** `PUT /api/projects/:projectId/comments/read` — stamps `lastReadAt` to now. */
+export interface ProjectCommentReadRequest {
+  /** Epoch ms. Server-clamped: a client clock ahead of the server cannot hide future comments. */
+  readAt: number;
+}
