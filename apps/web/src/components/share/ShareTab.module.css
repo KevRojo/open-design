@@ -15,6 +15,20 @@
   color: #333333;
 }
 
+/* S1-T/S4-T: scope explanation stays readable without hover or focus. */
+.scopeHeading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scopeDescription {
+  margin: 0;
+  color: #888888;
+  font-size: 12px;
+  line-height: 18px;
+}
+
 /* S1-T/S4-T scope label: align to the panel, not a padded deployment row.
    Only the scope heading has this help modifier inside ShareTab. */
 .panel :global(.share-menu-section-label--help) {

@@ -187,7 +187,15 @@ describe('Z11a · ShareTab 搬动前的 DOM 基线', () => {
   it('团队基线确实比个人基线多出那两段(否则上一条在裸奔)', () => {
     const personal = baseline('share-panel.personal.html');
     const team = baseline('share-panel.team.html');
-    expect(team.length).toBeGreaterThan(personal.length * 2);
+    // Removing the tooltip SVG changes byte ratios, not section ownership.
+    for (const marker of ['class="chrome-access-select"', 'Generate and copy link']) {
+      expect(team).toContain(marker);
+      expect(personal).not.toContain(marker);
+    }
+    for (const html of [personal, team]) {
+      expect(html).toContain('Deploy to Vercel');
+      expect(html).toContain('Deploy to Cloudflare Pages');
+    }
     expect(team).toContain('share-menu-section-label--help');
   });
 

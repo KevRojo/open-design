@@ -2832,7 +2832,13 @@ for (const published of [false, true]) {
      for (const [property, value] of Object.entries({ padding: '0px', color: 'rgb(51, 51, 51)', 'font-size': '13px', 'font-weight': '500', 'line-height': '20px' })) {
        await expect(heading).toHaveCSS(property, value);
      }
-     await expect(heading.getByTestId('workspace-access-help')).toBeEnabled();
+     await expect(menu.getByTestId('workspace-access-help')).toHaveCount(0);
+     const description = menu.getByText('Members of this workspace can access this project.', { exact: true });
+     await expect(description).toBeVisible();
+     for (const [property, value] of Object.entries({ margin: '0px', color: 'rgb(136, 136, 136)', 'font-size': '12px', 'line-height': '18px' })) {
+       await expect(description).toHaveCSS(property, value);
+     }
+     await expect(description.locator('..')).toHaveCSS('gap', '4px');
      const deployHeading = menu.locator('.share-menu-section-label:not(.share-menu-section-label--help)');
      await expect(deployHeading).toHaveCSS('font-size', '12px');
      await expect(deployHeading).toHaveCSS('font-weight', '700');
@@ -2927,6 +2933,7 @@ for (const published of [false, true]) {
     await expect(trigger).toBeEnabled();
     await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
     await expect(trigger).toHaveText('Workspace members');
+    await expect(description).toBeVisible(); // Failed move must not announce a different visibility.
   });
 }
 

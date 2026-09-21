@@ -7111,11 +7111,9 @@ describe('FileViewer SVG artifacts', () => {
     'ReactComponentViewer',
   );
 
-  // The publish "?" is not the only one — the workspace-access help beside it
-  // uses the same markup, so the focusability fix has to be panel-wide rather
-  // than a one-off on the row that happened to get reviewed. This case needs a
-  // TEAM workspace, since the access card is team-gated.
-  it('exposes the workspace-access help as a focusable control too', async () => {
+  // Scope help is persistent content in the HTML share panel. It remains
+  // team-gated; unlike provider tooltips it needs no focus or hover.
+  it('shows workspace-access help inline without a focus or hover prerequisite', async () => {
     const context = teamWorkspaceContext();
     stubFetchWithWorkspaceContext(context);
 
@@ -7129,13 +7127,11 @@ describe('FileViewer SVG artifacts', () => {
     fireEvent.click(await screen.findByRole('button', { name: /share/i }));
     expect(await screen.findByRole('menu')).toBeTruthy();
 
-    const help = await screen.findByTestId('workspace-access-help');
-    expect(help.tagName).toBe('BUTTON');
-    expect(help).toHaveProperty('type', 'button');
-    expect(help.getAttribute('data-tooltip-placement')).toBe('top');
-    expect(help.closest('[role="menuitem"]')).toBeNull();
-    help.focus();
-    expect(document.activeElement).toBe(help);
+    const description = await screen.findByText('Only you can access this project. Choose workspace members to share it with the team.');
+    expect(description.tagName).toBe('P');
+    expect(description).toBeVisible();
+    expect(description.closest('[role="menuitem"]')).toBeNull();
+    expect(screen.queryByTestId('workspace-access-help')).toBeNull();
   });
 
   // recvq5bM78HWCE: the "在工作空间中分享项目" card rendered for a personal

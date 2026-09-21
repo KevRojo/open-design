@@ -101,26 +101,15 @@ export function ShareTab({
                           see the comment there (recvq5bM78HWCE). */}
                       {menuOrigin === 'toolbar' && workspaceContextHasTeamIdentity(workspaceContext) ? (
                       <>
-                      {/* Access control gets the same section-label + row treatment as the
-                          publish / deploy / save tiers below; its explanation moves into the
-                          trailing "?" instead of a card sub-line. */}
-                      <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
-                        <span>{t('fileViewer.workspaceShareTitle')}</span>
-                        <button
-                          type="button"
-                          className="share-menu-help od-tooltip"
-                          data-testid="workspace-access-help"
-                          aria-label={shareAccess === 'private'
+                      <div className={styles.scopeHeading}>
+                        <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
+                          <span>{t('fileViewer.workspaceShareTitle')}</span>
+                        </div>
+                        <p className={styles.scopeDescription}>
+                          {shareAccess === 'private'
                             ? t('fileViewer.workspaceSharePrivateDescription')
                             : t('fileViewer.workspaceShareWorkspaceDescription')}
-                          data-tooltip={shareAccess === 'private'
-                            ? t('fileViewer.workspaceSharePrivateDescription')
-                            : t('fileViewer.workspaceShareWorkspaceDescription')}
-                          data-tooltip-placement="top"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <RemixIcon name="question-line" size={14} />
-                        </button>
+                        </p>
                       </div>
                       <div className="chrome-access-select">
                           <button
