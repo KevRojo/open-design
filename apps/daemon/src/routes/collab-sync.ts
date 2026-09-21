@@ -50,6 +50,7 @@ import { isUnmaterializedSharedPlaceholder } from '../collab/shared-project-plac
 import {
   isRetractedHubResourceError,
   parseVelaResourceSnapshot,
+  parseVelaPushVersionId,
   runVelaResourceCommand,
 } from '../collab/vela-cli-resource-adapter.js';
 import {
@@ -1327,7 +1328,7 @@ export function registerCollabSyncRoutes(
         projectId,
         fileName: filePath,
       };
-      await runVelaResourceCommand([
+      const pushOutput = await runVelaResourceCommand([
         'push',
         PUBLIC_FILE_RESOURCE_KIND,
         resourceId,
@@ -1338,16 +1339,17 @@ export function registerCollabSyncRoutes(
         JSON.stringify(metadata),
         '--json',
       ], principal.teamId);
+      const versionId = parseVelaPushVersionId(pushOutput);
       const snapshot = parseVelaResourceSnapshot(await runVelaResourceCommand([
         'snapshot',
         resourceId,
-        '--ref',
-        PUBLIC_FILE_REF,
+        '--version-id',
+        versionId,
         '--name',
         path.basename(filePath),
         '--json',
       ], principal.teamId));
-      if (!snapshot) {
+      if (!snapshot || snapshot.versionId !== versionId) {
         return res.status(502).json({ error: 'PUBLIC_SNAPSHOT_UNAVAILABLE' });
       }
       const publication: PublicProjectFilePublication = {
