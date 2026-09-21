@@ -39,6 +39,7 @@ import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.
 let tempDir: string | null = null;
 
 afterEach(() => {
+  vi.useRealTimers();
   closeDatabase();
   execFileMock.mockReset();
   vi.unstubAllEnvs();
@@ -128,6 +129,26 @@ async function waitForCondition(predicate: () => boolean): Promise<void> {
 }
 
 describe('durable Team comment relay outbox', () => {
+  it('starts with an empty durable outbox without pushing a comment', async () => {
+    vi.useFakeTimers();
+    const db = seededDb();
+    const pushes = vi.fn(async () => ({ seq: 1 }));
+    const service = createCollabCloudService({
+      client: clientWithPush(pushes),
+      commentOutbox: createCommentRelayOutboxStore(db, () => 0),
+      listProjectIds: () => [],
+      resolveLocalConversationId: () => 'conv-local',
+      mergeComment: () => false,
+      now: () => 0,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pushes).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
   it('keeps a materialized team member relay-eligible when the local mirror has no creator', () => {
     const teamMember = context('member', {
       workspaceId: 'ws-multi-client',
