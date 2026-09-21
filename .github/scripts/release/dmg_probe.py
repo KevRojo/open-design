@@ -114,9 +114,6 @@ def trace(argv: list[str]) -> None:
     def traced_build(*args: object, **kwargs: object) -> object:
         return original_build(*args, callback=callback, **kwargs)
 
-    core.subprocess.call = timed_subprocess("call")
-    core.subprocess.check_call = timed_subprocess("check_call")
-    command_line.build_dmg = traced_build
     if tag == "primary":
         settings_index = argv.index("-s") + 1
         if Path(argv[settings_index]).resolve() != (trace_dir / "settings.json").resolve():
@@ -124,6 +121,36 @@ def trace(argv: list[str]) -> None:
         (trace_dir / "invocation.json").write_text(
             json.dumps({"volume": argv[-2], "output": argv[-1]}) + "\n", encoding="utf-8",
         )
+        if os.environ.get("OD_DMG_PREFLIGHT") == "1":
+            settings = json.loads((trace_dir / "settings.json").read_text(encoding="utf-8"))
+            source_app = Path(settings["contents"][0]["path"])
+            if not source_app.is_dir():
+                raise ValueError(f"DMG source app is missing: {source_app}")
+            plain_copy = trace_dir / "preflight-regular.app"
+            for name, command in (
+                ("source-read", ["tar", "-cf", "/dev/null", "-C", str(source_app.parent), source_app.name]),
+                ("regular-copy", ["/usr/bin/ditto", str(source_app), str(plain_copy)]),
+            ):
+                started = time.monotonic()
+                try:
+                    result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+                    outcome = {"exitCode": result.returncode, "stderr": result.stderr[-500:]}
+                except subprocess.TimeoutExpired:
+                    outcome = {"error": "timeout"}
+                finally:
+                    duration_ms = round((time.monotonic() - started) * 1000)
+                    if name == "regular-copy":
+                        shutil.rmtree(plain_copy, ignore_errors=True)
+                record = {"name": name, "timestamp": datetime.now(timezone.utc).isoformat(),
+                          "durationMs": duration_ms, **outcome}
+                with (trace_dir / "preflight.jsonl").open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(record) + "\n")
+                print(f"[dmg-probe] preflight {record}", file=sys.stderr, flush=True)
+                if outcome.get("error") or outcome.get("exitCode"):
+                    break
+    core.subprocess.call = timed_subprocess("call")
+    core.subprocess.check_call = timed_subprocess("check_call")
+    command_line.build_dmg = traced_build
     sys.argv = ["dmgbuild", *argv]
     command_line.main()
 

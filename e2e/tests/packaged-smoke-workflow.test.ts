@@ -2614,13 +2614,13 @@ process.stdin.on("end", () => {
   it("[P2] confines the mac x64 DMG probe to nonpublishing diagnostics", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     expect(workflow).toContain("      mac_x64_dmg_probe:");
-    expect(workflow).toContain("      mac_x64_dmg_zip_control:");
+    expect(workflow).toContain("      mac_x64_dmg_preflight:");
     expect(workflow).toContain("        default: false");
     const build = workflowJob(workflow, "build_mac_x64");
     expect(build).toContain("- name: Prepare mac_x64 DMG probe\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish }}");
     expect(build).toContain("- name: Replay mac_x64 DMG copy\n        if: ${{ inputs.mac_x64_dmg_probe && !inputs.publish && steps.mac_x64_tools_pack_build.outcome == 'success' }}");
-    expect(build).toContain("--count 3 --zip-control --pack-root");
     expect(build).toContain("dmg-probe/phases.jsonl");
+    expect(build).toContain("dmg-probe/preflight.jsonl");
   });
 
   it("[P2] preserves stable linux AppImage smoke reports for release publication", async () => {
