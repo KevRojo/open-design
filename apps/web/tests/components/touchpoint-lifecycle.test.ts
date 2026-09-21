@@ -251,6 +251,30 @@ describe("resolveAuthorizationDeadline", () => {
 		const past = { serverTime: "2030-01-01T00:00:00.000Z", endsAt: "2030-01-01T00:20:00.000Z", authorizationExpiresAt: "2030-01-01T06:00:00.000Z" };
 		expect(resolveAuthorizationDeadline(past, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(past.endsAt));
 	});
+	// OPEND-3366, second tier. What a single `setTimeout` can name bounds one
+	// timer SEGMENT, which `armExpiry` already handles; it says nothing about how
+	// long the server may authorize. Setting the cap equal to it made the timer
+	// limit a policy again, one tier up from the five minutes that started this:
+	// a schedule longer than ~24.9 days came back silently truncated, so a device
+	// that could not reach the server for that long treated the wake as a new
+	// presentation and the device impression retired a campaign the server was
+	// still running. The server enforces no maximum schedule length — its own
+	// production-runtime fixtures use multi-year windows — so the cap may not
+	// impose one either.
+	it("does not truncate a schedule longer than a single timer can name", () => {
+		const twoMonths = { serverTime: "2030-01-01T00:00:00.000Z", endsAt: "2030-03-01T00:00:00.000Z", authorizationExpiresAt: "2030-03-01T00:00:00.000Z" };
+		expect(resolveAuthorizationDeadline(twoMonths, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(twoMonths.endsAt));
+	});
+	// The other half of the same contract: the cap has to stay a real backstop.
+	// `endsAt` cannot catch a server clock that has fallen behind, because it is
+	// what the skew is measured against — `validForMs` is `deadline - serverTime`,
+	// so a `serverTime` lagging by a month buys a month of display. An infinite
+	// or absent cap would let that through.
+	it("still bounds an authorization granted by a server clock that has fallen behind", () => {
+		const skewed = { serverTime: "2020-01-01T00:00:00.000Z", endsAt: "2099-01-01T00:00:00.000Z", authorizationExpiresAt: "2099-01-01T00:00:00.000Z" };
+		expect(resolveAuthorizationDeadline(skewed, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(skewed.serverTime) + PRODUCTION_MAX_LEASE_MS);
+		expect(Number.isFinite(PRODUCTION_MAX_LEASE_MS)).toBe(true);
+	});
 	// The cap is one value, in one place, because three copies of it is exactly
 	// how the Badge and the Hover kept a five-minute lease after the Modal was
 	// fixed. Deleting this case means re-opening that door.
