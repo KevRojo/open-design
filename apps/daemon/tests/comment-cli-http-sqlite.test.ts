@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildWorkspacePermissions,
   buildWorkspaceSeatSummary,
+  SHARE_COMMENT_MAX_BYTES,
   type WorkspaceCollabContext,
 } from '@open-design/contracts';
 import {
@@ -240,16 +241,61 @@ describe('od comment CLI HTTP/SQLite route integration', () => {
     expect(getPreviewComment(db!, PROJECT, CONVERSATION, JSON.parse(fromStdin.stdout).comment.id)?.note).toBe(stdinNote);
   });
 
-  it('sends oversized input to the actual route, which rejects it without a SQLite write', async () => {
+  it('accepts exactly the server byte ceiling and rejects one UTF-8 byte over it through CLI, HTTP, and SQLite', async () => {
     const base = await startRouteServer();
-    const note = '评论'.repeat(25_000);
-    expect(Buffer.byteLength(note, 'utf8')).toBeGreaterThan(64 * 1024);
-    const promptPath = join(tempRoot, 'oversized.txt');
-    writeFileSync(promptPath, note, 'utf8');
-    const result = await runCli(['comment', 'create', PROJECT, CONVERSATION, '--target', JSON.stringify(target), '--prompt-file', promptPath, ...headers(OWNER), '--daemon-url', base, '--json']);
-    expect(result.code).not.toBe(0);
-    expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
-    expect(listPreviewComments(db!, PROJECT, CONVERSATION)).toEqual([]);
+    const common = [...headers(OWNER), '--daemon-url', base, '--json'];
+    const multibyte = '评论';
+    const exactNote = multibyte.repeat(Math.floor(SHARE_COMMENT_MAX_BYTES / Buffer.byteLength(multibyte, 'utf8')))
+      + 'a'.repeat(SHARE_COMMENT_MAX_BYTES % Buffer.byteLength(multibyte, 'utf8'));
+    const oversizedNote = `${exactNote}b`;
+    expect(Buffer.byteLength(exactNote, 'utf8')).toBe(SHARE_COMMENT_MAX_BYTES);
+    expect(Buffer.byteLength(oversizedNote, 'utf8')).toBe(SHARE_COMMENT_MAX_BYTES + 1);
+
+    const exactPath = join(tempRoot, 'exact-limit.txt');
+    const oversizedPath = join(tempRoot, 'one-byte-over-limit.txt');
+    writeFileSync(exactPath, exactNote, 'utf8');
+    writeFileSync(oversizedPath, oversizedNote, 'utf8');
+
+    const create = await runCli(['comment', 'create', PROJECT, CONVERSATION, '--target', JSON.stringify(target), '--prompt-file', exactPath, ...common]);
+    expect(create.code).toBe(0);
+    const created = listPreviewComments(db!, PROJECT, CONVERSATION)[0]!;
+    expect(created).toMatchObject({
+      note: exactNote, status: 'open', authorMemberId: OWNER,
+    });
+
+    const rejectedCreate = await runCli(['comment', 'create', PROJECT, CONVERSATION, '--target', JSON.stringify(target), '--prompt-file', oversizedPath, ...common]);
+    expect(rejectedCreate.code).not.toBe(0);
+    const rejectedCreateError = JSON.parse(rejectedCreate.stderr);
+    expect(rejectedCreateError).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+    expect(rejectedCreateError).not.toMatchObject({ error: { code: 'INVALID_COMMENT' } });
+    expect(requestAudit.at(-1)).toMatchObject({
+      method: 'POST',
+      path: `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments`,
+      body: { note: oversizedNote },
+    });
+    expect(listPreviewComments(db!, PROJECT, CONVERSATION)).toHaveLength(1);
+
+    const update = await runCli(['comment', 'update', PROJECT, CONVERSATION, created.id, '--target', JSON.stringify(target), '--prompt-file', exactPath, ...common]);
+    expect(update.code).toBe(0);
+    const status = await runCli(['comment', 'status', PROJECT, CONVERSATION, created.id, '--status', 'resolved', ...common]);
+    expect(status.code).toBe(0);
+    expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toMatchObject({
+      note: exactNote, status: 'resolved', authorMemberId: OWNER,
+    });
+
+    const rejectedUpdate = await runCli(['comment', 'update', PROJECT, CONVERSATION, created.id, '--target', JSON.stringify(target), '--prompt-file', oversizedPath, ...common]);
+    expect(rejectedUpdate.code).not.toBe(0);
+    const rejectedUpdateError = JSON.parse(rejectedUpdate.stderr);
+    expect(rejectedUpdateError).toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+    expect(rejectedUpdateError).not.toMatchObject({ error: { code: 'INVALID_COMMENT' } });
+    expect(requestAudit.at(-1)).toMatchObject({
+      method: 'POST',
+      path: `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments`,
+      body: { note: oversizedNote },
+    });
+    expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toMatchObject({
+      note: exactNote, status: 'resolved', authorMemberId: OWNER,
+    });
   });
 
   it('rejects unauthorized and invalid CLI writes without mutation', async () => {
