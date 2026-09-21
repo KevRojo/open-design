@@ -342,6 +342,17 @@ function parseVersion(
   };
 }
 
+/** The push wire ID identifies this upload; display version/ref are not identities. */
+export function parseVelaPushVersionId(stdout: string): string {
+  let parsed: unknown;
+  try { parsed = JSON.parse(stdout); } catch { /* Report no raw wire content. */ }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    && 'id' in parsed && typeof parsed.id === 'string' && parsed.id.trim()) {
+    return parsed.id;
+  }
+  throw new Error('vela push response has no immutable version id');
+}
+
 export function parseVelaResourceSnapshot(stdout: string): VelaResourceSnapshotRecord | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;

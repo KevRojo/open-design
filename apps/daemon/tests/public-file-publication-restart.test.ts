@@ -149,7 +149,7 @@ describe('public file publication restart lifecycle', () => {
             versionId: 'version-1',
             createdAt: new Date(1).toISOString(),
           })
-        : JSON.stringify({ version: 1 }),
+        : JSON.stringify({ id: 'version-1', version: 1 }),
     );
     const publicationStore: PublicFilePublicationStore = {
       get: () => null,
@@ -200,7 +200,7 @@ describe('public file publication restart lifecycle', () => {
       if (args[0] === 'snapshot-redact') {
         throw new Error('resource hub unavailable');
       }
-      return JSON.stringify({ version: 1 });
+      return JSON.stringify({ id: 'version-1', version: 1 });
     });
     const publicationStore: PublicFilePublicationStore = {
       get: () => null,
@@ -246,7 +246,7 @@ describe('public file publication restart lifecycle', () => {
             versionId: 'version-1',
             createdAt: new Date(1).toISOString(),
           })
-        : JSON.stringify({ version: 1 }),
+        : JSON.stringify({ id: 'version-1', version: 1 }),
     );
     let publicationStore = createSqlitePublicFilePublicationStore(
       openDatabase(projectDir, { dataDir: projectDir }),

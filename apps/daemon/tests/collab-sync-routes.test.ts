@@ -1843,7 +1843,7 @@ describe('collab sync routes', () => {
           createdAt: new Date(1).toISOString(),
         });
       }
-      return JSON.stringify({ version: 1 });
+      return JSON.stringify({ id: 'v1', version: 1 });
     });
     const api = await startSyncServer(personalContextProvider(), {
       resolveProjectDir: () => dir,
@@ -1899,7 +1899,7 @@ describe('collab sync routes', () => {
           createdAt: new Date(1).toISOString(),
         });
       }
-      return JSON.stringify({ version: 1 });
+      return JSON.stringify({ id: 'v1', version: 1 });
     });
     const ownershipScopes: Array<TeamMirrorPullScope | null | undefined> = [];
     const resolveSharedProject = vi.fn(async (
@@ -2079,6 +2079,84 @@ describe('collab sync routes', () => {
     expect(runVelaResourceCommand).not.toHaveBeenCalled();
   });
 
+  it('pins each publication to its own push even when another push advances the ref', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-version-pin-'));
+    tempDirs.push(dir);
+    await writeFile(path.join(dir, 'index.html'), '<h1>A</h1>');
+    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
+    function barrier() {
+      let resolve!: () => void;
+      const promise = new Promise<void>((done) => { resolve = done; });
+      return { promise, resolve };
+    }
+    const pushedA = barrier();
+    const releaseA = barrier();
+    const versions = new Map<string, string>();
+    const snapshots = new Map<string, string>();
+    let head = '';
+    let sequence = 0;
+    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
+      if (args[0] === 'push') {
+        const id = `v${++sequence}`;
+        versions.set(id, await readFile(path.join(args[3]!, 'index.html'), 'utf8'));
+        head = id;
+        if (id === 'v1') { pushedA.resolve(); await releaseA.promise; }
+        return JSON.stringify({ id, version: sequence });
+      }
+      if (args[0] === 'snapshot') {
+        const position = args.indexOf('--version-id');
+        const id = position >= 0 ? args[position + 1]! : head;
+        const slug = `snapshot-${id}`;
+        snapshots.set(slug, versions.get(id)!);
+        return JSON.stringify({ slug, versionId: id });
+      }
+      throw new Error('unexpected command');
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    const a = api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    let b: Awaited<typeof a>;
+    try {
+      await pushedA.promise;
+      await writeFile(path.join(dir, 'index.html'), '<h1>B</h1>');
+      b = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    } finally { releaseA.resolve(); }
+    const first = await a;
+    expect(first.status).toBe(200);
+    expect(b!.status).toBe(200);
+    expect(snapshots.get(first.body.slug)).toContain('<h1>A</h1>');
+    expect(snapshots.get(b!.body.slug)).toContain('<h1>B</h1>');
+    for (const [args, workspace] of vi.mocked(runVelaResourceCommand).mock.calls.filter(([args]) => args[0] === 'snapshot')) {
+      expect(args).not.toContain('--ref');
+      expect(args).toContain('--version-id');
+      expect(workspace).toBe('team-1');
+    }
+  });
+
+  it.each(['missing-push-id', 'wrong-snapshot-version', 'missing-snapshot-version'])('rejects %s without replacing a successful publication', async (fault) => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-version-pin-failure-'));
+    tempDirs.push(dir);
+    await writeFile(path.join(dir, 'index.html'), '<h1>Keep old publication</h1>');
+    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
+    let broken = false;
+    let snapshots = 0;
+    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
+      if (args[0] === 'push') return JSON.stringify(broken && fault === 'missing-push-id' ? { version: 2 } : { id: 'v1', version: 1 });
+      if (args[0] === 'snapshot') {
+        snapshots++;
+        return JSON.stringify({ slug: broken ? 'bad' : 'original', versionId: !broken ? 'v1' : fault === 'wrong-snapshot-version' ? 'v2' : undefined });
+      }
+      throw new Error('unexpected command');
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    const original = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    expect(original.status).toBe(200);
+    broken = true;
+    const failed = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    expect(failed.status).toBe(502);
+    expect((await api.json('/api/projects/p1/files/index.html/publish-public')).body.publication).toEqual(original.body);
+    expect(snapshots).toBe(fault === 'missing-push-id' ? 1 : 2);
+  });
+
   it('hydrates and clears public file publication state', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-public-file-'));
     tempDirs.push(dir);
@@ -2100,7 +2178,7 @@ describe('collab sync routes', () => {
           createdAt: new Date(1).toISOString(),
         });
       }
-      return JSON.stringify({ version: 1 });
+      return JSON.stringify({ id: 'v1', version: 1 });
     });
     const api = await startSyncServer(fixedShareContextProvider(true), {
       resolveProjectDir: () => dir,
@@ -2148,7 +2226,7 @@ describe('collab sync routes', () => {
           createdAt: new Date(1).toISOString(),
         });
       }
-      return JSON.stringify({ version: 1 });
+      return JSON.stringify({ id: 'v1', version: 1 });
     });
     // Production injects resolveProjectDir as an async resolver (it awaits
     // ensureProject before returning the share dir). The handler must await it;
