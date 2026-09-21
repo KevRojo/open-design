@@ -4529,15 +4529,13 @@ function CommentAuthorIdentityContent({
   const avatarColor = commentAuthorAvatarColor(seed ?? '');
   return (
     <span className="comment-side-author" data-author-kind={comment.authorKind ?? 'member'}>
-      {displayName ? (
-        <span
-          className="comment-side-avatar"
-          style={{ background: avatarColor.bg, color: avatarColor.fg }}
-          aria-hidden="true"
-        >
-          {commentAuthorInitials(displayName)}
-        </span>
-      ) : null}
+      <span
+        className="comment-side-avatar"
+        style={{ background: avatarColor.bg, color: avatarColor.fg }}
+        aria-hidden="true"
+      >
+        {commentAuthorInitials(displayName)}
+      </span>
       <span className="comment-side-author-copy">
         <strong>{`${displayNumber}. ${commentDisplayLabel(comment, t)}`}</strong>
         {displayName ? (

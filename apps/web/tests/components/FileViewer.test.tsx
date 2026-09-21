@@ -13526,6 +13526,43 @@ describe('FileViewer tweaks toolbar', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/workspace/members'))).toBe(false);
   });
 
+  it('renders an empty external author as a key-colored question-mark avatar without a name line', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(
+      JSON.stringify({ members: [] }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const emptyNameComment = (id: string, authorDisplayName?: string): PreviewComment => ({
+      id, projectId: 'project-1', conversationId: 'conversation-1',
+      filePath: 'preview.html', elementId: id, selector: '[data-od-id="hero-copy"]',
+      label: 'Hero copy', text: 'Hero copy', htmlHint: '<p data-od-id="hero-copy">',
+      position: { x: 16, y: 24, width: 320, height: 48 }, note: 'External feedback.', status: 'open',
+      authorKind: 'user', authorDisplayName, authorAppUserId: 'user-1', authorKey: 'same-author-key',
+      createdAt: Date.now(), updatedAt: Date.now(),
+    });
+
+    renderWithProjectWorkspace(
+      <CommentSidePanel
+        comments={[
+          emptyNameComment('empty', ''), emptyNameComment('whitespace', '   '), emptyNameComment('missing'),
+        ]}
+        selectedIds={new Set()} activeCommentId={null} collapsed={false}
+        onCollapsedChange={() => {}} onToggleSelect={() => {}} onSelectAll={() => {}}
+        onClearSelection={() => {}} onReply={() => {}} onSendSelected={() => {}}
+        sending={false} t={t}
+      />,
+      teamWorkspaceContext(),
+    );
+
+    const items = await screen.findAllByTestId('comment-side-item');
+    const avatars = items.map((item) => item.querySelector<HTMLElement>('.comment-side-avatar'));
+    expect(avatars.map((avatar) => avatar?.textContent)).toEqual(['?', '?', '?']);
+    expect(avatars[0]?.style.background).toBe(avatars[1]?.style.background);
+    expect(avatars[1]?.style.background).toBe(avatars[2]?.style.background);
+    for (const item of items) expect(item.querySelector('.comment-side-author-copy small')).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/workspace/members'))).toBe(false);
+  });
+
   it('keeps relative comment-time boundaries stable across clock boundaries', () => {
     vi.useFakeTimers();
     try {
