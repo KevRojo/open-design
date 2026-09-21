@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ComponentProps } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'postcss';
 import { ShareTab } from '../../../src/components/share/ShareTab';
@@ -32,6 +32,30 @@ const checkPath = 'm3 8 3 3 7-7';
 const linkPath = 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7';
 
 describe('S3/S4/S4-C copy-button rendering seam', () => {
+  it.each(['copied', 'failed'] as const)('shows pending until the clipboard settles, then delegates %s feedback', async (feedback) => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const input = props({ copyPublishedFileLink: vi.fn(() => pending) });
+    const { rerender } = render(<ShareTab {...input} />);
+    fireEvent.click(screen.getByRole('button', { name: 'fileViewer.copyShareLink' }));
+    const busy = screen.getByRole('button', { name: 'fileViewer.copyingLink' });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText(input.publishedFileUrl)).toBeVisible();
+    fireEvent.click(busy);
+    expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(1);
+    expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
+    expect(input.unpublishCurrentFilePublic).not.toHaveBeenCalled();
+    await act(async () => { finish(); await pending; });
+    rerender(<ShareTab {...input} publishLinkFeedback={feedback} />);
+    const settled = screen.getByRole('button', { name: feedback === 'copied' ? 'fileViewer.copied' : 'fileViewer.copyShareLink' });
+    expect(settled).toBeEnabled();
+    expect(settled).not.toHaveAttribute('aria-busy');
+    if (feedback === 'failed') expect(screen.getByRole('status')).toHaveTextContent('fileViewer.copyLinkManually');
+    rerender(<ShareTab {...input} publishLinkFeedback={null} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'fileViewer.copyShareLink' })); });
+    expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(2);
+  });
   it.each([null, 'copied', 'failed'] as const)('renders only the matching icon for feedback %s', (feedback) => {
     render(<ShareTab {...props({ publishLinkFeedback: feedback })} />);
     const label = feedback === 'copied' ? 'fileViewer.copied' : 'fileViewer.copyShareLink';

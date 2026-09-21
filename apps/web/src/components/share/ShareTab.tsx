@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { Button } from '@open-design/components';
 import { workspaceContextHasTeamIdentity, type WorkspaceCollabContext } from '@open-design/contracts';
 import type { PublicFilePublishFailureKey } from '../../collab/public-file-publish';
@@ -95,6 +95,22 @@ export function ShareTab({
   canOpenSharePage: boolean;
   shareLinkStatusHint: string;
 }) {
+  const [copyingLink, setCopyingLink] = useState(false);
+  const copyInFlight = useRef(false);
+
+  // The host owns clipboard outcomes and their reset timer; only await its action here.
+  async function handleCopyPublishedFileLink() {
+    if (copyInFlight.current || streaming) return;
+    copyInFlight.current = true;
+    setCopyingLink(true);
+    try {
+      await copyPublishedFileLink();
+    } finally {
+      copyInFlight.current = false;
+      setCopyingLink(false);
+    }
+  }
+
   return (
                       <div className={`chrome-unified-panel chrome-unified-panel--share ${styles.panel}`}>
                       {canPublishPublic ? (
@@ -111,10 +127,11 @@ export function ShareTab({
                               <Button
                                 type="button"
                                 className={styles.copyButton}
-                                disabled={streaming}
+                                disabled={streaming || copyingLink}
+                                aria-busy={copyingLink || undefined}
                                 title={streaming ? t('fileViewer.shareAfterGenerationComplete') : undefined}
                                 onClick={() => {
-                                  void copyPublishedFileLink();
+                                  void handleCopyPublishedFileLink();
                                 }}
                               >
                                 <svg
@@ -134,7 +151,9 @@ export function ShareTab({
                                     ? 'm3 8 3 3 7-7'
                                     : 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7'} />
                                 </svg>
-                                {publishLinkFeedback === 'copied'
+{copyingLink
+                                  ? t('fileViewer.copyingLink')
+                                  : publishLinkFeedback === 'copied'
                                   ? t('fileViewer.copied')
                                   : t('fileViewer.copyShareLink')}
                               </Button>

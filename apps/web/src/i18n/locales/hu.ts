@@ -3012,6 +3012,7 @@ export const hu: Dict = {
   'fileViewer.exportPptx': 'Exportálás PPTX-ként',
   'fileViewer.openInNewTab': 'Megnyitás új lapon',
   'fileViewer.copyPath': 'Útvonal másolása',
+  "fileViewer.copyingLink": "Másolás…",
   'fileViewer.copied': 'Másolva!',
   'fileViewer.share': 'Megosztás',
   'fileViewer.binaryMeta': 'Bináris · {size}',

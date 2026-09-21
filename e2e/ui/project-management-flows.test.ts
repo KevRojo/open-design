@@ -3255,6 +3255,30 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(failedCopy).toBeEnabled();
   expect(publishAttempts).toBe(3); // Retrying copy must not publish again.
 
+  // S4-C: hold only the external clipboard boundary; the real host settles feedback.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => new Promise<void>((resolve) => {
+        window.addEventListener('test:release-copy', () => resolve(), { once: true });
+      }) },
+    });
+  });
+  await failedCopy.click();
+  const copying = menu.getByRole('button', { name: 'Copying…', exact: true });
+  await expect(copying).toBeVisible();
+  await expect(copying).toBeDisabled();
+  await expect(copying).toHaveAttribute('aria-busy', 'true');
+  await expect(fallback).toHaveText(publicUrl);
+  await test.info().attach('s4-c-copy-pending', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.evaluate(() => window.dispatchEvent(new Event('test:release-copy')));
+  const copied = menu.getByRole('button', { name: 'Copied!', exact: true });
+  await expect(copied).toBeVisible();
+  await expect(copied).toBeEnabled();
+  await expect(copied).not.toHaveAttribute('aria-busy');
+  await expect(failedCopy).toBeVisible(); // Existing host feedback timer restores the action.
+  expect(publishAttempts).toBe(3);
+
   // The same real cards become disabled through the workspace permission boundary.
   const readonlyContext = {
     ...AMR_PERSONAL_WORKSPACE_CONTEXT,

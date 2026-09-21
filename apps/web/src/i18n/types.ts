@@ -3927,6 +3927,7 @@ export interface Dict {
   'fileViewer.exportPptx': string;
   'fileViewer.openInNewTab': string;
   'fileViewer.copyPath': string;
+  'fileViewer.copyingLink': string;
   'fileViewer.copied': string;
   'fileViewer.share': string;
   'fileViewer.binaryMeta': string;

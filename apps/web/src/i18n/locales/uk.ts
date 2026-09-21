@@ -3012,6 +3012,7 @@ export const uk: Dict = {
   'fileViewer.exportPptx': 'Експортувати як PPTX',
   'fileViewer.openInNewTab': 'Відкрити в новій вкладці',
   'fileViewer.copyPath': 'Копіювати шлях',
+  "fileViewer.copyingLink": "Копіювання…",
   'fileViewer.copied': 'Скопійовано!',
   'fileViewer.share': 'Поділитися',
   'fileViewer.binaryMeta': 'Двійковий · {size}',

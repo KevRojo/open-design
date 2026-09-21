@@ -3012,6 +3012,7 @@ export const ko: Dict = {
   'fileViewer.exportPptx': 'PPTX로 내보내기',
   'fileViewer.openInNewTab': '새 탭에서 열기',
   'fileViewer.copyPath': '경로 복사',
+  "fileViewer.copyingLink": "복사 중…",
   'fileViewer.copied': '복사 완료!',
   'fileViewer.share': '공유',
   'fileViewer.binaryMeta': '바이너리 · {size}',

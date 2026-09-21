@@ -3012,6 +3012,7 @@ export const fr: Dict = {
   'fileViewer.exportPptx': 'Exporter en PPTX',
   'fileViewer.openInNewTab': 'Ouvrir dans un nouvel onglet',
   'fileViewer.copyPath': 'Copier le chemin',
+  "fileViewer.copyingLink": "Copie en cours…",
   'fileViewer.copied': 'Copié !',
   'fileViewer.share': 'Partager',
   'fileViewer.binaryMeta': 'Binaire · {size}',

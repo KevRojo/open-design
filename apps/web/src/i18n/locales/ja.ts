@@ -3012,6 +3012,7 @@ export const ja: Dict = {
   'fileViewer.exportPptx': 'PPTX としてエクスポート',
   'fileViewer.openInNewTab': '新しいタブで開く',
   'fileViewer.copyPath': 'パスをコピー',
+  "fileViewer.copyingLink": "コピー中…",
   'fileViewer.copied': 'コピーしました！',
   'fileViewer.share': '共有',
   'fileViewer.binaryMeta': 'バイナリ · {size}',

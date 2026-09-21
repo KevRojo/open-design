@@ -3253,6 +3253,7 @@ export const zhTW: Dict = {
   "fileViewer.exportPptx": "匯出為 PPTX",
   "fileViewer.openInNewTab": "在新分頁中開啟",
   "fileViewer.copyPath": "複製路徑",
+  "fileViewer.copyingLink": "複製中…",
   "fileViewer.copied": "已複製！",
   "fileViewer.share": "分享",
   "fileViewer.binaryMeta": "二進位 · {size}",

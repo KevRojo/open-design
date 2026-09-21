@@ -3019,6 +3019,7 @@ export const fa: Dict = {
   'fileViewer.exportPptx': 'صادرکردن به PPTX',
   'fileViewer.openInNewTab': 'باز کردن در تب جدید',
   'fileViewer.copyPath': 'کپی مسیر',
+  "fileViewer.copyingLink": "در حال کپی پیوند…",
   'fileViewer.copied': 'کپی شد!',
   'fileViewer.share': 'اشتراک‌گذاری',
   'fileViewer.binaryMeta': 'باینری · {size}',

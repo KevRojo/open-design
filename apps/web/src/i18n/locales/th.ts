@@ -3012,6 +3012,7 @@ export const th: Dict = {
   'fileViewer.exportPptx': 'ส่งข้อมูลเป็น PPTX',
   'fileViewer.openInNewTab': 'เข้าจากหน้าต่างใหม่',
   'fileViewer.copyPath': 'ก็อปปี้ลิ้งก์',
+  "fileViewer.copyingLink": "กำลังคัดลอก…",
   'fileViewer.copied': 'ทำการคัดลอก!',
   'fileViewer.share': 'แชร์ต่อ',
   'fileViewer.binaryMeta': 'ข้อมูล Binary · {size}',

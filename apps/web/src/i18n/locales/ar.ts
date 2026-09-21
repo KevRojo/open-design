@@ -3019,6 +3019,7 @@ export const ar: Dict = {
   'fileViewer.exportPptx': 'تصدير كـ PPTX',
   'fileViewer.openInNewTab': 'فتح في علامة تبويب جديدة',
   'fileViewer.copyPath': 'نسخ المسار',
+  "fileViewer.copyingLink": "جارٍ نسخ الرابط…",
   'fileViewer.copied': 'تم النسخ!',
   'fileViewer.share': 'مشاركة',
   'fileViewer.binaryMeta': 'ثنائي · {size}',

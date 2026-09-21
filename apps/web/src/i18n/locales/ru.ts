@@ -3012,6 +3012,7 @@ export const ru: Dict = {
   'fileViewer.exportPptx': 'Экспорт в PPTX',
   'fileViewer.openInNewTab': 'Открыть в новой вкладке',
   'fileViewer.copyPath': 'Копировать путь',
+  "fileViewer.copyingLink": "Копирование…",
   'fileViewer.copied': 'Скопировано!',
   'fileViewer.share': 'Поделиться',
   'fileViewer.binaryMeta': 'Бинарный · {size}',

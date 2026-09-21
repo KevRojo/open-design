@@ -3012,6 +3012,7 @@ export const tr: Dict = {
   'fileViewer.exportPptx': 'PPTX olarak dışa aktar',
   'fileViewer.openInNewTab': 'Yeni sekmede aç',
   'fileViewer.copyPath': 'Yolu kopyala',
+  "fileViewer.copyingLink": "Kopyalanıyor…",
   'fileViewer.copied': 'Kopyalandı!',
   'fileViewer.share': 'Paylaş',
   'fileViewer.binaryMeta': 'İkili · {size}',

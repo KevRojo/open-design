@@ -3012,6 +3012,7 @@ export const id: Dict = {
   'fileViewer.exportPptx': 'Ekspor PPTX',
   'fileViewer.openInNewTab': 'Buka di tab baru',
   'fileViewer.copyPath': 'Salin path',
+  "fileViewer.copyingLink": "Menyalin…",
   'fileViewer.copied': 'Tersalin',
   'fileViewer.share': 'Bagikan',
   'fileViewer.binaryMeta': 'Biner - {size}',
