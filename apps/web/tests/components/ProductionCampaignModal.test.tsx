@@ -1845,6 +1845,50 @@ describe("ProductionCampaignModal device impressions", () => {
 		expect(document.querySelector("opend-touchpoint")).toBe(host);
 	});
 
+	// The same tab switch, but with time actually passing. The case above toggles
+	// visibility on the real clock with nothing in between, so it cannot tell "the
+	// lease was left alone" from "nothing had time to lapse". Forty-five seconds
+	// of a sixty-second authorization puts a poll tick inside the hidden spell and
+	// still leaves the lease the server's to renew, which is the shape a user
+	// actually produces by reading a mail and coming back.
+	it("keeps the same host through a background spell shorter than its authorization", async () => {
+		vi.useFakeTimers({
+			toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+		});
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		let hidden = false;
+		vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify(decision()), { status: 200 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<ProductionCampaignModal authenticated sessionSubject="user-a" />);
+		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+		const dialog = screen.getByRole("dialog");
+		const host = document.querySelector("opend-touchpoint");
+		expect(host).not.toBeNull();
+		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+		expect(localStorage.getItem(marker())).toBe("1");
+		const callsBeforeHiding = fetchMock.mock.calls.length;
+
+		// Backgrounded. The thirty-second tick lands inside this and must not fire:
+		// no answer could be acted on while `isCurrent` fences a hidden page.
+		hidden = true;
+		await act(async () => { fireEvent(document, new Event("visibilitychange")); });
+		await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
+		expect(screen.getByRole("dialog")).toBe(dialog);
+		expect(document.querySelector("opend-touchpoint")).toBe(host);
+		expect(fetchMock.mock.calls.length).toBe(callsBeforeHiding);
+
+		// Back with fifteen seconds of authorization left. That revalidates, it
+		// does not re-present: same dialog, same host, no replayed entry animation.
+		hidden = false;
+		await act(async () => { fireEvent(document, new Event("visibilitychange")); });
+		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+		expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeHiding);
+		expect(screen.getByRole("dialog")).toBe(dialog);
+		expect(document.querySelector("opend-touchpoint")).toBe(host);
+	});
+
 	// Deliberate contract change (OPEND-3363). This case used to assert that
 	// hiding the page took the modal down, and then that waking did not bring it
 	// back. The first half is no longer true: hiding cancels the request in
