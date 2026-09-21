@@ -3733,7 +3733,16 @@ const PREVIEW_COMMENT_STATUSES = new Set([
   'failed',
 ]);
 
-export function listPreviewComments(db: SqliteDb, projectId: string, conversationId: string) {
+/** Server-controlled read scope; never populated from a request body. */
+interface PreviewCommentReadOptions {
+  /** Include the same project's reserved inbound anchor, not other private chats. */
+  includeProjectAnchor?: boolean;
+}
+
+export function listPreviewComments(
+  db: SqliteDb, projectId: string, conversationId: string,
+  options: PreviewCommentReadOptions = {},
+) {
   return (db
     .prepare(
       `SELECT id, project_id AS projectId, conversation_id AS conversationId,
@@ -3750,10 +3759,11 @@ export function listPreviewComments(db: SqliteDb, projectId: string, conversatio
               pin_seq AS pinSeq, sort_key AS sortKey,
               note, status, created_at AS createdAt, updated_at AS updatedAt
          FROM preview_comments
-        WHERE project_id = ? AND conversation_id = ?
+        WHERE project_id = ? AND (conversation_id = ? OR conversation_id = ?)
         ORDER BY created_at ASC, rowid ASC`,
     )
-    .all(projectId, conversationId) as DbRow[])
+    .all(projectId, conversationId, options.includeProjectAnchor
+      ? getProjectCommentAnchorConversationId(db, projectId) : null) as DbRow[])
     .map(normalizePreviewComment);
 }
 
@@ -4528,7 +4538,10 @@ export function markProjectCommentsRead(
   return getProjectCommentReadState(db, projectId, viewerScope);
 }
 
-export function getPreviewComment(db: SqliteDb, projectId: string, conversationId: string, id: string) {
+export function getPreviewComment(
+  db: SqliteDb, projectId: string, conversationId: string, id: string,
+  options: PreviewCommentReadOptions = {},
+) {
   const row = db
     .prepare(
       `SELECT id, project_id AS projectId, conversation_id AS conversationId,
@@ -4545,9 +4558,10 @@ export function getPreviewComment(db: SqliteDb, projectId: string, conversationI
               pin_seq AS pinSeq, sort_key AS sortKey,
               note, status, created_at AS createdAt, updated_at AS updatedAt
          FROM preview_comments
-        WHERE id = ? AND project_id = ? AND conversation_id = ?`,
+         WHERE id = ? AND project_id = ? AND (conversation_id = ? OR conversation_id = ?)`,
     )
-    .get(id, projectId, conversationId) as DbRow | undefined;
+    .get(id, projectId, conversationId, options.includeProjectAnchor
+      ? getProjectCommentAnchorConversationId(db, projectId) : null) as DbRow | undefined;
   return row ? normalizePreviewComment(row) : null;
 }
 

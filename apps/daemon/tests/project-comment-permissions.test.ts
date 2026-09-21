@@ -7,6 +7,8 @@ import path from 'node:path';
 import {
   closeDatabase,
   deletePreviewComment,
+  ensureProjectCommentAnchorConversation,
+  mergeSyncedPreviewComment,
   getConversation,
   getPreviewComment,
   insertConversation,
@@ -175,6 +177,34 @@ async function startServer({
 }
 
 describe('preview comment permission gating', () => {
+  it('personal reads and owner handling include only the current conversation plus internal shared anchor', async () => {
+    const api = await startServer();
+    const own = await api.createComment(OWNER, 'current private note');
+    insertConversation(api.db, { id: 'private-other', projectId: PROJECT, title: 'Other', createdAt: 2, updatedAt: 2 });
+    const hidden = upsertPreviewComment(api.db, PROJECT, 'private-other', {
+      target: api.commentTarget, note: 'other private note', authorMemberId: OWNER,
+    });
+    const route = `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments`;
+    expect((await api.json(route, { member: OWNER })).body.comments.map((c: { id: string }) => c.id)).toEqual([own.id]);
+    const anchor = ensureProjectCommentAnchorConversation(api.db, PROJECT)!.conversationId;
+    mergeSyncedPreviewComment(api.db, PROJECT, anchor, {
+      ...api.commentTarget, id: 'external-user', projectId: PROJECT, conversationId: 'remote',
+      memberId: '', seq: 1, note: 'shared incoming note', status: 'open',
+      authorKind: 'user', authorAppUserId: 'account-external', createdAt: 10, updatedAt: 10,
+    });
+    insertProject(api.db, { id: 'other-project', name: 'Other', createdAt: 1, updatedAt: 1 });
+    const foreignAnchor = ensureProjectCommentAnchorConversation(api.db, 'other-project')!.conversationId;
+    upsertPreviewComment(api.db, 'other-project', foreignAnchor, { target: api.commentTarget, note: 'foreign anchor' });
+    const listed = await api.json(route, { member: OWNER });
+    expect(listed.status).toBe(200);
+    expect(listed.body.comments.map((c: { id: string }) => c.id).sort()).toEqual([own.id, 'external-user'].sort());
+    const handled = await api.json(`${route}/external-user`, { method: 'PATCH', member: OWNER, body: { status: 'attached' } });
+    expect(handled.status).toBe(200);
+    expect(getPreviewComment(api.db, PROJECT, anchor, 'external-user')).toMatchObject({ status: 'attached', conversationId: anchor });
+    expect((await api.json(`${route}/${hidden!.id}`, { method: 'PATCH', member: OWNER, body: { status: 'attached' } })).status).toBe(404);
+    expect((await api.json(`/api/projects/${PROJECT}/conversations/${anchor}/comments`, { member: OWNER })).status).toBe(404);
+  });
+
   it('classifies new comments as self or other and does not count edits', async () => {
     const api = await startServer();
     const ownComment = await api.createComment(OWNER, 'owner note');

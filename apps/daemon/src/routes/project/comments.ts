@@ -209,7 +209,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
     return (commentsAreProjectScoped(projectId, context)
       && typeof getProjectPreviewComment === 'function'
       ? getProjectPreviewComment(db, projectId, commentId)
-      : getPreviewComment(db, projectId, conversationId, commentId)) as PreviewComment | null;
+      : getPreviewComment(db, projectId, conversationId, commentId, { includeProjectAnchor: true })) as PreviewComment | null;
   }
 
   /**
@@ -453,7 +453,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
         workspaceResolution.context,
       ) && typeof listProjectPreviewComments === 'function'
         ? listProjectPreviewComments(db, req.params.id)
-        : listPreviewComments(db, req.params.id, req.params.cid),
+        : listPreviewComments(db, req.params.id, req.params.cid, { includeProjectAnchor: true }),
     });
   });
 
