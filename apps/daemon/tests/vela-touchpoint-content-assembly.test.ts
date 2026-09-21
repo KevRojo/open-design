@@ -184,6 +184,8 @@ const decide = async () => {
 };
 
 const blobsDir = () => path.join(dataDir, 'touchpoint-content-cache', 'blobs');
+/** The file a digest names, so a case can damage one specific blob rather than whichever one readdir happens to list first. */
+const blobFile = (value: string) => path.join(blobsDir(), value.slice('sha256:'.length));
 
 describe('daemon touchpoint content assembly', () => {
   // Property 1. If this ever fails, every already-published client stops seeing
@@ -214,10 +216,9 @@ describe('daemon touchpoint content assembly', () => {
     expect(upstreamBytes[1]).toBeLessThan(upstreamBytes[0]! / 10);
   });
 
-  it('keeps serving the campaign when the cached bytes are corrupted', async () => {
+  it('keeps serving the campaign when the cached bytes are corrupted, and stops paying for them', async () => {
     await decide();
-    const [corrupted] = fs.readdirSync(blobsDir());
-    fs.writeFileSync(path.join(blobsDir(), corrupted as string), base64('tampered'));
+    fs.writeFileSync(blobFile(digest(SHARED)), base64('tampered'));
     calls = [];
     const recovered = await decide();
     expect(recovered.status).toBe(200);
@@ -226,6 +227,16 @@ describe('daemon touchpoint content assembly', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.heldContentId).toBe('version-1');
     expect(calls[1]?.heldContentId).toBeNull();
+    // Damage costs one extra round trip, not every round trip from now on. The
+    // full response the fallback just fetched is the daemon's only chance to
+    // put the real bytes back; if it declines, this placement pays double
+    // forever and nothing anywhere reports it.
+    calls = [];
+    const healed = await decide();
+    expect(healed.status).toBe(200);
+    expect(healed.text).toBe(JSON.stringify(FULL_RESPONSE));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.heldContentId).toBe('version-1');
   });
 
   it('keeps serving the campaign when the cache cannot be written at all', async () => {
