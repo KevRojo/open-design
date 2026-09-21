@@ -1,9 +1,0 @@
-$ corepack pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/comment-relay-outbox.test.ts tests/vela-cli-collab-client.test.ts tests/integrations/vela-command.test.ts
-
- RUN  v4.1.6 /Users/alche/.local/share/worktrees/herdr/open-design/feat-share-lane4-inbound/apps/daemon
-
-
- Test Files  3 passed (3)
-      Tests  62 passed (62)
-   Start at  23:59:30
-   Duration  1.53s (transform 558ms, setup 36ms, import 793ms, tests 462ms, environment 0ms)
