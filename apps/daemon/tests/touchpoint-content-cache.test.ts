@@ -101,6 +101,8 @@ const trimmedResponse = (full: Record<string, unknown>) => {
 
 const MODAL = { placementKey: 'opend.home.campaign-modal', locale: 'en-US' } as const;
 const BADGE = { placementKey: 'opend.home.account-badge', locale: 'en-US' } as const;
+/** What a daemon holding today's fixture would have offered upstream before asking. */
+const HELD_V1 = { heldContentId: 'version-1', heldContentLocale: 'en-US' } as const;
 
 let dataDir: string;
 beforeEach(() => {
@@ -126,7 +128,7 @@ describe('touchpoint content cache', () => {
     expect(cache.held(MODAL)).toBeNull();
     cache.remember(MODAL, full);
     expect(cache.held(MODAL)).toEqual({ heldContentId: 'version-1', heldContentLocale: 'en-US' });
-    const rebuilt = cache.reassemble(MODAL, trimmedResponse(full));
+    const rebuilt = cache.reassemble(MODAL, HELD_V1, trimmedResponse(full));
     expect(rebuilt).toEqual(full);
     // Field order too: the browser parses the same object shape it does today,
     // and `contentOmitted` never reaches it.
@@ -140,12 +142,44 @@ describe('touchpoint content cache', () => {
     cache.remember(BADGE, fullResponse(BADGE.placementKey, 'badge.js', BADGE_ENTRY));
     // Two distinct entries plus the one `shared.js` both of them import.
     expect(fs.readdirSync(blobsDir()).sort()).toHaveLength(3);
-    expect(cache.reassemble(MODAL, trimmedResponse(fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY)))).toEqual(
+    expect(cache.reassemble(MODAL, HELD_V1, trimmedResponse(fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY)))).toEqual(
       fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY),
     );
-    expect(cache.reassemble(BADGE, trimmedResponse(fullResponse(BADGE.placementKey, 'badge.js', BADGE_ENTRY)))).toEqual(
+    expect(cache.reassemble(BADGE, HELD_V1, trimmedResponse(fullResponse(BADGE.placementKey, 'badge.js', BADGE_ENTRY)))).toEqual(
       fullResponse(BADGE.placementKey, 'badge.js', BADGE_ENTRY),
     );
+  });
+
+  it('refuses to rebuild against a version it was not asked to hold', () => {
+    const cache = createTouchpointContentCache(dataDir);
+    const first = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
+    cache.remember(MODAL, first);
+    const held = cache.held(MODAL);
+    expect(held).toEqual(HELD_V1);
+    // A concurrent full response for the same placement lands while the first
+    // attempt is still on the wire, and replaces the record under it.
+    const second = JSON.parse(JSON.stringify(first)) as typeof first;
+    second.content.id = 'version-2';
+    cache.remember(MODAL, second);
+    // The server trimmed its answer against version-1 and nothing else, so
+    // version-2's bytes do not belong behind version-1's decision metadata --
+    // however internally consistent each half is on its own.
+    expect(cache.reassemble(MODAL, held!, trimmedResponse(first))).toBeNull();
+  });
+
+  it('still rebuilds when the server answered in a fallback locale', () => {
+    const cache = createTouchpointContentCache(dataDir);
+    const requested = { placementKey: MODAL.placementKey, locale: 'zh-CN' } as const;
+    // Vela resolves a placement locale through [requested, base language,
+    // en-US], so a zh-CN request is legitimately answered with en-US content.
+    const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
+    cache.remember(requested, full);
+    const held = cache.held(requested);
+    // What the daemon offers upstream is what it actually holds, not what it
+    // asked for. Binding reassembly to the requested locale instead would
+    // strand every placement the server answers through a fallback.
+    expect(held).toEqual({ heldContentId: 'version-1', heldContentLocale: 'en-US' });
+    expect(cache.reassemble(requested, held!, trimmedResponse(full))).toEqual(full);
   });
 
   it('refuses to rebuild from a blob whose bytes no longer match its digest', () => {
@@ -154,7 +188,7 @@ describe('touchpoint content cache', () => {
     cache.remember(MODAL, full);
     const [corrupted] = fs.readdirSync(blobsDir());
     fs.writeFileSync(path.join(blobsDir(), corrupted as string), base64('tampered'));
-    expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+    expect(cache.reassemble(MODAL, HELD_V1, trimmedResponse(full))).toBeNull();
   });
 
   it('refuses a blob whose stored bytes are not exactly the bytes its digest names', () => {
@@ -166,7 +200,7 @@ describe('touchpoint content cache', () => {
     // bytes -- while the file, and whatever the cache hands back, still
     // carries them. The browser's `atob` is not tolerant the same way.
     fs.appendFileSync(blobFile(digest(SHARED)), 'GARBAGEXX');
-    expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+    expect(cache.reassemble(MODAL, HELD_V1, trimmedResponse(full))).toBeNull();
   });
 
   it('hands back only bytes a browser can decode', () => {
@@ -174,7 +208,7 @@ describe('touchpoint content cache', () => {
     const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
     cache.remember(MODAL, full);
     fs.appendFileSync(blobFile(digest(SHARED)), 'GARBAGEXX');
-    const rebuilt = cache.reassemble(MODAL, trimmedResponse(full)) as
+    const rebuilt = cache.reassemble(MODAL, HELD_V1, trimmedResponse(full)) as
       | { content: { resources: Array<{ bytes: string }> } }
       | null;
     // Either the cache refuses (it does now), or every resource it vouches for
@@ -190,12 +224,12 @@ describe('touchpoint content cache', () => {
     cache.remember(MODAL, full);
     fs.writeFileSync(blobFile(digest(SHARED)), base64('tampered'));
     // The damage has to be real before its repair means anything.
-    expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+    expect(cache.reassemble(MODAL, HELD_V1, trimmedResponse(full))).toBeNull();
     // This is the fallback's full response arriving: the one moment the daemon
     // holds the correct bytes for that blob again. Refusing to write them is
     // what turns one damaged file into a permanent trimmed-then-full round.
     cache.remember(MODAL, full);
-    expect(cache.reassemble(MODAL, trimmedResponse(full))).toEqual(full);
+    expect(cache.reassemble(MODAL, HELD_V1, trimmedResponse(full))).toEqual(full);
   });
 
   it('does not offer content it can no longer read', () => {
@@ -213,7 +247,7 @@ describe('touchpoint content cache', () => {
     for (const file of fs.readdirSync(assemblies))
       fs.writeFileSync(path.join(assemblies, file), 'not json');
     expect(cache.held(MODAL)).toBeNull();
-    expect(cache.reassemble(MODAL, trimmedResponse(full))).toBeNull();
+    expect(cache.reassemble(MODAL, HELD_V1, trimmedResponse(full))).toBeNull();
   });
 
   it('stores nothing from a response whose digest does not describe its own bytes', () => {

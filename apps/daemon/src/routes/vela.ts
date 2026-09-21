@@ -535,6 +535,28 @@ function proxyTouchpointRuntimeRequest(
 
   const controlKey = context.controlKey;
   /**
+   * A caller that walked away takes its upstream request with it.
+   *
+   * The browser's own per-attempt budget is shorter than this proxy's, so an
+   * abandoned attempt would otherwise stay alive here: still downloading, still
+   * buffering, and still writing the assembly record that a later, LIVE request
+   * is about to rebuild from. `res.headersSent` does not catch it, because an
+   * attempt aborted before a single byte went out has sent no headers. Nobody
+   * reads an orphan's response; its side effects are the whole problem, and
+   * they stretch the window for crossing two campaigns from one round trip to
+   * the caller's entire budget.
+   *
+   * One request is in flight at a time -- the assembly fallback replaces it
+   * rather than adding to it -- so a single mutable reference covers both.
+   */
+  let currentUpstream: http.ClientRequest | null = null;
+  const abortUpstream = (): void => {
+    const pending = currentUpstream;
+    if (pending && !res.writableEnded && !pending.destroyed) pending.destroy();
+  };
+  req.once('aborted', abortUpstream);
+  res.once('close', abortUpstream);
+  /**
    * `fallback` is the one retry the assembly path is allowed: a trimmed reply
    * the daemon cannot rebuild is re-asked as today's full request. Clearing it
    * on that retry is what keeps the guarantee bounded — the daemon can never
@@ -632,7 +654,12 @@ function proxyTouchpointRuntimeRequest(
           res.end(decoded);
           return;
         }
-        const full = contentCache.reassemble(contentKey, decision);
+        // `held` is the pair this attempt offered upstream. Upstream only trims
+        // a reply the daemon asked it to trim, so on the trimmed path it is
+        // non-null by construction; rebuilding without it would rebuild from
+        // whatever the record says NOW, which a concurrent full response for
+        // the same placement may already have replaced.
+        const full = held ? contentCache.reassemble(contentKey, held, decision) : null;
         if (full) {
           res.status(200);
           res.setHeader('content-type', 'application/json');
@@ -646,6 +673,7 @@ function proxyTouchpointRuntimeRequest(
         else echo();
       });
     });
+    currentUpstream = upstream;
     upstream.setTimeout(30_000, () =>
       upstream.destroy(new Error('Touchpoint runtime request timed out')),
     );
