@@ -2588,23 +2588,15 @@ process.stdin.on("end", () => {
     expect(build).toContain("dmg-probe/fs-usage*.log");
   });
 
-  it("[P2] preserves stable linux AppImage smoke reports for release publication", async () => {
+  it("[P2] excludes Linux from stable planning, builds, outputs, and publication", async () => {
     const workflow = await readFile(releaseStableWorkflowPath, "utf8");
-    const linuxBuildStep = workflow.match(
-      /- name: Build release linux artifacts\r?\n(?:.+\r?\n)+?(?=\r?\n      - name: Smoke release linux AppImage runtime)/m,
-    );
-    expect(linuxBuildStep?.[0]).toBeDefined();
-    expect(linuxBuildStep?.[0]).toContain(
-      'node -e \'const fs = require("node:fs"); JSON.parse(fs.readFileSync(process.argv[1], "utf8"));\' "$build_json_path"',
-    );
-    expect(workflow).toContain("Smoke release linux AppImage runtime");
-    expect(workflow).toContain("manifest.json");
-    expect(workflow).toContain("tools-pack.json");
-    expect(workflow).toContain("Upload linux e2e spec report");
-    expect(workflow).toContain("open-design-release-linux-e2e-report");
-    expect(workflow).toContain("Download linux e2e spec report");
-    expectReleaseLinuxBuildPreservesEvidence(workflow, "Build release linux artifacts");
-    expectReleaseLinuxSmokePreservesEvidenceBeforeApt(workflow, "Smoke release linux AppImage runtime");
+    expect(workflow).not.toContain("build_linux");
+    expect(workflow).not.toContain("linux_url:");
+    expect(workflow).not.toContain("linux_namespace:");
+    expect(workflow).not.toContain("ENABLE_STABLE_LINUX");
+    expect(workflow).not.toContain("open-design-release-linux");
+    expect(workflow).toContain('ENABLE_LINUX_X64: "false"');
+    expect(workflow).toContain("LINUX_X64_RESULT: skipped");
   });
 
   it("[P2] keeps release namespaces aligned with release channels", async () => {
@@ -2624,13 +2616,11 @@ process.stdin.on("end", () => {
     expect(releaseStableWorkflow).toContain("namespace: ${{ steps.stable.outputs.namespace }}");
     expect(releaseStableWorkflow).toContain("mac_intel_namespace: ${{ steps.stable.outputs.mac_intel_namespace }}");
     expect(releaseStableWorkflow).toContain("win_namespace: ${{ steps.stable.outputs.win_namespace }}");
-    expect(releaseStableWorkflow).toContain("linux_namespace: ${{ steps.stable.outputs.linux_namespace }}");
     expect(releaseStableWorkflow).toContain('--namespace "${{ needs.metadata.outputs.namespace }}"');
     expect(releaseStableWorkflow).toContain("OD_PACKAGED_E2E_NAMESPACE: ${{ needs.metadata.outputs.namespace }}");
     expect(releaseStableWorkflow).toContain('"--namespace", "${{ needs.metadata.outputs.win_namespace }}",');
     expect(releaseStableWorkflow).toContain('OD_PACKAGED_E2E_NAMESPACE: ${{ needs.metadata.outputs.win_namespace }}');
-    expect(releaseStableWorkflow).toContain('--namespace "${{ needs.metadata.outputs.linux_namespace }}"');
-    expect(releaseStableWorkflow).toContain('"namespace": "${{ needs.metadata.outputs.linux_namespace }}",');
+    expect(releaseStableWorkflow).not.toContain("needs.metadata.outputs.linux_namespace");
     expect(releaseStableWorkflow).not.toMatch(/--namespace release-stable(?:-intel|-win|-linux)?\b/);
     expect(releaseStableWorkflow).not.toMatch(/OD_PACKAGED_E2E_NAMESPACE: release-stable(?:-win|-linux)?\b/);
     expect(releaseStableWorkflow).not.toMatch(/namespaces\/release-stable(?:-intel|-win|-linux)?\b/);
@@ -3499,29 +3489,26 @@ process.stdin.on("end", () => {
   });
 
 
-  it("[P2] supports stable metadata, prepublish, and publish dispatch modes", async () => {
+  it("[P2] makes stable publication an explicit default-off decision", async () => {
     const [workflow, script] = await Promise.all([
       readFile(releaseStableWorkflowPath, "utf8"),
       readFile(releaseStableScriptPath, "utf8"),
     ]);
 
-    expect(workflow).toContain("dry_run:");
+    expect(workflow).toContain("publish:");
     expect(workflow).toContain(
-      "Release mode. metadata stops after promotion metadata; prepublish runs build/smoke/report/plan without publishing; publish performs the stable release.",
+      "Publish the validated stable build to R2 and GitHub Releases. OFF by default; unchecked runs the complete prepublish build, signing, notarization, and smoke path without public side effects.",
     );
-    expect(workflow).toContain("group: open-design-release-stable-${{ inputs.dry_run }}");
-    expect(workflow).toContain("type: choice");
-    expect(workflow).toContain("- metadata");
-    expect(workflow).toContain("- prepublish");
-    expect(workflow).toContain("- publish");
-    expect(workflow).toContain("default: metadata");
+    expect(workflow).toContain("group: open-design-release-stable-${{ inputs.publish && 'publish' || inputs.metadata_only && 'metadata' || 'prepublish' }}");
+    expect(workflow).toContain("metadata_only:");
+    expect(workflow).toMatch(/publish:[\s\S]*?type: boolean[\s\S]*?default: false/);
     expect(workflow).not.toContain("inputs.channel");
-    expect(workflow).toContain("OPEN_DESIGN_RELEASE_DRY_RUN: ${{ inputs.dry_run == 'publish' && 'false' || inputs.dry_run }}");
+    expect(workflow).toContain("OPEN_DESIGN_RELEASE_DRY_RUN: ${{ inputs.publish && 'false' || inputs.metadata_only && 'metadata' || 'prepublish' }}");
     expect(workflow).toContain("RELEASE_PUBLIC_ORIGIN: ${{ vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}");
     expect(workflow).toContain("run: bash .github/scripts/release/github/stable-notes.sh");
     expect(workflow).toContain("dry_run: ${{ steps.stable.outputs.dry_run }}");
     expect(workflow).toContain("dry_run_mode: ${{ steps.stable.outputs.dry_run_mode }}");
-    expect(workflow).toContain("if: ${{ needs.metadata.outputs.run_prepublish_jobs == 'true' }}");
+    expect(workflow).toContain("needs.metadata.outputs.run_prepublish_jobs == 'true'");
     expect(workflow).toContain("RELEASE_PUBLISH_SIDE_EFFECTS: ${{ needs.metadata.outputs.publish_side_effects_enabled }}");
 
     expect(script).toContain("function parseStableDryRunMode");
@@ -4181,9 +4168,9 @@ function expectWindowsUpdaterSmokeContract(workflow: string, channel: "beta" | "
   if (channel === "stable") {
     expect(workflow).toContain("Build stable win_x64 update fixture");
     expect(workflow).toContain('full Windows stable smoke requires stable version x.y.z');
-    expect(workflow).toContain('pnpm.cmd exec tools-pack win cleanup --dir $toolsPackDir --namespace "${{ needs.metadata.outputs.win_namespace }}" --json');
-    expect(workflow).toContain("--cache-dir $cacheDir `");
-    expect(workflow).toContain('pnpm.cmd exec tools-pack win validate-payload --namespace "${{ needs.metadata.outputs.win_namespace }}" --payload-path $build.payloadPath --expected-version "${{ needs.metadata.outputs.release_version }}" --json');
+    expect(workflow).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs" win cleanup --dir "${{ runner.temp }}\\tools-pack" --namespace "${{ needs.metadata.outputs.win_namespace }}" --json');
+    expect(workflow).toContain('"--cache-dir", "${{ runner.temp }}\\tools-pack-cache"');
+    expect(workflow).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\pack\\dist\\index.mjs" win validate-payload --namespace "${{ needs.metadata.outputs.win_namespace }}" --payload-path $build.payloadPath --expected-version "${{ needs.metadata.outputs.release_version }}" --json');
   } else {
     expect(workflow).toContain(`Build ${channel} win_x64 update fixture`);
     expect(workflow).toContain(`full Windows smoke requires a counted ${channel} version`);

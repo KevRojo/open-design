@@ -189,13 +189,51 @@ describe("release workflows", () => {
     expect(workflows[0]).toContain("uses: ./.github/actions/setup-workspace");
     expect(workflows[0]).toContain("--cache-dir");
     expect(workflows.map((workflow) => countOccurrences(workflow, "keep=1"))).toEqual([0, 0, 0]);
-    expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([0, 0, 1]);
+    expect(workflows.map((workflow) => countOccurrences(workflow, "$keep = 1"))).toEqual([0, 0, 0]);
     expect(workflows[1]).not.toContain("uses: actions/cache/");
     expect(workflows[1]).toContain(".github/config/convergence/release-prerelease.json");
     for (const workflow of workflows) {
       expect(workflow).not.toContain("keep=3");
       expect(workflow).not.toContain("$keep = 3");
     }
+  });
+
+  it("lets stable reuse only explicit formal prerelease recipes", async () => {
+    const [stableWorkflow, prereleaseConfigText, stableConfigText] = await Promise.all([
+      readFile(new URL("../../../.github/workflows/release-stable.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/config/convergence/release-prerelease.json", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/config/convergence/release-stable.json", import.meta.url), "utf8"),
+    ]);
+    const prerelease = JSON.parse(prereleaseConfigText).workflows["release-prerelease"];
+    const stable = JSON.parse(stableConfigText).workflows["release-stable"];
+
+    expect(stable.policy).toBe("stable-v1");
+    expect(Object.keys(stable.workloads).sort()).toEqual([
+      "source_js_daemon",
+      "source_js_packages",
+      "source_js_shell",
+      "source_mac_arm64_web",
+      "source_mac_x64_executor",
+      "source_mac_x64_runtime",
+      "source_mac_x64_web",
+      "source_win_x64_executor",
+      "source_win_x64_web",
+      "test_verify",
+    ]);
+    for (const [workload, declaration] of Object.entries(stable.workloads) as Array<[
+      string,
+      { recipe: string; trustedSources: Array<{ policy: string; workflow: string; workload: string }> },
+    ]>) {
+      expect(declaration.recipe).toBe(prerelease.workloads[workload].recipe);
+      expect(declaration.trustedSources).toEqual([
+        { workflow: "release-prerelease", policy: "prerelease-v1", workload },
+      ]);
+    }
+    expect(stableWorkflow).toContain(".github/config/convergence/release-stable.json");
+    expect(stableWorkflow).toContain("  quality_gate:");
+    expect(stableWorkflow).toContain("fromJSON(needs.metadata.outputs.hit).test_verify");
+    expect(stableWorkflow).not.toContain("build_linux");
+    expect(stableWorkflow).not.toContain("linux_url:");
   });
 
   it("selects bounded producer closures for platform executors and mac x64 runtime", async () => {
@@ -294,7 +332,7 @@ describe("release workflows", () => {
     const prereleaseMac = sectionBetween(prerelease, "  build_mac:", "  build_mac_intel:");
     const prereleaseMacX64 = sectionBetween(prerelease, "  build_mac_intel:", "  build_win:");
     const prereleaseWin = sectionBetween(prerelease, "  build_win:", "  publish:");
-    const stableMetadata = sectionBetween(stable, "  metadata:", "  verify:");
+    const stableMetadata = sectionBetween(stable, "  metadata:", "  common:");
     const stablePublish = sectionBetween(stable, "  publish:", "  cleanup_partial_release_assets:");
 
     expect(mac).not.toContain("bash tools/release/scripts/build-platform.sh");
@@ -356,9 +394,12 @@ describe("release workflows", () => {
     expect(prereleaseMetadata).toContain("uses: ./.github/actions/setup-workspace");
     expect(prereleaseMetadata).toContain("release-prerelease.json");
     expect(prereleaseMetadata).toContain("--mode enforce");
-    expect(stableMetadata).toContain("uses: pnpm/action-setup@v5");
-    expect(stableMetadata).toContain("run: pnpm install --frozen-lockfile");
-    expect(stableMetadata.indexOf("run: pnpm install --frozen-lockfile")).toBeLessThan(stableMetadata.indexOf("tools-release prepare"));
+    expect(stableMetadata).toContain("uses: ./.github/actions/setup-workspace");
+    expect(stableMetadata).toContain("release-stable.json");
+    expect(stableMetadata).toContain("--mode enforce");
+    expect(stableMetadata.indexOf("uses: ./.github/actions/setup-workspace")).toBeLessThan(
+      stableMetadata.indexOf("tools-release prepare"),
+    );
     for (const publish of [prereleasePublish, stablePublish]) {
       expect(publish).toContain("uses: pnpm/action-setup@v5");
       expect(publish).toContain("run: pnpm install --frozen-lockfile");
@@ -489,9 +530,11 @@ describe("release workflows", () => {
     expect(stable).not.toContain(".github/scripts/release/r2/publish.sh");
     expect(stable).not.toContain(".github/scripts/release/r2/verify.sh");
     expect(stable).not.toContain(".github/scripts/release/r2/summary.sh");
-    expect(countOccurrences(stable, "tools/release/scripts/prepare-platform-assets.sh")).toBeGreaterThanOrEqual(3);
-    expect(stable).toContain("tools\\release\\scripts\\prepare-platform-assets.ps1");
-    expect(countOccurrences(stable, "tools-release publish-platform")).toBeGreaterThanOrEqual(4);
+    expect(stable).toContain("pnpm exec tools-release prepare-platform-assets");
+    expect(stable).toContain('node "$RELEASE_EXECUTOR_ROOT/release/dist/index.mjs" prepare-platform-assets');
+    expect(stable).toContain('node "$env:RELEASE_EXECUTOR_ROOT\\release\\dist\\index.mjs" prepare-platform-assets');
+    expect(stable).toContain("pnpm exec tools-release publish-platform");
+    expect(stable).not.toContain("uses: actions/cache/");
     expect(stable).toContain("tools-release publish-metadata");
     // The stable promotion gate validates prerelease metadata.github fields; the
     // publish steps must therefore pass the resolved release attribution through.
@@ -500,7 +543,7 @@ describe("release workflows", () => {
     expect(stable).toContain("RELEASE_WORKFLOW: ${{ github.workflow }}");
     expect(countOccurrences(stable, "RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}")).toBeGreaterThanOrEqual(5);
     expect(stable).toContain("RELEASE_RUN_ID: ${{ github.run_id }}");
-    expect(countOccurrences(stable, "RELEASE_BRANCH: ${{ needs.metadata.outputs.branch }}")).toBeGreaterThanOrEqual(5);
+    expect(countOccurrences(stable, "RELEASE_BRANCH: ${{ needs.metadata.outputs.branch }}")).toBeGreaterThanOrEqual(4);
     expect(stable).not.toContain("RELEASE_BRANCH: ${{ github.ref_name }}");
     expect(stable).toContain("tools-release verify-metadata");
     expect(stable).toContain("tools-release summary-metadata");
@@ -511,15 +554,14 @@ describe("release workflows", () => {
     expect(stable).toContain("run: pnpm exec tools-release prepare stable");
     expect(stable).toContain("OPEN_DESIGN_RELEASE_CHANNEL: stable");
     expect(stable).not.toContain("OPEN_DESIGN_STABLE_VERSION:");
-    expect(stable).toContain("type: choice");
-    expect(stable).toContain("- metadata");
-    expect(stable).toContain("- prepublish");
-    expect(stable).toContain("- publish");
-    expect(stable).toContain("default: metadata");
-    expect(stable).toContain("OPEN_DESIGN_RELEASE_DRY_RUN: ${{ inputs.dry_run == 'publish' && 'false' || inputs.dry_run }}");
+    expect(stable).toContain("publish:");
+    expect(stable).toContain("metadata_only:");
+    expect(stable).toContain("type: boolean");
+    expect(stable).toContain("default: false");
+    expect(stable).toContain("OPEN_DESIGN_RELEASE_DRY_RUN: ${{ inputs.publish && 'false' || inputs.metadata_only && 'metadata' || 'prepublish' }}");
     expect(stable).toContain("run_prepublish_jobs: ${{ steps.stable.outputs.run_prepublish_jobs }}");
     expect(stable).toContain("publish_side_effects_enabled: ${{ steps.stable.outputs.publish_side_effects_enabled }}");
-    expect(stable).toContain("if: ${{ needs.metadata.outputs.run_prepublish_jobs == 'true' }}");
+    expect(stable).toContain("needs.metadata.outputs.run_prepublish_jobs == 'true'");
     expect(stable).toContain("RELEASE_DRY_RUN_MODE: ${{ needs.metadata.outputs.dry_run_mode }}");
     expect(stable).toContain("RELEASE_PUBLISH_SIDE_EFFECTS: ${{ needs.metadata.outputs.publish_side_effects_enabled }}");
     expect(stable).toContain("pnpm exec tools-release prepare-github-assets");

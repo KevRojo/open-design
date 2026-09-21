@@ -144,9 +144,9 @@ beta runs Plan-selected tests without requesting a native product; existing
 frozen Plan references. Each test workload publishes only
 after its complete declared shard set succeeds, independently of other tests.
 Distribution may publish while tests run; downloaded-artifact validation joins
-the test and publication branches without making tests a CDN gate. Prerelease has
-no Linux input, workload, output, metadata, smoke, or notification row; stable and
-preview keep their optional Linux policy independently. Beta and prerelease prepare
+the test and publication branches without making tests a CDN gate. Prerelease and
+stable have no Linux input, workload, output, metadata, or smoke row; preview keeps
+its optional Linux policy independently. Beta, prerelease, and stable prepare
 metadata and Plan in one root job, reusing the source checkout unless
 the workflow control SHA differs. Release build and single-job test results publish
 in place through the thin convergence action; product directories go directly to
@@ -156,8 +156,10 @@ steps success boundary, using step outcomes rather than continue-on-error conclu
 The current run/attempt/commit/runner evidence is still checked against GitHub.
 Multi-job workloads retain their all-shard join; no one shard can publish group success.
 CI keeps its separate trusted writer and does not accept local release assertions.
-Test cache publication does not gate beta publication. Stable's
-existing validation gates remain intact. Prefer shallow checkouts; when beta needs
+Test cache publication does not gate beta publication. Stable consumes only explicitly
+shared prerelease recipes, retains its promotion and quality gates, and always rebuilds
+the stable-specific signed distribution layer. Its `publish` input defaults to false,
+which runs the complete prepublish path without public side effects. Prefer shallow checkouts; when beta needs
 the stable version floor, tools-release reads remote tag names explicitly instead
 of assuming a shallow checkout contains every tag or downloading full history.
 
