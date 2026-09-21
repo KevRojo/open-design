@@ -17,6 +17,7 @@ import {
   deletePreviewComment,
   ensureWorkspaceProject,
   getConversation,
+  getProjectCommentReadState,
   getPreviewComment,
   getProjectPreviewComment,
   getWorkspaceProject,
@@ -56,6 +57,7 @@ const target = {
 let server: http.Server | null = null;
 let tempRoot = '';
 let db: ReturnType<typeof openDatabase> | null = null;
+let requestAudit: Array<{ method: string; path: string; body: unknown }> = [];
 
 function context(memberId: string): WorkspaceCollabContext {
   return {
@@ -107,7 +109,12 @@ async function startRouteServer() {
   insertConversation(db, { id: CONVERSATION, projectId: PROJECT, title: 'CLI', createdAt: 1, updatedAt: 1 });
   ensureWorkspaceProject(db, { projectId: PROJECT, workspaceId: WORKSPACE, visibility: 'team', createdByWorkspaceMemberId: OWNER });
   const app = express();
+  requestAudit = [];
   app.use(express.json({ limit: '4mb' }));
+  app.use((req, _res, next) => {
+    requestAudit.push({ method: req.method, path: req.path, body: req.body });
+    next();
+  });
   registerProjectCommentRoutes(app, {
     db,
     projectStore: { updateProject, getWorkspaceProject, getWorkspaceProjectByProjectId } as any,
@@ -166,6 +173,55 @@ describe('od comment CLI HTTP/SQLite route integration', () => {
     const deleted = await runCli(['comment', 'delete', PROJECT, CONVERSATION, created.id, ...common]);
     expect(deleted.code).toBe(0);
     expect(getPreviewComment(db!, PROJECT, CONVERSATION, created.id)).toBeNull();
+  });
+
+  it('persists CLI read markers through the production route with clamp, isolation, and reopen durability', async () => {
+    const base = await startRouteServer();
+    const common = ['--daemon-url', base, '--json'];
+    const ownerScope = `${WORKSPACE}:${OWNER}`;
+    const otherScope = `${WORKSPACE}:${OTHER}`;
+    const suppliedReadAt = Date.now() - 10_000;
+
+    const initial = await runCli(['comment', 'read', PROJECT, '--read-at', String(suppliedReadAt), ...headers(OWNER), ...common]);
+    expect(initial.code).toBe(0);
+    expect(JSON.parse(initial.stdout)).toEqual({ projectId: PROJECT, lastReadAt: suppliedReadAt });
+    expect(requestAudit).toEqual([{ method: 'PUT', path: `/api/projects/${PROJECT}/comments/read`, body: { readAt: suppliedReadAt } }]);
+    expect(getProjectCommentReadState(db!, PROJECT, ownerScope)).toEqual({ projectId: PROJECT, lastReadAt: suppliedReadAt });
+
+    const futureReadAt = Date.now() + 60_000;
+    const clampStartedAt = Date.now();
+    const clamped = await runCli(['comment', 'read', PROJECT, '--read-at', String(futureReadAt), ...headers(OWNER), ...common]);
+    const clampFinishedAt = Date.now();
+    expect(clamped.code).toBe(0);
+    const clampedState = JSON.parse(clamped.stdout) as { projectId: string; lastReadAt: number };
+    expect(clampedState.projectId).toBe(PROJECT);
+    expect(clampedState.lastReadAt).toBeGreaterThanOrEqual(clampStartedAt);
+    expect(clampedState.lastReadAt).toBeLessThanOrEqual(clampFinishedAt);
+    expect(clampedState.lastReadAt).toBeLessThan(futureReadAt);
+
+    const lower = await runCli(['comment', 'read', PROJECT, '--read-at', String(suppliedReadAt), ...headers(OWNER), ...common]);
+    expect(lower.code).toBe(0);
+    expect(JSON.parse(lower.stdout)).toEqual(clampedState);
+
+    const other = await runCli(['comment', 'read', PROJECT, '--read-at', String(suppliedReadAt), ...headers(OTHER), ...common]);
+    expect(other.code).toBe(0);
+    expect(JSON.parse(other.stdout)).toEqual({ projectId: PROJECT, lastReadAt: suppliedReadAt });
+    expect(getProjectCommentReadState(db!, PROJECT, ownerScope)).toEqual(clampedState);
+    expect(getProjectCommentReadState(db!, PROJECT, otherScope)).toEqual({ projectId: PROJECT, lastReadAt: suppliedReadAt });
+
+    const auditBeforeFailures = requestAudit.length;
+    const unauthorized = await runCli(['comment', 'read', PROJECT, '--read-at', String(futureReadAt), ...headers('member-intruder'), ...common]);
+    expect(unauthorized.code).not.toBe(0);
+    expect(requestAudit).toHaveLength(auditBeforeFailures + 1);
+    const invalid = await runCli(['comment', 'read', PROJECT, '--read-at', 'not-a-number', ...headers(OWNER), ...common]);
+    expect(invalid.code).toBe(2);
+    expect(requestAudit).toHaveLength(auditBeforeFailures + 1);
+    expect(getProjectCommentReadState(db!, PROJECT, ownerScope)).toEqual(clampedState);
+
+    closeDatabase();
+    db = openDatabase(tempRoot);
+    expect(getProjectCommentReadState(db, PROJECT, ownerScope)).toEqual(clampedState);
+    expect(getProjectCommentReadState(db, PROJECT, otherScope)).toEqual({ projectId: PROJECT, lastReadAt: suppliedReadAt });
   });
 
   it('passes long multibyte prompt files and stdin through the route into SQLite', async () => {
