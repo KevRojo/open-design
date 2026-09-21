@@ -174,9 +174,10 @@ function reactComponentFile(): ProjectFile {
 // copy-link / `fileViewer.unpublishFile` pair.
 const PUBLISH_ROW = /generate and copy link|get a share link/i;
 const UNPUBLISH_ROW = /stop sharing/i;
-// `fileViewer.publishingFile` — the row's in-flight label, and therefore the
+// HTML uses `fileViewer.uploadingFile`; the legacy React card still uses
+// `fileViewer.publishingFile`. Both labels identify the in-flight row, and the
 // state the publish handler leaves behind only once its `finally` has run.
-const BUSY_PUBLISH_ROW = /creating link/i;
+const BUSY_PUBLISH_ROW = /creating link|uploading/i;
 // Either settled shape of the panel: the idle publish row, or the copy-link
 // control that replaces it once a published URL is committed.
 const SETTLED_PUBLISH_PANEL = /generate and copy link|get a share link|copy share link/i;
@@ -367,7 +368,7 @@ describe('publish flow analytics', () => {
       // Wait for the operation's own completion signal rather than timer turns.
       // The handler clears `publishingPublicFile` in its `finally`, strictly
       // after the point where the result event would have been emitted, so the
-      // panel leaving its "Creating link…" state proves the continuation ran
+      // panel leaving its busy state proves the continuation ran
       // past the emission site. A retained viewer renders no chrome at all, so
       // switch back first to observe it — the inactive window has already
       // closed, and an event emitted during it would still be recorded.

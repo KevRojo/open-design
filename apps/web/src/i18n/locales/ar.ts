@@ -3258,6 +3258,7 @@ export const ar: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'جارٍ إنشاء الرابط…',
+  "fileViewer.uploadingFile": "جارٍ الرفع",
   "fileViewer.publishingContinuesOnClose": "لن يؤدي إغلاق هذه اللوحة إلى مقاطعة الرفع.",
   'fileViewer.unpublishFile': 'إيقاف المشاركة',
   'fileViewer.shareEmptyStateTitle': 'لا يوجد شيء للمشاركة بعد',

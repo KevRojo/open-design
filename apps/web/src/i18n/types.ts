@@ -4170,6 +4170,7 @@ export interface Dict {
    *  for the "no loading state, looks like nothing happened" report
    *  (recvqae7v8yMlk). */
   'fileViewer.publishingFile': string;
+  'fileViewer.uploadingFile': string;
   'fileViewer.publishingContinuesOnClose': string;
   'fileViewer.unpublishFile': string;
   /** @deprecated Orphaned (recvqgif6Xa7Wb): rendered the "no team to share

@@ -3251,6 +3251,7 @@ export const ru: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.publishingFile': 'Создание ссылки…',
+  "fileViewer.uploadingFile": "Загрузка",
   "fileViewer.publishingContinuesOnClose": "Закрытие этой панели не прервёт загрузку.",
   'fileViewer.unpublishFile': 'Прекратить доступ',
   'fileViewer.shareEmptyStateTitle': 'Пока нечем делиться',

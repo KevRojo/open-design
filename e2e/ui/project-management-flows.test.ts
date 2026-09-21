@@ -2753,7 +2753,7 @@ for (const origin of ['artifact-card', 'toolbar'] as const) {
       await expect(progress).toHaveCSS('height', '32px');
       await expect(progress).toHaveCSS('border-radius', '6px');
       await expect(progress).toHaveCSS('background-color', 'rgb(110, 110, 112)');
-      const busy = menu.getByRole('menuitem', { name: /Creating link.*\d+%/ });
+      const busy = menu.getByRole('menuitem', { name: /Uploading.*\d+%/ });
       await expect(busy).toBeDisabled();
       const spinner = busy.locator('.icon-spin');
       await expect(spinner).toHaveCSS('width', '13px');

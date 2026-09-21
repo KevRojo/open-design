@@ -239,7 +239,7 @@ export function ShareTab({
                           ) : null}
                         </div>
                       ) : (
-                        <PublishProgressFrame value={publishProgress} label={t('fileViewer.publishingFile')}>
+                        <PublishProgressFrame value={publishProgress} label={t('fileViewer.uploadingFile')}>
                         <Button
                           type="button"
                           className={`${styles.copyButton}${publishingPublicFile && publishProgress !== null ? ` ${styles.publishingButton}` : ''}`}
@@ -272,7 +272,7 @@ export function ShareTab({
                             </svg>
                           )}
                           <span>{publishingPublicFile
-                            ? `${t('fileViewer.publishingFile')}${publishProgress !== null ? ` ${Math.round(publishProgress * 100)}%` : ''}`
+                            ? `${t('fileViewer.uploadingFile')}${publishProgress !== null ? ` ${Math.round(publishProgress * 100)}%` : ''}`
                             : publishFailureKey === 'fileViewer.publishFileFailed' || publishFailureKey === 'fileViewer.publishFileTooLarge'
                               ? t('preview.retry')
                               : t('fileViewer.generateAndCopyLink')}</span>

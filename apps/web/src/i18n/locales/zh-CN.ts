@@ -3423,6 +3423,7 @@ export const zhCN: Dict = {
   "fileViewer.openFileRequired": "打开文件后可用。",
   "fileViewer.publishFile": "发布文件",
   "fileViewer.publishingFile": "生成中…",
+  "fileViewer.uploadingFile": "上传中",
   "fileViewer.publishingContinuesOnClose": "关闭面板不会中断上传。",
   "fileViewer.unpublishFile": "停止分享",
   "fileViewer.shareEmptyStateTitle": "暂时无法分享",

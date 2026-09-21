@@ -34,6 +34,11 @@ const uploadPath = 'M12 15V4m-4 4 4-4 4 4M5 20h14';
 const firstProps = (overrides: Partial<Props> = {}) => props({ filePublished: false, ...overrides });
 
 describe('S1 first-publish visual seam', () => {
+  it.each(['artifact-card', 'toolbar'] as const)('%s uses the S2 uploading label for both visible and accessible progress', menuOrigin => {
+    render(<ShareTab {...firstProps({ menuOrigin, t: key => zhCN[key], publishingPublicFile: true, publishProgress: 0.45 })} />);
+    expect(screen.getByRole('menuitem', { name: '上传中 45%' })).toBeDisabled();
+    expect(screen.getByRole('progressbar', { name: '上传中' })).toHaveAttribute('value', '0.45');
+  });
   it.each(['artifact-card', 'toolbar'] as const)('%s explains closing only while publishing, not while stopping', (menuOrigin) => {
     const input = firstProps({ menuOrigin, t: key => zhCN[key] });
     const hint = '关闭面板不会中断上传。';
@@ -58,7 +63,7 @@ describe('S1 first-publish visual seam', () => {
     render(<ShareTab {...input} />);
     const button = screen.getByRole('menuitem');
     const progress = screen.getByRole('progressbar');
-    expect(button).toHaveTextContent(`fileViewer.publishingFile ${Math.round(publishProgress * 100)}%`);
+    expect(button).toHaveTextContent(`fileViewer.uploadingFile ${Math.round(publishProgress * 100)}%`);
     expect(button).toBeDisabled();
     expect(progress).toHaveAttribute('value', String(publishProgress));
     expect(progress.parentElement).toBe(button.parentElement);
@@ -112,7 +117,7 @@ describe('S1 first-publish visual seam', () => {
     fireEvent.click(button);
     expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
     if (restriction === 'publishingPublicFile') {
-      expect(button).toHaveTextContent('fileViewer.publishingFile');
+      expect(button).toHaveTextContent('fileViewer.uploadingFile');
       const spinner = button.querySelector('.icon-spin');
       expect(spinner).not.toBeNull();
       for (const [name, value] of Object.entries({ width: '13', height: '13', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
