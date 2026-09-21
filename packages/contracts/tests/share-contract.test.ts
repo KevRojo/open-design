@@ -143,6 +143,30 @@ describe('share contract · share state', () => {
     expect([...SHARE_STATUSES]).toEqual(['none', 'preparing', 'active', 'stopped']);
   });
 
+  /**
+   * D142. The lifecycle must stay a four-state enum living in ONE place.
+   *
+   * Two lanes each built a share store; one carried `status`, the other an
+   * `enabled` boolean. Two stop switches, nothing keeping them equal — stop
+   * through one path and the page still serves content while comments answer
+   * 410 Gone. Both halves passed their own tests.
+   *
+   * These two assertions pin the property that makes a boolean unable to
+   * stand in: `none` and `stopped` are BOTH not-live, yet must stay
+   * distinguishable, because "stopped" is what lets the same slug resume.
+   * Collapse the union to two states and this goes red.
+   */
+  it('keeps `none` and `stopped` distinct although neither is live', () => {
+    const state = (status: ProjectShareState['status']): ProjectShareState => ({
+      projectId: 'p',
+      status,
+    });
+    expect(hasActiveShare(state('none'))).toBe(hasActiveShare(state('stopped')));
+    expect(state('none').status).not.toBe(state('stopped').status);
+    // A boolean lifecycle has at most two values; this one must not.
+    expect(new Set(SHARE_STATUSES).size).toBeGreaterThan(2);
+  });
+
   it('treats only `active` as a live share', () => {
     const state = (status: ProjectShareState['status']): ProjectShareState => ({
       projectId: 'p',

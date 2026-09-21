@@ -73,6 +73,24 @@ export const SHARE_URL_PATH_SEGMENT = 'artifact';
  * refused with {@link ShareCommentErrorCode} `SHARE_NOT_FOUND` — the same
  * answer an unknown slug gets, so the mismatch does not confirm that either
  * half exists.
+ *
+ * ## This is the ONLY authority for whether a share is live
+ *
+ * `status` here is the single truth for the share's lifecycle. Whatever
+ * stores the share's CONTENT — the alias row that points at the current
+ * published version — must carry the version pointer and nothing else. It
+ * must not carry its own `enabled` / `active` / `deleted` flag.
+ *
+ * This is not a style preference. Two lifecycle flags means two stop
+ * switches, and nothing keeps them equal: stopping through one path leaves
+ * the other saying "live", so the page serves content while comments answer
+ * 410 Gone, or the reverse. Both halves look correct in isolation and their
+ * own tests pass.
+ *
+ * Note the shape of the truth as well as its location: the lifecycle is a
+ * four-state enum ({@link SHARE_STATUSES}), not a boolean. A boolean cannot
+ * distinguish `none` from `stopped`, which is what makes "stop preserves the
+ * binding so the same slug can resume" expressible at all.
  */
 export interface ShareBindingLookup {
   projectId: string;
