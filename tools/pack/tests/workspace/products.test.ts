@@ -40,13 +40,15 @@ afterEach(() => {
 });
 
 describe("workspace product boundary", () => {
-  it("retries a transient connection failure once without rebuilding outputs", async () => {
+  it("recovers repeated transient connection failures within the bounded retry window", async () => {
     const f = fixture();
     const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
     const descriptor = source(f.root, archive);
-    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("fetch failed", { cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) }));
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new TypeError("fetch failed", { cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) }))
+      .mockRejectedValueOnce(new TypeError("fetch failed", { cause: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }) }));
     expect(await importWorkspaceOutputs(f.root, f.scratch, descriptor)).toBeGreaterThan(0);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it.each([404, 403, 503])("bounds HTTP %s recovery without changing existing outputs", async (status) => {
@@ -55,7 +57,7 @@ describe("workspace product boundary", () => {
     const descriptor = source(f.root, archive);
     vi.mocked(fetch).mockImplementation(async () => new Response("unavailable", { status }));
     await expect(importWorkspaceOutputs(f.root, f.scratch, descriptor)).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(status === 503 ? 2 : 1);
+    expect(fetch).toHaveBeenCalledTimes(status === 503 ? 4 : 1);
     expect(readFileSync(join(f.root, "apps/daemon/dist/cli.js"), "utf8")).toBe("export {};\n");
   });
 
@@ -64,7 +66,7 @@ describe("workspace product boundary", () => {
     const archive = exportWorkspaceOutputs(f.root, join(f.root, "export"), [f.output], ["daemon"]);
     const descriptor = source(f.root, archive);
     vi.mocked(fetch).mockRejectedValue(new TypeError("fetch failed", { cause: { code } }));
-    const attempts = code === "ECONNRESET" ? 2 : 1;
+    const attempts = code === "ECONNRESET" ? 4 : 1;
     await expect(importWorkspaceOutputs(f.root, f.scratch, descriptor)).rejects.toThrow(
       `workspace product request failed after ${attempts} request(s): ${code}`,
     );

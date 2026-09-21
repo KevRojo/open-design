@@ -1,5 +1,6 @@
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createTarArchive, downloadCopyAndClear, extractArchive, listArchive, readTarEntry } from "@open-design/download";
 import { WORKSPACE_BUILD_UNITS as units, type WorkspaceBuildUnit as Unit } from "./units.js";
 import { workspaceBuildUnitResult } from "../workspace-build.js";
@@ -8,27 +9,32 @@ type Output = { schemaVersion: number; unit: Unit; platform?: string; arch?: str
 export type WorkspaceSource = { unit: Unit; url: string; sha256: string };
 
 // Recovery belongs to transport, never to build selection. Missing/invalid
-// products remain failures; only enumerated transient requests get one retry.
+// products remain failures; only enumerated transient requests get a small,
+// bounded backoff window. A single immediate retry is too narrow for the short
+// R2 edge/network stalls seen by parallel release consumers.
 function workspaceFetch(signal: AbortSignal): typeof globalThis.fetch {
-  let retried = false;
+  let transientFailures = 0;
+  const retryDelaysMs = [100, 300, 900];
   const transientStatuses = new Set([429, 500, 502, 503, 504]);
   const transientCodes = new Set(["ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"]);
   return async (input, init) => {
     for (;;) {
       try {
         const response = await globalThis.fetch(input, { ...init, signal });
-        if (retried || !transientStatuses.has(response.status)) return response;
+        if (!transientStatuses.has(response.status) || transientFailures >= retryDelaysMs.length) return response;
         await response.body?.cancel();
       } catch (error) {
         const cause = error instanceof Error && error.cause != null ? error.cause : error;
         const code = typeof cause === "object" && cause != null && "code" in cause ? String(cause.code) : "";
-        if (retried || signal.aborted || !transientCodes.has(code)) {
-          throw new Error(`workspace product request failed after ${retried ? 2 : 1} request(s): ${code || (error instanceof Error ? error.name : "unknown")}`, { cause: error });
+        if (transientFailures >= retryDelaysMs.length || signal.aborted || !transientCodes.has(code)) {
+          throw new Error(`workspace product request failed after ${transientFailures + 1} request(s): ${code || (error instanceof Error ? error.name : "unknown")}`, { cause: error });
         }
         process.stderr.write(`[tools-pack workspace] transient connection error code=${code}\n`);
       }
-      retried = true;
-      process.stderr.write("[tools-pack workspace] transient product request failed; retrying once\n");
+      const delayMs = retryDelaysMs[transientFailures];
+      transientFailures += 1;
+      process.stderr.write(`[tools-pack workspace] transient product request failed; retry ${transientFailures}/${retryDelaysMs.length} in ${delayMs}ms\n`);
+      await sleep(delayMs, undefined, { signal });
     }
   };
 }
