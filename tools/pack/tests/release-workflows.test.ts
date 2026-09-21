@@ -342,6 +342,8 @@ describe("release workflows", () => {
     expect(countOccurrences(win, "--require-vela-cli")).toBe(2);
     expect(mac.match(/RELEASE_ARTIFACT_MODE: dmg-and-payload/g)?.length ?? 0).toBe(2);
     expect(macX64.match(/RELEASE_ARTIFACT_MODE: \$\{\{ inputs\.mac_x64_target == 'all' && 'all' \|\| 'dmg-and-payload' \}\}/g)?.length ?? 0).toBe(2);
+    expect(macX64.match(/RELEASE_REPORT_DIR: \$\{\{ runner\.temp \}\}\/release-report\/mac_x64/g)?.length ?? 0).toBe(2);
+    expect(macX64).toContain("RELEASE_REPORT_ZIP_PATH: ${{ runner.temp }}/release-report/mac_x64-report.zip");
     expect(mac).toContain("exec tools-pack mac package");
     expect(mac).toContain("build_args+=(--signed --notarize)");
     expect(mac).toContain("Build beta mac_arm64 update fixture");

@@ -1188,6 +1188,8 @@ jobs:
           RELEASE_MANIFEST_DIR: ${{ runner.temp }}/release-platform-manifests
           RELEASE_OUTPUTS_PATH: ${{ runner.temp }}/release-platform-outputs/mac_x64.json
           RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
+          RELEASE_REPORT_DIR: ${{ runner.temp }}/release-report/mac_x64
+          RELEASE_REPORT_ZIP_PATH: ${{ runner.temp }}/release-report/mac_x64-report.zip
           RELEASE_SIGNED: ${{ inputs.mac_x64_sign_mode != 'no' && 'true' || 'false' }}
           RELEASE_STORAGE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_RELEASES_AK }}
           RELEASE_STORAGE_BUCKET: ${{ secrets.CLOUDFLARE_R2_RELEASES_BUCKET }}
