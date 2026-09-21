@@ -693,3 +693,65 @@ export interface ProjectCommentReadRequest {
   /** Epoch ms. Server-clamped: a client clock ahead of the server cannot hide future comments. */
   readAt: number;
 }
+
+/* ------------------------------------------------------------------ *
+ * Delete-time residual cleanup
+ * ------------------------------------------------------------------ */
+
+/**
+ * The project was deleted locally, but stopping its public share did not
+ * finish.
+ *
+ * Deleting a shared project is two effects against two systems: the local
+ * project row goes away, and the cloud binding that keeps the public link
+ * serving has to be stopped. The second one crosses the network and can fail
+ * on its own — expired credentials, the cloud being down, the account no
+ * longer authorized for that project.
+ *
+ * ## Why this cannot be folded into the delete's success flag
+ *
+ * Failing the whole delete would be wrong: the project IS gone, and telling
+ * the user it was not would make them try again against something that no
+ * longer exists. Succeeding silently would be worse: a link they believe they
+ * just revoked is still serving their content to anyone holding it. That is a
+ * privacy-visible outcome, and it is exactly the one an `ok: true` with no
+ * further shape cannot say.
+ *
+ * So the delete reports success AND carries this. One response, two facts.
+ *
+ * ## `retrying` is the difference between a notice and an alarm
+ *
+ * `true` means the stop was queued and the daemon will keep attempting it;
+ * the user needs to know the link may be briefly live, not to do anything.
+ * `false` means nothing further will happen on its own and the link stays up
+ * until someone acts. Collapsing the two produces either a scary banner for a
+ * self-healing case, or a calm one for a case that needs a person.
+ *
+ * ## Exactly once
+ *
+ * This is delivered on the delete response and nowhere else. The project is
+ * gone, so there is no row left to hang a persistent indicator on, and no
+ * later request will rediscover the condition. A surface that drops it drops
+ * it permanently — which is why it rides the response every consumer already
+ * reads rather than a separate channel one of them might not subscribe to.
+ */
+export interface ProjectDeleteShareResidual {
+  /** The public slug that may still be serving. */
+  slug: string;
+  /** Will the daemon keep trying on its own? */
+  retrying: boolean;
+  /** The failure's error code, when the stop attempt produced one. */
+  code?: string;
+}
+
+/**
+ * `DELETE /api/projects/:projectId` response.
+ *
+ * `ok` describes the LOCAL delete only. It stays `true` when
+ * {@link ProjectDeleteShareResidual} is present — see that type for why.
+ */
+export interface ProjectDeleteResponse {
+  ok: true;
+  /** Absent means the project had no live share, or the stop succeeded. */
+  shareResidual?: ProjectDeleteShareResidual;
+}
