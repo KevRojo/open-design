@@ -315,6 +315,12 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 // assertions make it a property of the types. Each `@ts-expect-error` below is
 // itself checked — if the field came back, TypeScript would report the directive
 // as unused and `pnpm typecheck` would fail on this file.
+//
+// What they do NOT cover is every consumer of the hook. `touchpointLeaseValue`
+// is applied at the three production placements; `TestCampaignModal` is a
+// fourth consumer and retains whole decisions, timing included, on purpose —
+// see the helper's own docblock. So this describes the helper's contract, not a
+// property of `useTouchpointLifecycle`.
 describe("the lease value carries content identity, never authorization timing", () => {
 	type ServerDecision = Readonly<{
 		activityId: string;
