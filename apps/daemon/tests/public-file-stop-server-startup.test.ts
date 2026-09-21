@@ -1,9 +1,12 @@
 import { expect, it, vi } from 'vitest';
 import { startServer, type StartServerResult } from '../src/server.js';
 import * as publications from '../src/collab/public-file-publication-store.js';
+import * as velaStop from '../src/collab/vela-public-file-stop.js';
 
 it('runs the real shared SQLite queue consumer once after server startup, deferring unavailable stops', async () => {
   const key = { resourceTeamId: 'startup-team', ownerMemberId: 'startup-owner', projectId: 'already-deleted', filePath: 'index.html', slug: 'still-public' };
+  const prepare = vi.fn(async () => null);
+  const adapterSpy = vi.spyOn(velaStop, 'createVelaPublicFileStop').mockReturnValue(prepare);
   const createStore = publications.createSqlitePublicFilePublicationStore;
   const createStartup = publications.createPublicFileStopStartup;
   const stores: publications.StopQueuePublicFilePublicationStore[] = [];
@@ -14,9 +17,10 @@ it('runs the real shared SQLite queue consumer once after server startup, deferr
     stores.push(store);
     return store;
   });
-  const startupSpy = vi.spyOn(publications, 'createPublicFileStopStartup').mockImplementation((store, prepare) => {
-    expect(prepare).toBeNull(); // Production TODO is unavailable, not simulated success.
-    const run = vi.fn(createStartup(store, prepare));
+  const startupSpy = vi.spyOn(publications, 'createPublicFileStopStartup').mockImplementation((store, prepareStop, mutations) => {
+    expect(prepareStop).toBe(prepare);
+    expect(mutations).toEqual({ run: expect.any(Function) });
+    const run = vi.fn(createStartup(store, prepareStop, mutations));
     runs.push(run);
     return run;
   });
@@ -24,7 +28,8 @@ it('runs the real shared SQLite queue consumer once after server startup, deferr
   try {
     started = await startServer({ port: 0, returnServer: true }) as StartServerResult;
     expect(stores).toHaveLength(1);
-    expect(startupSpy).toHaveBeenCalledWith(stores[0], null);
+    expect(startupSpy).toHaveBeenCalledWith(stores[0], prepare, expect.objectContaining({ run: expect.any(Function) }));
+    expect(adapterSpy).toHaveBeenCalled();
     expect(runs).toHaveLength(1);
     const run = runs[0];
     const store = stores[0];
@@ -37,6 +42,7 @@ it('runs the real shared SQLite queue consumer once after server startup, deferr
   } finally {
     await started?.shutdown();
     if (started) await new Promise<void>((resolve) => started!.server.close(() => resolve()));
+    adapterSpy.mockRestore();
     startupSpy.mockRestore();
     storeSpy.mockRestore();
   }

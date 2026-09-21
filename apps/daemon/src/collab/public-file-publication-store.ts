@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { PublicFileMutations } from './public-file-mutations.js';
 import { cancelPersonalCommentRelayOutbox } from './comment-relay-outbox.js';
 import { randomUUID } from 'node:crypto';
 
@@ -393,12 +394,13 @@ interface PublicFileStopStartupResult {
 export function createPublicFileStopStartup(
   store: StopQueuePublicFilePublicationStore,
   prepare: PreparePublicFileStop | null,
+  mutations?: PublicFileMutations,
 ): () => Promise<PublicFileStopStartupResult> {
   let started: Promise<PublicFileStopStartupResult> | undefined;
   return () => started ??= Promise.resolve().then(async () => {
     const result = { stopped: 0, failed: 0, deferred: 0, persistenceFailures: 0 };
     const seen = new Set<string>();
-    for (const task of store.listRetryableStops()) {
+    const processTask = async (task: PublicFileStopTask): Promise<void> => {
       const key: PublicFileStopTaskKey = {
         resourceTeamId: task.resourceTeamId,
         ownerMemberId: task.ownerMemberId,
@@ -407,7 +409,7 @@ export function createPublicFileStopStartup(
         slug: task.slug,
       };
       const id = stopTaskKey(key);
-      if (seen.has(id)) continue;
+      if (seen.has(id)) return;
       seen.add(id);
       const stillOwnsTask = () => {
         const currentTask = store.listStops().find(item => stopTaskKey(item) === id);
@@ -418,7 +420,7 @@ export function createPublicFileStopStartup(
         return !current || (current.slug === task.slug
           && current.token === task.publicationRevision);
       };
-      if (!stillOwnsTask()) { result.deferred++; continue; }
+      if (!stillOwnsTask()) { result.deferred++; return; }
       let operation: PreparedPublicFileStop | null = null;
       try { operation = await prepare?.(Object.freeze(key)) ?? null; } catch { /* No verified operation. */ }
       if (!operation
@@ -426,7 +428,7 @@ export function createPublicFileStopStartup(
         || operation.ownerMemberId !== key.ownerMemberId
         || !stillOwnsTask()) {
         result.deferred++;
-        continue;
+        return;
       }
       let failed = false;
       try { await operation.stop(); } catch { failed = true; }
@@ -434,7 +436,7 @@ export function createPublicFileStopStartup(
       try {
         if (!stillOwnsTask()) {
           result.deferred++;
-          continue;
+          return;
         }
         if (failed) {
           store.recordStopFailure(key);
@@ -444,7 +446,7 @@ export function createPublicFileStopStartup(
           if (current && (task.publicationRevision === undefined
             || !store.deleteIfRevisionMatches(key, { slug: task.slug, token: task.publicationRevision }))) {
             result.deferred++;
-            continue;
+            return;
           }
           store.completeStop(key);
           result.stopped++;
@@ -452,6 +454,10 @@ export function createPublicFileStopStartup(
       } catch {
         result.persistenceFailures++;
       }
+    };
+    for (const task of store.listRetryableStops()) {
+      if (mutations) await mutations.run(task.projectId, () => processTask(task));
+      else await processTask(task);
     }
     return result;
   });
