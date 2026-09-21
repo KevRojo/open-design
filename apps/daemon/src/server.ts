@@ -955,7 +955,7 @@ import {
 import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
-import { createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
+import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
 import {
   createActiveWorkspaceSelectionStore,
 } from './collab/active-workspace-selection.js';
@@ -5184,9 +5184,13 @@ export async function startServer({
     _scope: TeamMirrorPullScope,
     _version: number,
   ): Promise<void> => {};
+  const publicFilePublicationStore = createSqlitePublicFilePublicationStore(db);
+  // TODO(B12): supply the real Go binding-stop adapter, with credentials pinned
+  // to the queued principal. Never substitute snapshot-redact or report success.
+  const retryPublicFileStopsAtStartup = createPublicFileStopStartup(publicFilePublicationStore, null);
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
-    publicFilePublicationStore: createSqlitePublicFilePublicationStore(db),
+    publicFilePublicationStore,
     verifyWorkspaceRequest: verifiedWorkspaceContextForRequest,
     verifyWorkspaceReadRequest: verifiedWorkspaceReadContextForRequest,
     verifyWorkspaceScope: verifiedTeamMirrorScope,
@@ -18059,6 +18063,17 @@ export async function startServer({
           return;
         }
         resolvedPort = boundPort;
+        void retryPublicFileStopsAtStartup().then((result) => {
+          if (result.deferred || result.failed || result.persistenceFailures) {
+            console.warn(
+              `[od] public share cleanup incomplete: ${JSON.stringify(result)}; queued links may remain public`,
+            );
+          }
+        }).catch(() => {
+          console.warn(
+            "[od] public share cleanup could not read its queue; queued links may remain public",
+          );
+        });
         startAmrTerminalReportDeliveryAfterBind(amrTerminalReportDelivery, boundPort);
         messageEventPayloadHeal ??= startMessageEventPayloadHeal({ db });
         // When binding to all interfaces report localhost for local callers;
