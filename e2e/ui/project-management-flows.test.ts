@@ -2781,7 +2781,15 @@ for (const origin of ['artifact-card', 'toolbar'] as const) {
       await expect(hint).toHaveCSS('color', 'rgb(153, 153, 153)');
       await expect(hint).toHaveCSS('margin', '0px');
       await test.info().attach(`failure-recovery-${origin}-retry`, { body: await page.screenshot(), contentType: 'image/png' });
-      await menu.getByRole('button', { name: 'Close', exact: true }).click();
+      const close = menu.getByRole('button', { name: 'Close', exact: true });
+      const closeIcon = close.locator('svg');
+      for (const [name, value] of Object.entries({ width: '14', height: '14', viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'aria-hidden': 'true', focusable: 'false' })) {
+        await expect(closeIcon).toHaveAttribute(name, value);
+      }
+      await expect(closeIcon).toHaveCSS('width', '14px');
+      await expect(closeIcon).toHaveCSS('height', '14px');
+      await expect(closeIcon.locator('path')).toHaveAttribute('d', 'M4 4l8 8M12 4l-8 8');
+      await close.click();
       await expect(menu).toBeHidden();
       await page.clock.fastForward(500);
       if (origin === 'artifact-card') await page.getByTestId('artifact-card-publish-index.html').last().click();
