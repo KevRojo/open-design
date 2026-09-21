@@ -34,9 +34,12 @@
   font-size: 12px;
 }
 
-/* S1-T2 menu elevation/spacing; inherited anchoring and width remain intact. */
+/* S1-T2: canvas minimum width; grow for translations within the panel. */
 .panel :global(.chrome-access-options) {
   box-sizing: border-box;
+  width: max-content;
+  min-width: 168px;
+  max-width: 100%;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -50,6 +53,7 @@
 /* S1-T2 option-row skin; retain existing listbox anchoring and permission gates. */
 .panel :global(.chrome-access-options button) {
   box-sizing: border-box;
+  grid-template-columns: 13px minmax(0, 1fr);
   height: 28px;
   min-height: 28px;
   padding: 0 8px;
@@ -59,6 +63,26 @@
   color: #494949;
   font-size: 12px;
   font-weight: 400;
+}
+
+.panel :global(.chrome-access-options button > .share-menu-icon) {
+  display: none;
+}
+
+.panel :global(.chrome-access-options button > span:nth-child(2)) {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel :global(.chrome-access-options button > svg) {
+  grid-column: 1;
+  grid-row: 1;
+  width: 13px;
+  height: 13px;
 }
 
 .panel :global(.chrome-access-options button[aria-selected="true"]) {

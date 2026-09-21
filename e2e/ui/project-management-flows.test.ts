@@ -2738,7 +2738,19 @@ for (const published of [false, true]) {
       'border-radius': '8px', 'background-color': 'rgb(255, 255, 255)',
       'box-shadow': 'rgba(0, 0, 0, 0.07) 0px 6px 20px 0px, rgba(0, 0, 0, 0.024) 0px 1px 4px 0px',
     })) await expect(scopeMenu).toHaveCSS(property, value);
+    await expect(scopeMenu).toHaveCSS('min-width', '168px');
+    await expect(scopeMenu).toHaveCSS('width', '168px');
     const options = menu.getByRole('option');
+    for (const option of await options.all()) {
+      await expect(option.locator(':scope > .share-menu-icon')).toBeHidden();
+      const label = option.locator(':scope > span:nth-child(2)');
+      await expect(label).toHaveCSS('grid-column-start', '2');
+      expect(await label.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    }
+    const check = menu.getByRole('option', { selected: true }).locator(':scope > svg');
+    await expect(check).toHaveCSS('grid-column-start', '1');
+    await expect(check).toHaveCSS('width', '13px');
+    await expect(check).toHaveCSS('height', '13px');
     await expect(options).toHaveCount(2);
     for (const option of await options.all()) {
       for (const [property, value] of Object.entries({

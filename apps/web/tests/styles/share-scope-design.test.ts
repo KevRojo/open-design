@@ -15,7 +15,23 @@ describe('S1-T2 scope menu container', () => {
       border: '1px solid #00000008', 'border-radius': '8px', background: '#FFFFFF',
       'box-shadow': '0 6px 20px #00000012, 0 1px 4px #00000006',
     });
-    for (const property of ['position', 'top', 'left', 'right', 'width']) expect(values).not.toHaveProperty(property);
+    for (const property of ['position', 'top', 'left', 'right']) expect(values).not.toHaveProperty(property);
+  });
+});
+
+describe('S1-T2 leading selection layout', () => {
+  it('reserves one leading check column and fits translated labels', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const values = (selector: string) => {
+      const result: Record<string, string> = {};
+      css.walkRules(selector, rule => { rule.walkDecls(decl => { result[decl.prop] = decl.value; }); });
+      return result;
+    };
+    expect(values('.panel :global(.chrome-access-options)')).toMatchObject({ width: 'max-content', 'min-width': '168px', 'max-width': '100%' });
+    expect(values('.panel :global(.chrome-access-options button)')).toMatchObject({ 'grid-template-columns': '13px minmax(0, 1fr)' });
+    expect(values('.panel :global(.chrome-access-options button > .share-menu-icon)')).toMatchObject({ display: 'none' });
+    expect(values('.panel :global(.chrome-access-options button > span:nth-child(2))')).toMatchObject({ 'grid-column': '2', 'grid-row': '1' });
+    expect(values('.panel :global(.chrome-access-options button > svg)')).toMatchObject({ 'grid-column': '1', 'grid-row': '1', width: '13px', height: '13px' });
   });
 });
 
