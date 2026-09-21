@@ -13,6 +13,9 @@ import {
   SHARE_MAX_TOTAL_BYTES,
   SHARE_STATUSES,
   SHARE_URL_PATH_SEGMENT,
+  SHARE_COMMENTS_PATH_PREFIX,
+  SHARE_SNAPSHOT_DISCOVERY_IN_P0,
+  buildShareCommentsUrl,
   buildSharePath,
   hasActiveShare,
   isValidAuthorKey,
@@ -212,5 +215,49 @@ describe('share contract · comment API (I4)', () => {
     // ...and it is deliberately absent from the validation ORDER, because it
     // is not one of the four checks a comment body goes through.
     expect(SHARE_COMMENT_VALIDATION_ORDER).not.toContain('PAYLOAD_TOO_LARGE');
+  });
+});
+
+describe('share contract · public HTTP seam', () => {
+  it('puts the slug in the path and the project in the query', () => {
+    const url = buildShareCommentsUrl({
+      slug: 'snap-1',
+      projectId: 'proj-1',
+      filePath: 'index.html',
+    });
+    expect(url.startsWith(`${SHARE_COMMENTS_PATH_PREFIX}/snap-1/comments?`)).toBe(true);
+    const query = new URLSearchParams(url.split('?')[1]);
+    expect(query.get('projectId')).toBe('proj-1');
+    expect(query.get('filePath')).toBe('index.html');
+    // Absent rather than zero: `since=0` and "no cursor" are the same read
+    // today, but sending 0 explicitly invites treating it as a sentinel.
+    expect(query.has('since')).toBe(false);
+  });
+
+  it('carries the cursor when polling forward', () => {
+    const query = new URLSearchParams(
+      buildShareCommentsUrl({
+        slug: 's', projectId: 'p', filePath: 'f', since: 42,
+      }).split('?')[1],
+    );
+    expect(query.get('since')).toBe('42');
+  });
+
+  it('encodes a slug that would otherwise break out of its path segment', () => {
+    const url = buildShareCommentsUrl({
+      slug: 'a/b', projectId: 'p', filePath: 'f',
+    });
+    expect(url).toContain('/a%2Fb/comments');
+  });
+
+  /**
+   * A published snapshot is immutable and re-publishing mints a new slug, so
+   * a share link addresses one version forever. P0 has no transport for an
+   * open page to discover a newer one, and that is a decision rather than an
+   * omission: discovery would let a live share URL start serving different
+   * bytes than the person who sent it saw.
+   */
+  it('records that snapshot discovery is deliberately absent in P0', () => {
+    expect(SHARE_SNAPSHOT_DISCOVERY_IN_P0).toBe(false);
   });
 });

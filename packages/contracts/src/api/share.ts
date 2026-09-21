@@ -409,7 +409,13 @@ export const SHARE_COMMENT_ERROR_CODES = [
   'SHARE_STOPPED',
   /** 404 — no share binding for this `(projectId, slug)` pair. */
   'SHARE_NOT_FOUND',
-  /** 400 — body empty or anchor malformed; payload overflow is PAYLOAD_TOO_LARGE. */
+  /**
+   * 400 — body empty or anchor malformed.
+   *
+   * NOT the answer for an oversized body: that is `PAYLOAD_TOO_LARGE`
+   * against {@link SHARE_COMMENT_MAX_BYTES}, because size is a transport
+   * fact rather than a judgement about the comment.
+   */
   'INVALID_COMMENT',
   /** 429 — per-viewer write throttle tripped; carries `retryAfterSeconds`. */
   'RATE_LIMITED',
@@ -491,3 +497,70 @@ export interface ShareCommentCreateRequest {
 export interface ShareCommentCreateResponse {
   comment: ShareComment;
 }
+
+/* ------------------------------------------------------------------ *
+ * Public HTTP seam
+ * ------------------------------------------------------------------ */
+
+/**
+ * The share page's public endpoints, frozen 2026-09-21.
+ *
+ * The page URL and the API URL are different things and only the first was
+ * frozen earlier, which left the share page unable to write a request without
+ * inventing one. These are the shapes the cloud actually serves.
+ *
+ * `{slug}` rides in the path and `projectId` in the query. That split is not
+ * arbitrary: the slug alone identifies the snapshot bytes, while the project
+ * is what scopes the comments, and keeping them in different positions makes
+ * it obvious at the call site that BOTH must be supplied. A request missing
+ * either half is refused as `SHARE_NOT_FOUND` — the same answer a mismatched
+ * pair gets, so probing learns nothing.
+ */
+export const SHARE_COMMENTS_PATH_PREFIX = '/api/v1/collab/share';
+
+/**
+ * `GET {prefix}/{slug}/comments?projectId=&filePath=&since=`
+ * → {@link ShareCommentListResponse}
+ *
+ * `since` is the `seq` cursor: pass back the previous response's `latestSeq`
+ * to poll forward. It is a DELTA read, not a full list, so a caller that
+ * discards its accumulated comments between polls will show an emptying page.
+ */
+export function buildShareCommentsUrl(input: {
+  slug: string;
+  projectId: string;
+  filePath: string;
+  since?: number;
+}): string {
+  const query = new URLSearchParams({
+    projectId: input.projectId,
+    filePath: input.filePath,
+  });
+  if (input.since !== undefined) query.set('since', String(input.since));
+  return `${SHARE_COMMENTS_PATH_PREFIX}/${encodeURIComponent(input.slug)}/comments?${query}`;
+}
+
+/**
+ * Snapshot metadata comes from the EXISTING public snapshot read, not from a
+ * new share-specific endpoint: `GET /api/v1/public/snapshots/{slug}` returns
+ * the manifest, which is where the entry file name comes from. There is no
+ * directory index and no `index.html` fallback, so the page must read the
+ * manifest before it can build an iframe `src`.
+ */
+export const PUBLIC_SNAPSHOT_PATH_PREFIX = '/api/v1/public/snapshots';
+
+/**
+ * A published snapshot is immutable and a re-publish mints a NEW slug, so a
+ * share link addresses one version forever.
+ *
+ * P0 deliberately has no "this page discovers a newer snapshot" transport.
+ * The owner who re-publishes shares the new link. Building discovery would
+ * mean a live share URL could start serving different bytes than the person
+ * who sent it saw, which is the property `resource_hub.snapshots` was
+ * designed to rule out ("Public, immutable, read-only capture of one
+ * version").
+ *
+ * This constant exists so the absence is a recorded decision rather than a
+ * gap someone fills in with a version poll.
+ */
+export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = false;

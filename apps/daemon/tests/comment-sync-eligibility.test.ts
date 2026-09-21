@@ -210,11 +210,11 @@ function resolveCommentWorkspaceContext(
   const binding = getWorkspaceProjectByProjectId(db, projectId) as
     | LocalBinding
     | undefined;
-  if (!binding?.workspaceId) return { ok: true, context: null };
+  if (!binding?.workspaceId) return { ok: true as const, context: null };
   if (binding.resourceState === 'deleted') {
     return {
-      ok: false,
-      status: 403,
+      ok: false as const,
+      status: 403 as const,
       code: 'WORKSPACE_PROJECT_PERMISSION_DENIED',
       message: 'workspace project read is not allowed',
     };
@@ -235,14 +235,26 @@ function resolveCommentWorkspaceContext(
     )
   ) {
     return {
-      ok: false,
-      status: 403,
+      ok: false as const,
+      status: 403 as const,
       code: 'WORKSPACE_PROJECT_PERMISSION_DENIED',
       message: 'workspace project access is not allowed',
     };
   }
+  // Transcribed VERBATIM from production, conditional spread included.
+  //
+  // Production writes `teamId: null` for a personal binding while the
+  // contract declares `teamId?: string`. It typechecks only because a spread
+  // is checked more loosely than a direct assignment — write
+  // `teamId: cond ? x : null` here instead and it goes red. So the spread is
+  // load-bearing for the transcription, not a stylistic leftover: changing
+  // it would make this fixture disagree with the code it exists to pin.
+  //
+  // The underlying divergence (production putting `null` in a `string |
+  // undefined` field) is recorded for lane ④ to resolve when this resolver
+  // is lifted out of `startServer` and becomes importable.
   return {
-    ok: true,
+    ok: true as const,
     context: {
       ...local.context,
       workspaceType: binding.visibility === 'team' ? 'team' : 'personal',
@@ -250,7 +262,21 @@ function resolveCommentWorkspaceContext(
         ? { teamId: binding.workspaceId }
         : { teamId: null }),
     },
-  };
+    // The ONE cast in this fixture, sitting exactly on the divergence it
+    // covers. Production writes `teamId: null` for a personal binding while
+    // `WorkspaceCollabContext` declares `teamId?: string`; that typechecks
+    // there only because the resolver lives inside `startServer`, unexported
+    // and unannotated, so nothing ever compares it to the declared type.
+    //
+    // Writing `undefined` here instead would make this fixture pin behaviour
+    // the code does not have — in the one file whose entire job is to pin
+    // behaviour the code DOES have. So the transcription stays verbatim and
+    // the mismatch is admitted here rather than smoothed away.
+    //
+    // A7: once this resolver is lifted out of `startServer` and becomes
+    // importable, delete the cast, import the real function, and settle
+    // whether `teamId: null` or `teamId?: string` is the truth.
+  } as { ok: true; context: WorkspaceCollabContext | null };
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +473,24 @@ async function startHarness() {
         projectId,
         capability,
       ),
+    // The cast is the ONE place this fixture stops being type-honest, and it
+    // is here rather than inside the transcription on purpose.
+    //
+    // Production writes `teamId: null` for a personal binding while
+    // `WorkspaceCollabContext` declares `teamId?: string`. That divergence
+    // typechecks in production only because the resolver lives inside
+    // `startServer`, is never exported, and is never annotated — so nothing
+    // ever compares it to the declared type. The transcription reproduces
+    // production verbatim, which means it inherits the divergence.
+    //
+    // Making the transcription type-clean would mean writing `undefined`
+    // where production writes `null`, i.e. pinning behaviour the code does
+    // not have. Casting here keeps the fixture honest about the code and
+    // localises the lie to one line with its reason attached.
+    //
+    // A7: when this resolver is lifted out of `startServer` and becomes
+    // importable, delete the cast, import the real function, and decide
+    // whether `teamId: null` or `teamId?: string` is the truth.
     resolveWorkspaceContext: async (req, projectId) =>
       resolveCommentWorkspaceContext(db, req, projectId),
     resolveReadWorkspaceContext: async (req, projectId) =>
@@ -487,8 +531,7 @@ async function startHarness() {
     onCommentUpdated: (comment, context) =>
       context ? collabCloud.enqueueComment(comment, context) : undefined,
     onCommentDeleted: (comment, context) =>
-      context ? collabCloud.enqueueCommentDeletion(comment, context) : undefined,
-  });
+      context ? collabCloud.enqueueCommentDeletion(comment, context) : undefined,  });
 
   const created = http.createServer(app);
   server = created;
