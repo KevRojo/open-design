@@ -1,9 +1,11 @@
+import { VELA_CLI_FAILURE_ENVELOPE_FIELDS } from '@open-design/contracts';
 import type {
   CollabCloudComment,
   CollabCloudMemberDirectoryEntry,
   CollabMemberRole,
   CollabPresenceMember,
 } from '@open-design/contracts';
+import { CollabCloudError } from '../integrations/collab-cloud.js';
 import {
   runVelaCommand,
   velaCommandStdout,
@@ -61,10 +63,19 @@ export function createVelaCliCollabClient(options: VelaCliCollabClientOptions = 
     if (!requestedWorkspaceId) {
       throw new Error('explicit workspace scope is required');
     }
-    const stdout = await run(args, requestedWorkspaceId, commandOptions);
+    let stdout: string;
+    try {
+      stdout = await run(args, requestedWorkspaceId, commandOptions);
+    } catch (error) {
+      throw collabCloudErrorFromVelaFailure(error) ?? error;
+    }
     const trimmed = stdout.trim();
     if (!trimmed) return {} as T;
-    return JSON.parse(trimmed) as T;
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch (cause) {
+      throw new Error('Invalid JSON from Vela collaboration command', { cause });
+    }
   }
 
   return {
@@ -121,6 +132,8 @@ export function createVelaCliCollabClient(options: VelaCliCollabClientOptions = 
         projectId,
         '--since-seq',
         String(sinceSeq),
+        '--author-kinds',
+        'member,user',
       ], _teamId);
       const comments = Array.isArray(payload.comments)
         ? (payload.comments as CollabCloudComment[])
@@ -183,6 +196,43 @@ export function createVelaCliCollabClient(options: VelaCliCollabClientOptions = 
 
 export type VelaCliCollabClient = ReturnType<typeof createVelaCliCollabClient>;
 
+/**
+ * Preserve a Vela command's machine-readable HTTP failure without ever
+ * classifying its human stderr. `runVelaCommand` carries rejected stdout, and
+ * structured command envelopes put the Go-defined fields at the root. Legacy
+ * nested `error.code` remains accepted; both fields are required so a code
+ * alone cannot cancel data.
+ */
+export function collabCloudErrorFromVelaFailure(error: unknown): CollabCloudError | null {
+  const stdout = error !== null && typeof error === 'object'
+    && typeof (error as { stdout?: unknown }).stdout === 'string'
+    ? (error as { stdout: string }).stdout.trim()
+    : '';
+  if (!stdout) return null;
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return null;
+  const root = envelope as Record<string, unknown>;
+  const nested = root[VELA_CLI_FAILURE_ENVELOPE_FIELDS.message];
+  const detail = nested !== null && typeof nested === 'object' && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : null;
+  const status = detail?.[VELA_CLI_FAILURE_ENVELOPE_FIELDS.status]
+    ?? root[VELA_CLI_FAILURE_ENVELOPE_FIELDS.status];
+  const code = detail?.code ?? root[VELA_CLI_FAILURE_ENVELOPE_FIELDS.code];
+  const message = detail?.message ?? root[VELA_CLI_FAILURE_ENVELOPE_FIELDS.message];
+  if (typeof status !== 'number' || !Number.isInteger(status) || typeof code !== 'string' || !code.trim()) return null;
+  return new CollabCloudError(
+    status,
+    code,
+    typeof message === 'string' ? message : undefined,
+  );
+}
+
 function toDirectoryEntry(input: MemberWire | undefined): CollabCloudMemberDirectoryEntry {
   const memberId = typeof input?.memberId === 'string' ? input.memberId : '';
   const displayName =
@@ -237,19 +287,28 @@ const PRESENCE_COMMAND_TIMEOUT_MS = 10_000;
 // Comment transport deadlines are retryable failures, never share lifecycle signals.
 const COMMENT_COMMAND_TIMEOUT_MS = 30_000;
 
-/** Only a complete, validated CLI envelope may supply HTTP status/code. */
-function commentCommandError(error: unknown): unknown {
+/** Only a validated CLI envelope may supply status/code; omitted Go status stays null. */
+function commentCommandError(error: unknown): Error {
+  const classified = collabCloudErrorFromVelaFailure(error);
+  if (classified) return classified;
+
+  const original = error instanceof Error
+    ? error
+    : new Error('Vela comment command failed', { cause: error });
   let payload: unknown;
-  try { payload = JSON.parse(velaCommandStdout(error)); } catch { return error; }
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return error;
+  try { payload = JSON.parse(velaCommandStdout(error)); } catch { return original; }
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return original;
   const wire = payload as Record<string, unknown>;
-  if (typeof wire.error !== 'string' || !wire.error.trim() ||
-      typeof wire.status !== 'number' || !Number.isInteger(wire.status) ||
-      wire.status < 400 || wire.status > 599 ||
-      typeof wire.errorCode !== 'string' || !/^[A-Za-z0-9_-]+$/.test(wire.errorCode)) return error;
-  return Object.assign(new Error(wire.error, { cause: error }), {
-    status: wire.status, code: wire.errorCode,
-  });
+  const message = wire[VELA_CLI_FAILURE_ENVELOPE_FIELDS.message];
+  const code = wire[VELA_CLI_FAILURE_ENVELOPE_FIELDS.code];
+  const statusValue = wire[VELA_CLI_FAILURE_ENVELOPE_FIELDS.status];
+  const status = typeof statusValue === 'number' && Number.isInteger(statusValue)
+    && statusValue >= 400 && statusValue <= 599
+    ? statusValue
+    : null;
+  if (typeof message !== 'string' || !message.trim() ||
+      typeof code !== 'string' || !/^[A-Za-z0-9_-]+$/.test(code)) return original;
+  return Object.assign(new Error(message, { cause: original }), { status, code });
 }
 
 const defaultRunVelaCollab: RunVelaCollab = (args, workspaceId, options) =>

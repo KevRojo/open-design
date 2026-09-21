@@ -21,6 +21,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { T } from '@/timeouts';
+import { captureVisual } from '@/playwright/visual';
 import { automatedUiScenarios } from '@/playwright/resources';
 import type { UiScenario } from '@/playwright/resources';
 
@@ -67,6 +68,13 @@ function stagedAttachmentName(page: Page, name: string): Locator {
   return page
     .locator('[data-testid="staged-attachments"], [data-testid="staged-contexts"]')
     .getByText(name, { exact: true });
+}
+
+/** Opt-in visual evidence from this real daemon-backed browser flow. */
+async function captureLane4CommentState(page: Page, state: string): Promise<void> {
+  if (!process.env.OD_VISUAL_OUTPUT_DIR) return;
+  test.setTimeout(120_000);
+  await captureVisual(page, `lane4-${state}`);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -345,15 +353,22 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(artifactPreview(page)).toBeVisible();
 
   await enterPreviewCommentMode(page);
+  const sidePanel = page.getByTestId('comment-side-panel');
+  await expect(sidePanel).toBeVisible();
+  await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(0);
+  await captureLane4CommentState(page, '06-panel-empty');
+  await captureLane4CommentState(page, '05-input-no-selection');
+
   await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
+  await captureLane4CommentState(page, '05-input-element-selected');
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toBeVisible();
 
-  const sidePanel = page.getByTestId('comment-side-panel');
-  await expect(sidePanel).toBeVisible();
   await expect(sidePanel.getByTestId('comment-side-item').filter({ hasText: 'Make the headline more specific.' }).first()).toBeVisible();
+  await captureLane4CommentState(page, '06-panel-populated');
+  await captureLane4CommentState(page, '06-author-self');
   await expect
     .poll(async () => {
       const selectAll = sidePanel.getByRole('button', { name: /select all/i }).first();

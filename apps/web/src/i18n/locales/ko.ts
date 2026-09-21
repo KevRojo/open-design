@@ -5394,4 +5394,11 @@ export const ko: Dict = {
   'chat.record.canceled': "취소됨",
   'chat.record.pending': "시작 전",
   'chat.record.unfinished': "미완료",
+  'comment.authorRole.owner': '소유자',
+  'comment.authorRole.admin': '관리자',
+  'comment.authorRole.member': '구성원',
+  'comment.authorRole.sharePage': '공유 페이지',
+  'comment.anchorState.reanchored': '이전 버전을 기준으로 함',
+  'comment.anchorState.stale': '앵커가 이동했을 수 있습니다',
+  'comment.anchorState.lost': '앵커를 찾을 수 없습니다',
 };

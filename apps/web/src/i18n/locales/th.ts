@@ -5394,4 +5394,11 @@ export const th: Dict = {
   'chat.record.canceled': "ยกเลิกแล้ว",
   'chat.record.pending': "ยังไม่เริ่ม",
   'chat.record.unfinished': "ยังไม่เสร็จ",
+  'comment.authorRole.owner': 'เจ้าของ',
+  'comment.authorRole.admin': 'ผู้ดูแลระบบ',
+  'comment.authorRole.member': 'สมาชิก',
+  'comment.authorRole.sharePage': 'หน้าที่แชร์',
+  'comment.anchorState.reanchored': 'อ้างอิงจากเวอร์ชันเก่า',
+  'comment.anchorState.stale': 'จุดยึดอาจถูกย้ายแล้ว',
+  'comment.anchorState.lost': 'ไม่พบจุดยึด',
 };

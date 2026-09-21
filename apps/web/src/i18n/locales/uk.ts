@@ -5394,4 +5394,11 @@ export const uk: Dict = {
   'chat.record.canceled': "Скасовано",
   'chat.record.pending': "Не розпочато",
   'chat.record.unfinished': "Не завершено",
+  'comment.authorRole.owner': 'Власник',
+  'comment.authorRole.admin': 'Адміністратор',
+  'comment.authorRole.member': 'Учасник',
+  'comment.authorRole.sharePage': 'Спільна сторінка',
+  'comment.anchorState.reanchored': 'на основі старішої версії',
+  'comment.anchorState.stale': 'якір міг переміститися',
+  'comment.anchorState.lost': 'якір втрачено',
 };

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { cancelPersonalCommentRelayOutbox } from './comment-relay-outbox.js';
 import { randomUUID } from 'node:crypto';
 
 type SqliteDb = Database.Database;
@@ -234,6 +235,16 @@ export function createSqlitePublicFilePublicationStore(
        AND file_path = ?
   `);
 
+  const deletePublicationAndCancelOutbox = db.transaction((scope: PublicFilePublicationScope) => {
+    deleteRow.run(
+      scope.resourceTeamId,
+      scope.ownerMemberId,
+      scope.projectId,
+      scope.filePath,
+    );
+    cancelPersonalCommentRelayOutbox(db, scope);
+  });
+
   const selectRevision = db.prepare(`SELECT slug, revision AS token FROM public_file_publications
     WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ?`);
   const deleteRevision = db.prepare(`DELETE FROM public_file_publications
@@ -316,12 +327,10 @@ export function createSqlitePublicFilePublicationStore(
       );
     },
     delete(scope) {
-      deleteRow.run(
-        scope.resourceTeamId,
-        scope.ownerMemberId,
-        scope.projectId,
-        scope.filePath,
-      );
+      // A successful public-file stop is authoritative locally. Remove its
+      // witness and every pre-stop personal relay revision as one SQLite
+      // transaction, so immediate re-publication cannot revive stale rows.
+      deletePublicationAndCancelOutbox(scope);
     },
   };
 }

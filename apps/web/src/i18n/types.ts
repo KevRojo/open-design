@@ -1143,6 +1143,13 @@ export interface Dict {
   'collabPresence.roleOwner': string;
   'collabPresence.roleAdmin': string;
   'collabPresence.roleMember': string;
+  'comment.authorRole.owner': string;
+  'comment.authorRole.admin': string;
+  'comment.authorRole.member': string;
+  'comment.authorRole.sharePage': string;
+  'comment.anchorState.reanchored': string;
+  'comment.anchorState.stale': string;
+  'comment.anchorState.lost': string;
   'collabPresence.viewingFileSelf': string;
   'collabPresence.viewingFileOther': string;
   'collabPresence.viewingProjectSelf': string;

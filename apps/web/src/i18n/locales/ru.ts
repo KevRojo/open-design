@@ -5394,4 +5394,11 @@ export const ru: Dict = {
   'chat.record.canceled': "Отменено",
   'chat.record.pending': "Не начато",
   'chat.record.unfinished': "Не завершено",
+  'comment.authorRole.owner': 'Владелец',
+  'comment.authorRole.admin': 'Администратор',
+  'comment.authorRole.member': 'Участник',
+  'comment.authorRole.sharePage': 'Страница общего доступа',
+  'comment.anchorState.reanchored': 'на основе более ранней версии',
+  'comment.anchorState.stale': 'привязка могла переместиться',
+  'comment.anchorState.lost': 'привязка потеряна',
 };

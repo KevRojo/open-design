@@ -5394,4 +5394,11 @@ export const it: Dict = {
   'chat.record.canceled': "Annullato",
   'chat.record.pending': "Non avviato",
   'chat.record.unfinished': "Non completato",
+  'comment.authorRole.owner': 'Proprietario',
+  'comment.authorRole.admin': 'Amministratore',
+  'comment.authorRole.member': 'Membro',
+  'comment.authorRole.sharePage': 'Pagina condivisa',
+  'comment.anchorState.reanchored': 'basato su una versione precedente',
+  'comment.anchorState.stale': 'l’ancora potrebbe essere stata spostata',
+  'comment.anchorState.lost': 'ancora persa',
 };

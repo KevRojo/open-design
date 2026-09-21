@@ -5847,4 +5847,11 @@ export const zhTW: Dict = {
   'chat.record.canceled': "已取消",
   'chat.record.pending': "尚未開始",
   'chat.record.unfinished': "未完成",
+  'comment.authorRole.owner': '擁有者',
+  'comment.authorRole.admin': '管理員',
+  'comment.authorRole.member': '成員',
+  'comment.authorRole.sharePage': '分享頁',
+  'comment.anchorState.reanchored': '基於較舊版本',
+  'comment.anchorState.stale': '錨點可能已移動',
+  'comment.anchorState.lost': '錨點已遺失',
 };

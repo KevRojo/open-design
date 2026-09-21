@@ -5394,4 +5394,11 @@ export const hu: Dict = {
   'chat.record.canceled': "Megszakítva",
   'chat.record.pending': "Nincs elindítva",
   'chat.record.unfinished': "Befejezetlen",
+  'comment.authorRole.owner': 'Tulajdonos',
+  'comment.authorRole.admin': 'Rendszergazda',
+  'comment.authorRole.member': 'Tag',
+  'comment.authorRole.sharePage': 'Megosztási oldal',
+  'comment.anchorState.reanchored': 'egy korábbi verzió alapján',
+  'comment.anchorState.stale': 'a horgony elmozdulhatott',
+  'comment.anchorState.lost': 'a horgony elveszett',
 };

@@ -526,9 +526,9 @@ describe('runVelaCommand', () => {
     ['{"error":"stopped","status":410,"errorCode":"SHARE_STOPPED"}', 410, 'SHARE_STOPPED'],
     ['{"error":"stopped","status":500,"errorCode":"SHARE_STOPPED"}', 500, 'SHARE_STOPPED'],
     ['{"error":"stopped","status":410,"errorCode":"OTHER"}', 410, 'OTHER'],
-    ['{"error":"SHARE_STOPPED"}', undefined, undefined],
+    ['{"error":"stopped","errorCode":"SHARE_STOPPED"}', null, 'SHARE_STOPPED'],
     ['SHARE_STOPPED status 410', undefined, undefined],
-    ['{"error":"stopped","status":"410","errorCode":"SHARE_STOPPED"}', undefined, undefined],
+    ['{"error":"stopped","status":"410","errorCode":"SHARE_STOPPED"}', null, 'SHARE_STOPPED'],
     ['', undefined, undefined],
   ])('maps only validated comment failure JSON: %s', async (stdout, status, code) => {
     vi.stubEnv('VELA_BIN', process.execPath);

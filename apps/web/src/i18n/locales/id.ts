@@ -5394,4 +5394,11 @@ export const id: Dict = {
   'chat.record.canceled': "Dibatalkan",
   'chat.record.pending': "Belum dimulai",
   'chat.record.unfinished': "Belum selesai",
+  'comment.authorRole.owner': 'Pemilik',
+  'comment.authorRole.admin': 'Admin',
+  'comment.authorRole.member': 'Anggota',
+  'comment.authorRole.sharePage': 'Halaman berbagi',
+  'comment.anchorState.reanchored': 'berdasarkan versi lama',
+  'comment.anchorState.stale': 'jangkar mungkin telah berpindah',
+  'comment.anchorState.lost': 'jangkar hilang',
 };

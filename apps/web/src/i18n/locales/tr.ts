@@ -5394,4 +5394,11 @@ export const tr: Dict = {
   'chat.record.canceled': "İptal edildi",
   'chat.record.pending': "Başlatılmadı",
   'chat.record.unfinished': "Tamamlanmadı",
+  'comment.authorRole.owner': 'Sahip',
+  'comment.authorRole.admin': 'Yönetici',
+  'comment.authorRole.member': 'Üye',
+  'comment.authorRole.sharePage': 'Paylaşım sayfası',
+  'comment.anchorState.reanchored': 'eski bir sürüme göre',
+  'comment.anchorState.stale': 'bağlantı noktası taşınmış olabilir',
+  'comment.anchorState.lost': 'bağlantı noktası kayboldu',
 };

@@ -320,6 +320,10 @@ const SHARE_STRING_FLAGS = new Set([
 const SHARE_BOOLEAN_FLAGS = new Set([
   'help', 'h', 'json',
 ]);
+const COMMENT_STRING_FLAGS = new Set([
+  'daemon-url', 'workspace', 'workspace-member', 'prompt', 'prompt-file', 'target', 'status', 'read-at',
+]);
+const COMMENT_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 // Defined near the top because `runFigma` is reachable through the
 // top-of-file SUBCOMMAND_MAP dispatch during module evaluation; a `const`
 // further down would still be in TDZ when the handler reads it.
@@ -398,6 +402,7 @@ const SUBCOMMAND_MAP = {
   ui: runUi,
   marketplace: runMarketplace,
   share: runShare,
+  comment: runComment,
   brand: runBrand,
   brands: runBrand,
   project: runProject,
@@ -430,6 +435,146 @@ const SUBCOMMAND_MAP = {
   library: runLibrary,
   figma: runFigma,
 };
+
+function printCommentHelp() {
+  console.log(`Usage:
+  od comment list <projectId> <conversationId> [--json]
+  od comment create <projectId> <conversationId> --target <json> (--prompt <text> | --prompt-file <path|->) [--json]
+  od comment update <projectId> <conversationId> <commentId> --target <json> (--prompt <text> | --prompt-file <path|->) [--json]
+  od comment status <projectId> <conversationId> <commentId> --status <open|attached|applying|needs_review|resolved|failed> [--json]
+  od comment delete <projectId> <conversationId> <commentId> [--json]
+  od comment read <projectId> [--read-at <epoch-ms>] [--json]
+
+Manage comments through the same daemon HTTP API as the workspace UI.
+
+Options:
+  --target <json>             PreviewCommentTarget JSON for create/update.
+  --prompt <text>             Comment body.
+  --prompt-file <path|->      Read the comment body from a file or stdin; mutually exclusive with --prompt.
+  --workspace <id>            Exact Workspace for bound project requests.
+  --workspace-member <id>     Exact caller membership for bound project requests.
+  --read-at <epoch-ms>        Mark comments read at this time (defaults to now; server clamps).
+  --daemon-url <url>          Override daemon URL.
+  --json                      Emit the daemon response as JSON.`);
+}
+
+function commentUsageError(message) {
+  console.error(message);
+  printCommentHelp();
+  process.exit(2);
+}
+
+function parseCommentTarget(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const target = JSON.parse(raw);
+    if (!target || typeof target !== 'object' || Array.isArray(target)) return null;
+    const requiredStrings = ['filePath', 'elementId', 'selector', 'label', 'text', 'htmlHint'];
+    if (!requiredStrings.every((key) => typeof target[key] === 'string')) return null;
+    const position = target.position;
+    if (!position || typeof position !== 'object'
+      || !['x', 'y', 'width', 'height'].every((key) => Number.isFinite(position[key]))) return null;
+    return target;
+  } catch {
+    return null;
+  }
+}
+
+async function runComment(args) {
+  if (args.length === 0 || args[0] === 'help' || args.includes('--help') || args.includes('-h')) {
+    printCommentHelp();
+    process.exit(args.length === 0 ? 2 : 0);
+  }
+  const sub = args[0];
+  const rest = args.slice(1);
+  let flags;
+  try {
+    flags = parseFlags(rest, { string: COMMENT_STRING_FLAGS, boolean: COMMENT_BOOLEAN_FLAGS });
+  } catch (error) {
+    commentUsageError(error.message);
+  }
+  const positional = positionalArgs(rest, COMMENT_STRING_FLAGS);
+  const [projectId, conversationId, commentId] = positional;
+  if (!['list', 'create', 'update', 'status', 'delete', 'read'].includes(sub)) {
+    commentUsageError(`unknown subcommand: od comment ${sub}`);
+  }
+  if (!projectId || (sub !== 'read' && (!conversationId || ((sub === 'update' || sub === 'status' || sub === 'delete') && !commentId)))) {
+    commentUsageError(`od comment ${sub} requires projectId, conversationId${sub === 'update' || sub === 'status' || sub === 'delete' ? ', and commentId' : ''}`);
+  }
+  const workspaceHeaders = workspaceHeadersFromExplicitFlags(flags) ?? {};
+  const base = await cliDaemonBaseUrl(flags);
+  if (sub === 'read') {
+    const readAt = flags['read-at'] === undefined ? Date.now() : Number(flags['read-at']);
+    if (!Number.isFinite(readAt)) commentUsageError('--read-at must be a finite epoch milliseconds value');
+    let response;
+    try {
+      response = await fetch(`${base}/api/projects/${encodeURIComponent(projectId)}/comments/read`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', ...workspaceHeaders },
+        body: JSON.stringify({ readAt }),
+      });
+    } catch (error) {
+      surfaceFetchError(error, base);
+      process.exit(3);
+    }
+    if (!response.ok) return structuredHttpFailure(response);
+    const payload = await response.json();
+    if (flags.json) return process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    console.log(`[comment] read ${payload.projectId}`);
+    return;
+  }
+  const collectionPath = `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/comments`;
+  let path = collectionPath;
+  let method = 'GET';
+  let body;
+  if (sub === 'create' || sub === 'update') {
+    if (typeof flags.prompt === 'string' && typeof flags['prompt-file'] === 'string') {
+      commentUsageError('pass either --prompt or --prompt-file, not both');
+    }
+    const target = parseCommentTarget(flags.target);
+    if (!target) commentUsageError('--target must be valid PreviewCommentTarget JSON');
+    let note;
+    try {
+      note = await readPromptFromFlags(flags);
+    } catch (error) {
+      commentUsageError(`cannot read --prompt-file: ${error.message}`);
+    }
+    if (typeof note !== 'string' || !note.trim()) {
+      commentUsageError('create/update requires --prompt or --prompt-file');
+    }
+    method = 'POST';
+    body = { ...(sub === 'update' ? { id: commentId } : {}), target, note };
+  } else if (sub === 'status') {
+    if (typeof flags.status !== 'string' || !flags.status.trim()) {
+      commentUsageError('status requires --status');
+    }
+    method = 'PATCH';
+    path = `${collectionPath}/${encodeURIComponent(commentId)}`;
+    body = { status: flags.status };
+  } else if (sub === 'delete') {
+    method = 'DELETE';
+    path = `${collectionPath}/${encodeURIComponent(commentId)}`;
+  }
+  let response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      method,
+      headers: body === undefined ? workspaceHeaders : { 'content-type': 'application/json', ...workspaceHeaders },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  } catch (error) {
+    surfaceFetchError(error, base);
+    process.exit(3);
+  }
+  if (!response.ok) return structuredHttpFailure(response);
+  const payload = await response.json();
+  if (flags.json) return process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  if (sub === 'list') {
+    for (const comment of payload.comments ?? []) console.log(`${comment.id}\t${comment.status}\t${comment.note}`);
+    return;
+  }
+  console.log(sub === 'delete' ? `[comment] deleted ${commentId}` : `[comment] ${sub}d ${payload.comment?.id ?? ''}`);
+}
 
 function printStrategyHelp() {
   console.log(`Usage:
@@ -1012,6 +1157,9 @@ function printRootHelp() {
   od share <open-design|url> [options]
       Build localized social-share targets for the OpenDesign repo or a
       deployed project URL. Use --json for scripted integrations.
+
+  od comment <list|create|update|status|delete> [args]
+      Manage project comments through the same daemon API as the workspace UI.
 
   od ui <list|show|respond|revoke|prefill> [args]
       Read and answer GenUI surfaces (form / choice / confirmation / oauth-prompt) headlessly.

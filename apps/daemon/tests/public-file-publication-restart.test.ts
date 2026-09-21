@@ -290,4 +290,30 @@ describe('public file publication restart lifecycle', () => {
       'team-1',
     );
   });
+
+  it('keeps the local publication when remote stop fails', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'od-public-stop-fail-'));
+    tempDirs.push(projectDir);
+    await writeFile(path.join(projectDir, 'index.html'), '<h1>Public</h1>');
+    process.env.OD_RESOURCE_HUB_URL = 'https://hub.example.test';
+    vela.runResourceCommand.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'snapshot') return JSON.stringify({
+        slug: 'stop-failure-slug', name: 'index.html', kind: 'project',
+        versionId: 'version-1', createdAt: new Date(1).toISOString(),
+      });
+      if (args[0] === 'snapshot-redact') throw new Error('remote stop unavailable');
+      return JSON.stringify({ version: 1 });
+    });
+    const publicationStore = createSqlitePublicFilePublicationStore(
+      openDatabase(projectDir, { dataDir: projectDir }),
+    );
+    const daemon = await startDaemon(projectDir, publicationStore);
+
+    expect((await daemon.request('POST')).status).toBe(200);
+    expect((await daemon.request('DELETE')).status).toBe(502);
+    expect(publicationStore.get({
+      resourceTeamId: 'team-1', ownerMemberId: 'member-1',
+      projectId: 'project-1', filePath: 'index.html',
+    })?.slug).toBe('stop-failure-slug');
+  });
 });
