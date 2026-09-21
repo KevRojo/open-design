@@ -71,7 +71,11 @@ export function createVelaCliCollabClient(options: VelaCliCollabClientOptions = 
     }
     const trimmed = stdout.trim();
     if (!trimmed) return {} as T;
-    return JSON.parse(trimmed) as T;
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch (cause) {
+      throw new Error('Invalid JSON from Vela collaboration command', { cause });
+    }
   }
 
   return {
