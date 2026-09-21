@@ -34,6 +34,20 @@ const uploadPath = 'M12 15V4m-4 4 4-4 4 4M5 20h14';
 const firstProps = (overrides: Partial<Props> = {}) => props({ filePublished: false, ...overrides });
 
 describe('S1 first-publish visual seam', () => {
+  it.each([0, 0.45, 0.9])('integrates progress %s into the busy control without changing its value', (publishProgress) => {
+    const input = firstProps({ publishingPublicFile: true, publishProgress });
+    render(<ShareTab {...input} />);
+    const button = screen.getByRole('menuitem');
+    const progress = screen.getByRole('progressbar');
+    expect(button).toHaveTextContent(`fileViewer.publishingFile ${Math.round(publishProgress * 100)}%`);
+    expect(button).toBeDisabled();
+    expect(progress).toHaveAttribute('value', String(publishProgress));
+    expect(progress.parentElement).toBe(button.parentElement);
+    expect(progress.className).toContain('publishProgress');
+    expect(button.className).toContain('publishingButton');
+    fireEvent.click(button);
+    expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
+  });
   it('scopes the 360px canvas shell to the mounted share panel, not Export', () => {
     const css = parse(readFileSync(resolve(__dirname, '../../../src/components/share/ShareTab.module.css'), 'utf8'));
     const values: Record<string, string> = {};

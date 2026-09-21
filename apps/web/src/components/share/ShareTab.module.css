@@ -149,6 +149,48 @@ button.copyButton:disabled {
   color: #82D994;
 }
 
+/* S2: native progress semantics under the existing disabled action, not a
+   second row. The upstream simulation still owns its value and lifetime. */
+.publishControl {
+  position: relative;
+  width: 100%;
+}
+
+.publishProgress {
+  position: absolute;
+  inset: 0;
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #6E6E70;
+  pointer-events: none;
+}
+
+.publishProgress::-webkit-progress-bar {
+  background: #6E6E70;
+}
+
+.publishProgress::-webkit-progress-value {
+  background: #29292B;
+}
+
+.publishProgress::-moz-progress-bar {
+  background: #29292B;
+}
+
+button.copyButton.publishingButton:disabled {
+  position: relative;
+  background: transparent;
+  color: #FFFFFF;
+  opacity: 1;
+  gap: 6px;
+}
+
 /* S11 (◇): preserve the full selectable URL; only clipboard failure gets
    this fallback treatment. Successful/idle links retain their existing skin. */
 .copyFallback:global(.chrome-publish-url) {

@@ -2704,6 +2704,7 @@ test('[P1] project detail assistant completion actions support copy, fork, and f
 
 for (const origin of ['artifact-card', 'toolbar'] as const) {
   test(`[P1] share failure recovery matches available actions from ${origin}`, async ({ page }) => {
+    await page.clock.install();
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await mockWritablePersonalProjectScope(page);
     const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
@@ -2742,7 +2743,26 @@ for (const origin of ['artifact-card', 'toolbar'] as const) {
     await test.info().attach(`failure-recovery-${origin}-failed`, { body: await page.screenshot(), contentType: 'image/png' });
     try {
       await retry.click();
-      await expect(menu.getByRole('progressbar')).toBeVisible();
+      const progress = menu.getByRole('progressbar');
+      await expect(progress).toBeVisible();
+      // Advance the existing waiting simulation, not upload bytes or the held response.
+      await page.clock.fastForward(3_500);
+      await expect.poll(async () => Number(await progress.getAttribute('value'))).toBeGreaterThan(0.4);
+      await expect(progress).toHaveCSS('height', '32px');
+      await expect(progress).toHaveCSS('border-radius', '6px');
+      await expect(progress).toHaveCSS('background-color', 'rgb(110, 110, 112)');
+      const busy = menu.getByRole('menuitem', { name: /Creating link.*\d+%/ });
+      await expect(busy).toBeDisabled();
+      await expect(busy).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(busy).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      expect(await progress.boundingBox()).toEqual(await busy.boundingBox());
+      const rendered = await progress.evaluate(node => ({
+        value: Number(node.getAttribute('value')),
+        text: node.parentElement?.querySelector('button')?.textContent,
+      }));
+      expect(rendered.value).toBeGreaterThan(0.4);
+      expect(rendered.value).toBeLessThanOrEqual(0.9);
+      expect(rendered.text).toContain(`${Math.round(rendered.value * 100)}%`);
       await expect(menu.getByRole('status')).toHaveCount(0);
       await expect.poll(() => attempts).toBe(2);
       await test.info().attach(`failure-recovery-${origin}-retry`, { body: await page.screenshot(), contentType: 'image/png' });

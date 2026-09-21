@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { Button } from '@open-design/components';
 import { workspaceContextHasTeamIdentity, type WorkspaceCollabContext } from '@open-design/contracts';
 import type { PublicFilePublishFailureKey } from '../../collab/public-file-publish';
@@ -15,6 +15,17 @@ export function boundedPublishProgress(elapsedMs: number, completed: boolean): n
   if (completed) return 1;
   const elapsed = Number.isNaN(elapsedMs) ? 0 : Math.max(0, elapsedMs);
   return Math.min(0.9, 0.9 * (1 - Math.exp(-elapsed / 5000)));
+}
+
+/** Keep idle markup unchanged; native progress and its action share one busy row. */
+function PublishProgressFrame({ value, label, children }: { value: number | null; label: string; children: ReactNode }) {
+  if (value === null) return <>{children}</>;
+  return (
+    <div className={styles.publishControl}>
+      <progress className={styles.publishProgress} max={1} value={value} aria-label={label} />
+      {children}
+    </div>
+  );
 }
 
 export function ShareTab({
@@ -169,7 +180,7 @@ export function ShareTab({
                       ) : null}
                       {canPublishPublic ? (
                       <>
-                      {publishProgress !== null ? (
+                      {filePublished && publishProgress !== null ? (
                         <progress max={1} value={publishProgress} aria-label={t('fileViewer.publishingFile')} />
                       ) : null}
                       {filePublished ? (
@@ -224,9 +235,10 @@ export function ShareTab({
                           ) : null}
                         </div>
                       ) : (
+                        <PublishProgressFrame value={publishProgress} label={t('fileViewer.publishingFile')}>
                         <Button
                           type="button"
-                          className={styles.copyButton}
+                          className={`${styles.copyButton}${publishingPublicFile && publishProgress !== null ? ` ${styles.publishingButton}` : ''}`}
                           role="menuitem"
                           disabled={streaming || viewerOnly || publishingPublicFile}
                           aria-busy={publishingPublicFile}
@@ -254,11 +266,12 @@ export function ShareTab({
                             </svg>
                           )}
                           <span>{publishingPublicFile
-                            ? t('fileViewer.publishingFile')
+                            ? `${t('fileViewer.publishingFile')}${publishProgress !== null ? ` ${Math.round(publishProgress * 100)}%` : ''}`
                             : publishFailureKey === 'fileViewer.publishFileFailed' || publishFailureKey === 'fileViewer.publishFileTooLarge'
                               ? t('preview.retry')
                               : t('fileViewer.generateAndCopyLink')}</span>
                         </Button>
+                        </PublishProgressFrame>
                       ) }
                       {publishFailureKey ? (
                         <p className={styles.publishError} role="status">
