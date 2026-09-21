@@ -12,6 +12,8 @@ import {
   SHARE_COMMENT_VALIDATION_ORDER,
   SHARE_MAX_TOTAL_BYTES,
   SHARE_STATUSES,
+  SHARE_COMMENT_TERMINAL_REJECTION,
+  VELA_CLI_FAILURE_ENVELOPE_FIELDS,
   SHARE_URL_PATH_SEGMENT,
   SHARE_COMMENTS_PATH_PREFIX,
   SHARE_SNAPSHOT_DISCOVERY_IN_P0,
@@ -165,6 +167,27 @@ describe('share contract · share state', () => {
     expect(state('none').status).not.toBe(state('stopped').status);
     // A boolean lifecycle has at most two values; this one must not.
     expect(new Set(SHARE_STATUSES).size).toBeGreaterThan(2);
+  });
+
+  /**
+   * D147. The CLI failure envelope's field names, pinned because the two
+   * halves disagreed and neither side's tests could see it.
+   */
+  it('names the CLI failure envelope fields the way the batch path shipped them', () => {
+    expect(VELA_CLI_FAILURE_ENVELOPE_FIELDS.code).toBe('errorCode');
+    expect(VELA_CLI_FAILURE_ENVELOPE_FIELDS.status).toBe('status');
+    expect(VELA_CLI_FAILURE_ENVELOPE_FIELDS.message).toBe('error');
+    // The prose field must never be the one carrying the decision.
+    expect(VELA_CLI_FAILURE_ENVELOPE_FIELDS.message).not.toBe(
+      VELA_CLI_FAILURE_ENVELOPE_FIELDS.code,
+    );
+  });
+
+  it('requires both halves of the terminal rejection', () => {
+    expect(SHARE_COMMENT_TERMINAL_REJECTION).toEqual({ status: 410, code: 'SHARE_STOPPED' });
+    // `SHARE_STOPPED` must remain a real member of the error union, not a
+    // free-floating string this constant invented.
+    expect(SHARE_COMMENT_ERROR_CODES).toContain(SHARE_COMMENT_TERMINAL_REJECTION.code);
   });
 
   it('treats only `active` as a live share', () => {
