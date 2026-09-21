@@ -65,6 +65,33 @@ export interface CollabCloudServiceDeps {
     projectId: string,
     context: WorkspaceCollabContext,
   ) => ReadonlySet<string>;
+  /**
+   * Where a comment we already store lives, by project AND comment id.
+   *
+   * A deletion arriving from the cloud carries no anchor: there is nothing left
+   * to point at. The personal path filters incoming records by `filePath`, so a
+   * tombstone matches nothing and is dropped — while the cursor still advances
+   * past it. The deletion is then unreachable forever, and the local copy keeps
+   * a comment the author deleted on the web.
+   *
+   * Resolving the stored record's own `filePath` is what lets a tombstone be
+   * judged by the same publication rules as the comment it deletes, instead of
+   * by an anchor it cannot have.
+   *
+   * Contract, and each clause is load-bearing:
+   * - BOTH ids are required. Matching on comment id alone would let one
+   *   project's deletion reach another project's row.
+   * - `found: false` means the row is genuinely absent — a safe no-op.
+   * - A failed lookup MUST throw. It must never be reported as absence: that
+   *   would turn "the database did not answer" into "there is nothing to
+   *   delete", and the batch would be acknowledged with the deletion lost.
+   * - Only the stored path is returned. The comment's own content stays out of
+   *   this seam; the caller is deciding eligibility, not reading the comment.
+   */
+  resolveStoredCommentLocation?: (
+    projectId: string,
+    commentId: string,
+  ) => { found: false } | { found: true; filePath: string | null };
   /** Local binding witness captured synchronously when the mutation commits. */
   resolveLocalProjectRelayBinding?: (projectId: string) => {
     workspaceId: string;

@@ -4435,6 +4435,14 @@ export async function startServer({
             projectId,
             publications: publicFilePublicationStore,
           }),
+        // Deliberately unguarded: if the query throws, the batch must fail and
+        // keep its cursor. Swallowing the error here would report "no such
+        // comment" and acknowledge a deletion we never applied.
+        resolveStoredCommentLocation: (projectId, commentId) => {
+          const stored = getProjectPreviewComment(db, projectId, commentId);
+          if (!stored) return { found: false };
+          return { found: true, filePath: stored.filePath?.trim() || null };
+        },
         resolveLocalProjectRelayBinding: (projectId) => {
           const binding = getWorkspaceProjectByProjectId(db, projectId);
           const workspaceId = binding?.workspaceId?.trim() ?? '';
