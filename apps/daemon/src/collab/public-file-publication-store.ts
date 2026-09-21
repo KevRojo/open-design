@@ -50,6 +50,8 @@ export interface PublicFileStopTaskKey extends PublicFilePublicationScope {
 }
 
 export interface PublicFileStopTask extends PublicFileStopTaskKey {
+  /** Absent for legacy tasks or a slug without a current local witness. */
+  publicationRevision?: string;
   failureCount: number;
 }
 
@@ -68,6 +70,13 @@ export interface StopQueuePublicFilePublicationStore extends ProjectPublicFilePu
 }
 
 const MAX_STOP_FAILURES = 5;
+
+function readStopTasks(rows: unknown[]): PublicFileStopTask[] {
+  return (rows as Array<PublicFileStopTask & { publicationRevision: string | null }>).map((row) => {
+    const { publicationRevision, ...task } = row;
+    return publicationRevision == null ? task : { ...task, publicationRevision };
+  });
+}
 
 function stopTaskValues(key: PublicFileStopTaskKey): [string, string, string, string, string] {
   return [key.resourceTeamId, key.ownerMemberId, key.projectId, key.filePath, key.slug];
@@ -99,9 +108,14 @@ export function migratePublicFilePublications(db: SqliteDb): void {
       file_path TEXT NOT NULL,
       slug TEXT NOT NULL,
       failure_count INTEGER NOT NULL CHECK (failure_count BETWEEN 1 AND 5),
+      publication_revision TEXT,
       PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path, slug)
     );
   `);
+  const stopColumns = db.prepare('PRAGMA table_info(public_file_stop_queue)').all() as Array<{ name: string }>;
+  if (!stopColumns.some(column => column.name === 'publication_revision')) {
+    db.exec('ALTER TABLE public_file_stop_queue ADD COLUMN publication_revision TEXT');
+  }
   const columns = db.prepare('PRAGMA table_info(public_file_publications)').all() as Array<{ name: string }>;
   if (!columns.some(column => column.name === 'revision')) {
     db.exec("ALTER TABLE public_file_publications ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
@@ -145,7 +159,9 @@ export function createInMemoryPublicFilePublicationStore(): StopQueuePublicFileP
     enqueueStop(key) {
       const id = stopTaskKey(key);
       if (!stopTasks.has(id)) {
+        const current = publications.get(scopeKey(key));
         stopTasks.set(id, {
+          ...(current?.publication.slug === key.slug ? { publicationRevision: current.revision } : {}),
           resourceTeamId: key.resourceTeamId,
           ownerMemberId: key.ownerMemberId,
           projectId: key.projectId,
@@ -268,14 +284,15 @@ export function createSqlitePublicFilePublicationStore(
   // must not erase an outstanding remote stop, including exhausted diagnostics.
   const stopSelect = `SELECT resource_team_id AS resourceTeamId,
     owner_member_id AS ownerMemberId, project_id AS projectId,
-    file_path AS filePath, slug, failure_count AS failureCount
+    file_path AS filePath, slug, failure_count AS failureCount, publication_revision AS publicationRevision
     FROM public_file_stop_queue`;
   const selectStops = db.prepare(stopSelect);
   const selectRetryableStops = db.prepare(`${stopSelect} WHERE failure_count < ?`);
   const enqueueStop = db.prepare(`
     INSERT INTO public_file_stop_queue
-      (resource_team_id, owner_member_id, project_id, file_path, slug, failure_count)
-    VALUES (?, ?, ?, ?, ?, 1)
+      (resource_team_id, owner_member_id, project_id, file_path, slug, failure_count, publication_revision)
+    VALUES (?, ?, ?, ?, ?, 1, (SELECT revision FROM public_file_publications
+      WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ? AND slug = ?))
     ON CONFLICT(resource_team_id, owner_member_id, project_id, file_path, slug) DO NOTHING
   `);
   const failStop = db.prepare(`UPDATE public_file_stop_queue
@@ -291,9 +308,9 @@ export function createSqlitePublicFilePublicationStore(
     deleteIfRevisionMatches(scope, expected) {
       return deleteRevisionAndCancelOutbox(scope, expected);
     },
-    enqueueStop(key) { enqueueStop.run(...stopTaskValues(key)); },
-    listStops() { return selectStops.all() as PublicFileStopTask[]; },
-    listRetryableStops() { return selectRetryableStops.all(MAX_STOP_FAILURES) as PublicFileStopTask[]; },
+    enqueueStop(key) { enqueueStop.run(...stopTaskValues(key), ...stopTaskValues(key)); },
+    listStops() { return readStopTasks(selectStops.all()); },
+    listRetryableStops() { return readStopTasks(selectRetryableStops.all(MAX_STOP_FAILURES)); },
     recordStopFailure(key) { failStop.run(...stopTaskValues(key), MAX_STOP_FAILURES); },
     completeStop(key) { completeStop.run(...stopTaskValues(key)); },
     get(scope) {
