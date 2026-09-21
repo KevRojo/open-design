@@ -4196,6 +4196,7 @@ export interface Dict {
   'fileViewer.workspaceUnshareFailed': string;
   'fileViewer.readonlySharedNoExport': string;
   'fileViewer.copyShareLink': string;
+  'fileViewer.copyLinkManually': string;
   'fileViewer.openSharePage': string;
   'fileViewer.shareLinkRequiresDeploy': string;
   'fileViewer.shareLinkPublishGuide': string;

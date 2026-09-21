@@ -3267,6 +3267,7 @@ export const uk: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': 'Скопіювати посилання для доступу',
+  "fileViewer.copyLinkManually": "Не вдалося скопіювати автоматично. Скопіюйте посилання вище вручну.",
   'fileViewer.openSharePage': 'Відкрити сторінку доступу',
   'fileViewer.shareLinkRequiresDeploy': 'Спочатку опублікуйте онлайн, щоб отримати посилання',
   'fileViewer.shareLinkPublishGuide': 'Опублікуйте онлайн вище, щоб увімкнути доступ ↑',

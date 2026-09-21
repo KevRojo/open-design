@@ -3267,6 +3267,7 @@ export const hu: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': 'Megosztási link másolása',
+  "fileViewer.copyLinkManually": "Az automatikus másolás nem sikerült. Másold ki kézzel a fenti hivatkozást.",
   'fileViewer.openSharePage': 'Megosztási oldal megnyitása',
   'fileViewer.shareLinkRequiresDeploy': 'Előbb tedd közzé online, hogy linket kapj',
   'fileViewer.shareLinkPublishGuide': 'Tedd közzé online fent a megosztás engedélyezéséhez ↑',

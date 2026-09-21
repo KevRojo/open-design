@@ -79,6 +79,13 @@ button.copyButton:disabled {
   cursor: text;
 }
 
+.copyHint {
+  margin: 0;
+  color: #888888;
+  font-size: 12px;
+  line-height: 18px;
+}
+
 /* S7/S15 warning only; legacy renderer and deployment errors keep their styles. */
 p.publishError {
   margin: 0;

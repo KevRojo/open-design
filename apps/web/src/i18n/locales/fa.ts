@@ -3274,6 +3274,7 @@ export const fa: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': 'کپی لینک اشتراک‌گذاری',
+  "fileViewer.copyLinkManually": "کپی خودکار انجام نشد. لطفاً پیوند بالا را به‌صورت دستی کپی کنید.",
   'fileViewer.openSharePage': 'باز کردن صفحه اشتراک‌گذاری',
   'fileViewer.shareLinkRequiresDeploy': 'ابتدا آنلاین منتشر کنید تا لینک دریافت شود',
   'fileViewer.shareLinkPublishGuide': 'برای فعال شدن اشتراک‌گذاری، بالا آنلاین منتشر کنید ↑',

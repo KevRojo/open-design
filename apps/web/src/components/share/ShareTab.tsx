@@ -206,9 +206,7 @@ export function ShareTab({
                                 </svg>
                                 {publishLinkFeedback === 'copied'
                                   ? t('fileViewer.copied')
-                                  : publishLinkFeedback === 'failed'
-                                    ? t('useEverywhere.copyFailed')
-                                    : t('fileViewer.copyShareLink')}
+                                  : t('fileViewer.copyShareLink')}
                               </Button>
                               <button
                                 type="button"
@@ -221,6 +219,9 @@ export function ShareTab({
                                 {t('fileViewer.unpublishFile')}
                               </button>
                           </div>
+                          {publishLinkFeedback === 'failed' ? (
+                            <p className={styles.copyHint} role="status">{t('fileViewer.copyLinkManually')}</p>
+                          ) : null}
                         </div>
                       ) : (
                         <Button

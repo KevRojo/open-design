@@ -34,8 +34,7 @@ const linkPath = 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5
 describe('S3/S4/S4-C copy-button rendering seam', () => {
   it.each([null, 'copied', 'failed'] as const)('renders only the matching icon for feedback %s', (feedback) => {
     render(<ShareTab {...props({ publishLinkFeedback: feedback })} />);
-    const label = feedback === 'copied' ? 'fileViewer.copied'
-      : feedback === 'failed' ? 'useEverywhere.copyFailed' : 'fileViewer.copyShareLink';
+    const label = feedback === 'copied' ? 'fileViewer.copied' : 'fileViewer.copyShareLink';
     const button = screen.getByRole('button', { name: label });
     expect(button.className).toContain('copyButton');
     const icon = button.querySelector('svg')!;
@@ -77,6 +76,22 @@ describe('S3/S4/S4-C copy-button rendering seam', () => {
       'font-size': '11px', 'line-height': '30px', 'user-select': 'text',
       'white-space': 'nowrap', 'text-overflow': 'ellipsis',
     });
+  });
+
+  it('explains clipboard failure separately and keeps the copy action retryable', () => {
+    const input = props({ publishLinkFeedback: 'failed' });
+    const { rerender } = render(<ShareTab {...input} />);
+    expect(screen.getByRole('status')).toHaveTextContent('fileViewer.copyLinkManually');
+    expect(screen.getByRole('status').className).toContain('copyHint');
+    expect(screen.queryByRole('button', { name: 'useEverywhere.copyFailed' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'fileViewer.copyShareLink' }));
+    expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(1);
+    expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
+    expect(input.unpublishCurrentFilePublic).not.toHaveBeenCalled();
+    for (const feedback of [null, 'copied'] as const) {
+      rerender(<ShareTab {...input} publishLinkFeedback={feedback} />);
+      expect(screen.queryByText('fileViewer.copyLinkManually')).toBeNull();
+    }
   });
 
   it('keeps copy and stop callbacks separate and the URL read-only', () => {

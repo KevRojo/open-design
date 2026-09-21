@@ -3274,6 +3274,7 @@ export const esES: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': 'Copiar enlace compartido',
+  "fileViewer.copyLinkManually": "No se pudo copiar automáticamente. Copia manualmente el enlace de arriba.",
   'fileViewer.openSharePage': 'Abrir página compartida',
   'fileViewer.shareLinkRequiresDeploy': 'Publica en línea primero para obtener un enlace',
   'fileViewer.shareLinkPublishGuide': 'Publica en línea arriba para habilitar compartir ↑',

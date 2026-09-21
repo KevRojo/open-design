@@ -3448,6 +3448,7 @@ export const zhTW: Dict = {
   "fileViewer.workspaceUnshareFailed": "移回僅自己可見失敗",
   "fileViewer.readonlySharedNoExport": "共享專案唯讀：可以評論，不能編輯或匯出",
   "fileViewer.copyShareLink": "複製分享連結",
+  "fileViewer.copyLinkManually": "無法自動複製，請手動複製上方連結。",
   "fileViewer.openSharePage": "開啟分享頁面",
   "fileViewer.shareLinkRequiresDeploy": "先發布到線上以取得連結",
   "fileViewer.shareLinkPublishGuide": "先發布線上，即可分享 ↑",

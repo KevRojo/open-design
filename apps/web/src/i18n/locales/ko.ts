@@ -3267,6 +3267,7 @@ export const ko: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': '공유 링크 복사',
+  "fileViewer.copyLinkManually": "자동으로 복사하지 못했습니다. 위 링크를 직접 복사해 주세요.",
   'fileViewer.openSharePage': '공유 페이지 열기',
   'fileViewer.shareLinkRequiresDeploy': '링크를 받으려면 먼저 온라인에 게시하세요',
   'fileViewer.shareLinkPublishGuide': '위에서 온라인에 게시하면 공유할 수 있습니다 ↑',

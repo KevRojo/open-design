@@ -3267,6 +3267,7 @@ export const tr: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': 'Paylaşım bağlantısını kopyala',
+  "fileViewer.copyLinkManually": "Otomatik olarak kopyalanamadı. Lütfen yukarıdaki bağlantıyı elle kopyalayın.",
   'fileViewer.openSharePage': 'Paylaşım sayfasını aç',
   'fileViewer.shareLinkRequiresDeploy': 'Bağlantı almak için önce çevrimiçi yayınla',
   'fileViewer.shareLinkPublishGuide': 'Paylaşımı etkinleştirmek için yukarıda çevrimiçi yayınla ↑',

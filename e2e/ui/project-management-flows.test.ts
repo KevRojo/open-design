@@ -2827,8 +2827,15 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
     await route.fulfill({ json: { url: publicUrl, slug: 'stable-alias-for-manual-copy', fileName: 'index.html' } });
   });
   await retry.click();
-  const failedCopy = menu.getByRole('button', { name: 'Copy failed', exact: true });
+  const failedCopy = menu.getByRole('button', { name: 'Copy share link', exact: true });
   await expect(failedCopy).toBeVisible();
+  const manualCopyHint = menu.getByRole('status');
+  await expect(manualCopyHint).toHaveText('Could not copy automatically. Please manually copy the link above.');
+  for (const [property, value] of Object.entries({
+    margin: '0px', color: 'rgb(136, 136, 136)', 'font-size': '12px', 'line-height': '18px',
+  })) {
+    await expect(manualCopyHint).toHaveCSS(property, value);
+  }
   const fallback = menu.locator('.chrome-publish-url');
   await expect(fallback).toHaveText(publicUrl);
   await expect(fallback).toHaveAttribute('title', publicUrl);

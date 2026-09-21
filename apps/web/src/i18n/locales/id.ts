@@ -3267,6 +3267,7 @@ export const id: Dict = {
   'fileViewer.workspaceUnshareFailed': 'Could not move back to private',
   'fileViewer.readonlySharedNoExport': 'Shared project is read-only: you can comment, but cannot edit or export.',
   'fileViewer.copyShareLink': 'Salin tautan berbagi',
+  "fileViewer.copyLinkManually": "Tidak dapat menyalin otomatis. Silakan salin tautan di atas secara manual.",
   'fileViewer.openSharePage': 'Buka halaman berbagi',
   'fileViewer.shareLinkRequiresDeploy': 'Publikasikan online terlebih dahulu untuk mendapatkan tautan',
   'fileViewer.shareLinkPublishGuide': 'Publikasikan online di atas untuk mengaktifkan berbagi ↑',
