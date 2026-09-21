@@ -2828,7 +2828,16 @@ for (const published of [false, true]) {
     const menu = page.locator('.share-menu-popover[role="menu"]');
     if (published) await expect(menu.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
     else await expect(menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true })).toBeVisible();
-    const trigger = menu.locator('.chrome-access-trigger');
+     const heading = menu.locator('.share-menu-section-label--help');
+     for (const [property, value] of Object.entries({ padding: '0px', color: 'rgb(51, 51, 51)', 'font-size': '13px', 'font-weight': '500', 'line-height': '20px' })) {
+       await expect(heading).toHaveCSS(property, value);
+     }
+     await expect(heading.getByTestId('workspace-access-help')).toBeEnabled();
+     const deployHeading = menu.locator('.share-menu-section-label:not(.share-menu-section-label--help)');
+     await expect(deployHeading).toHaveCSS('font-size', '12px');
+     await expect(deployHeading).toHaveCSS('font-weight', '700');
+     const trigger = menu.locator('.chrome-access-trigger');
+     expect((await heading.boundingBox())?.x).toBe((await trigger.boundingBox())?.x);
     await expect(trigger).toBeEnabled();
     await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
     await expect(trigger.locator(':scope > svg')).toHaveCSS('width', '12px');

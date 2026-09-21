@@ -56,6 +56,22 @@ describe('S1-T2 scope option rows', () => {
 });
 
 describe('S1-T/S4-T shared scope trigger', () => {
+  it('removes only the legacy horizontal scope inset, preserving the anchor', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules('.panel :global(.chrome-access-select)', rule => {
+      rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+    });
+    expect(values).toEqual({ 'padding-inline': '0' });
+  });
+  it('uses canvas scope heading typography without inheriting menu item insets', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules('.panel :global(.share-menu-section-label--help)', rule => {
+      rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+    });
+    expect(values).toMatchObject({ padding: '0', color: '#333333', 'font-size': '13px', 'line-height': '20px', 'font-weight': '500' });
+  });
   it('hides decorative icons but preserves the busy slot and sizes the chevron', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
     const declarations = (selector: string) => {

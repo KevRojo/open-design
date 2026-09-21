@@ -15,6 +15,20 @@
   color: #333333;
 }
 
+/* S1-T/S4-T scope label: align to the panel, not a padded deployment row.
+   Only the scope heading has this help modifier inside ShareTab. */
+.panel :global(.share-menu-section-label--help) {
+  padding: 0;
+  color: #333333;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.panel :global(.chrome-access-select) {
+  padding-inline: 0;
+}
+
 /* S1-T/S4-T: compact scope trigger; legacy viewer and option rows are untouched. */
 .panel :global(.chrome-access-trigger) {
   box-sizing: border-box;
