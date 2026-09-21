@@ -1,3 +1,25 @@
+/* Chain-1/5 shared shell: the export panel uses the same anchored host, so
+   apply the canvas geometry only while this ShareTab is actually mounted. */
+:global(.chrome-share-menu--unified .chrome-unified-popover):has(.panel) {
+  box-sizing: border-box;
+  width: 360px;
+  min-width: 0;
+  max-width: calc(100vw - 32px);
+  padding: 16px 20px;
+  gap: 12px;
+  border: 1px solid #00000008;
+  border-radius: 12px;
+  background: #FFFFFF;
+  box-shadow: 0 8px 28px #00000010, 0 2px 6px #00000006;
+  font-size: 12px;
+  color: #333333;
+}
+
+.panel:global(.chrome-unified-panel) {
+  padding: 0;
+  gap: 12px;
+}
+
 /* Publish/copy seam: outrank the shared Button base without changing stop/deploy. */
 button.copyButton {
   box-sizing: border-box;

@@ -85,7 +85,7 @@ export function ShareTab({
   shareLinkStatusHint: string;
 }) {
   return (
-                      <div className="chrome-unified-panel chrome-unified-panel--share">
+                      <div className={`chrome-unified-panel chrome-unified-panel--share ${styles.panel}`}>
                       {/* Team-only, same as ReactComponentViewer's copy of this card above —
                           see the comment there (recvq5bM78HWCE). */}
                       {menuOrigin === 'toolbar' && workspaceContextHasTeamIdentity(workspaceContext) ? (

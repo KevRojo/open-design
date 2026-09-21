@@ -34,6 +34,20 @@ const uploadPath = 'M12 15V4m-4 4 4-4 4 4M5 20h14';
 const firstProps = (overrides: Partial<Props> = {}) => props({ filePublished: false, ...overrides });
 
 describe('S1 first-publish visual seam', () => {
+  it('scopes the 360px canvas shell to the mounted share panel, not Export', () => {
+    const css = parse(readFileSync(resolve(__dirname, '../../../src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules(':global(.chrome-share-menu--unified .chrome-unified-popover):has(.panel)', rule => {
+      rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+    });
+    expect(values).toMatchObject({
+      width: '360px', 'max-width': 'calc(100vw - 32px)', padding: '16px 20px', gap: '12px',
+      border: '1px solid #00000008', 'border-radius': '12px', background: '#FFFFFF',
+      'box-shadow': '0 8px 28px #00000010, 0 2px 6px #00000006',
+    });
+    const { container } = render(<ShareTab {...firstProps()} />);
+    expect(container.firstElementChild?.className).toContain('panel');
+  });
   it('binds the canvas button style, Chinese label and 13px upload icon', () => {
     render(<ShareTab {...firstProps({ t: (key) => zhCN[key] })} />);
     const button = screen.getByRole('menuitem', { name: '生成并复制链接' });

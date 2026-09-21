@@ -2745,6 +2745,17 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(anchoredMenu).toHaveAttribute('data-anchored-menu', secondAnchor!);
   const menu = anchoredMenu.locator('.share-menu-popover[role="menu"]');
   await expect(menu).toBeVisible();
+  // Shared S1/S2/S3/S4/S4-C/S7 shell, scoped away from the Export tab.
+  for (const [property, value] of Object.entries({
+    width: '360px', padding: '16px 20px', gap: '12px',
+    'border-radius': '12px', 'background-color': 'rgb(255, 255, 255)',
+    'border-top-color': 'rgba(0, 0, 0, 0.03)', 'border-top-width': '1px',
+    'box-shadow': 'rgba(0, 0, 0, 0.063) 0px 8px 28px 0px, rgba(0, 0, 0, 0.024) 0px 2px 6px 0px',
+  })) {
+    await expect(menu).toHaveCSS(property, value);
+  }
+  await expect(menu.locator('.chrome-unified-panel--share')).toHaveCSS('padding', '0px');
+  await expect(menu.locator('.chrome-unified-panel--share')).toHaveCSS('gap', '12px');
   const shareLink = menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true });
   await expect(shareLink).toBeVisible();
   await expect(shareLink).toBeEnabled();
