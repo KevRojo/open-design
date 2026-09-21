@@ -400,7 +400,7 @@ async function buildSharePlan(
     path.dirname(projectDir),
     path.basename(projectDir),
     entryName,
-    { metadata, hookScriptUrl: '' },
+    { metadata, hookScriptUrl: '', assetUrlPolicy: 'share-relative' },
   );
   const totalBytes = deployPlan.files.reduce(
     (total, file) => total + Buffer.from(file.data).byteLength,

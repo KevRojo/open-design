@@ -2157,6 +2157,35 @@ describe('collab sync routes', () => {
     expect(snapshots).toBe(fault === 'missing-push-id' ? 1 : 2);
   });
 
+  it('stages root assets relative to the share package rather than the hub root', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-share-relative-route-'));
+    tempDirs.push(dir);
+    await mkdir(path.join(dir, 'assets'));
+    await mkdir(path.join(dir, 'images'));
+    await writeFile(path.join(dir, 'index.html'), '<link rel="stylesheet" href="/assets/site.css"><img src="/images/bg.png?q#h">');
+    await writeFile(path.join(dir, 'assets/site.css'), '.x{background:url(/images/bg.png?css#h)}');
+    await writeFile(path.join(dir, 'images/bg.png'), 'image-bytes');
+    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
+    let staged: { html: string; css: string; image: string } | undefined;
+    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
+      if (args[0] === 'push') {
+        staged = {
+          html: await readFile(path.join(args[3]!, 'index.html'), 'utf8'),
+          css: await readFile(path.join(args[3]!, 'assets/site.css'), 'utf8'),
+          image: await readFile(path.join(args[3]!, 'images/bg.png'), 'utf8'),
+        };
+        return JSON.stringify({ id: 'v1', version: 1 });
+      }
+      return JSON.stringify({ slug: 'root-assets', versionId: 'v1' });
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    expect((await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' })).status).toBe(200);
+    expect(staged?.html).toContain('href="assets/site.css"');
+    expect(staged?.html).toContain('src="images/bg.png?q#h"');
+    expect(staged?.css).toBe('.x{background:url(../images/bg.png?css#h)}');
+    expect(staged?.image).toBe('image-bytes');
+  });
+
   it('hydrates and clears public file publication state', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-public-file-'));
     tempDirs.push(dir);

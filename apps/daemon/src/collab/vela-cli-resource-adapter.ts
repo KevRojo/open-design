@@ -326,7 +326,12 @@ function parseVersion(
 ): { version: number; versionId?: string } | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
-  const parsed = JSON.parse(trimmed) as VelaVersionRecord;
+  let parsed: VelaVersionRecord;
+  try {
+    parsed = JSON.parse(trimmed) as VelaVersionRecord;
+  } catch {
+    throw new Error('vela resource response has invalid JSON');
+  }
   if (parsed.version == null) return null;
   if (typeof parsed.version !== 'number') {
     throw new Error('vela resource response has an invalid version');
