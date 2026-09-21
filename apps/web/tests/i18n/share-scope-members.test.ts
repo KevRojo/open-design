@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { de } from '../../src/i18n/locales/de';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { zhTW } from '../../src/i18n/locales/zh-TW';
+
+it('uses German labels for both workspace visibility options', () => {
+  expect(de['fileViewer.workspaceAccessPrivate']).toBe('Nur ich');
+  expect(de['fileViewer.workspaceAccessMembers']).toBe('Teammitglieder');
+});
 
 describe('Chinese workspace scope member labels', () => {
   it.each([

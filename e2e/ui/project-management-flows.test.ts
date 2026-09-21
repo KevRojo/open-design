@@ -3044,6 +3044,22 @@ for (const published of [false, true]) {
       await expect(menu.getByRole('option', { name: label, exact: true })).toHaveAttribute('aria-selected', 'true');
       await test.info().attach(`team-scope-private-${locale}-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
     }
+    await page.evaluate(() => {
+      localStorage.setItem('open-design:locale', 'de');
+      localStorage.setItem('open-design:locale-source', 'manual');
+    });
+    await page.reload();
+    await expectWorkspaceReady(page);
+    await page.locator('.chrome-share-menu--unified > button[aria-label="Teilen"]').click();
+    await expect(trigger).toHaveText('Nur ich');
+    await trigger.click();
+    await expect(menu.getByRole('option', { name: 'Nur ich', exact: true })).toHaveAttribute('aria-selected', 'true');
+    const germanMembers = menu.getByRole('option', { name: 'Teammitglieder', exact: true });
+    await expect(germanMembers).toHaveAttribute('aria-selected', 'false');
+    await expect(germanMembers).toHaveCSS('height', '28px');
+    const germanLabel = germanMembers.locator(':scope > span:nth-child(2)');
+    expect(await germanLabel.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await test.info().attach(`team-scope-private-de-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
 
