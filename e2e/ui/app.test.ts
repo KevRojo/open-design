@@ -382,6 +382,13 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   })) {
     await expect(floatingComposer).toHaveCSS(property, value);
   }
+  const note = floatingComposer.getByTestId('comment-popover-input');
+  for (const [property, value] of Object.entries({
+    padding: '8px 10px', 'border-radius': '6px', 'border-top-color': 'rgb(227, 227, 230)',
+    'background-color': 'rgb(255, 255, 255)', color: 'rgb(51, 51, 51)',
+    'font-size': '12px', 'line-height': '18px', height: '112px', 'overflow-y': 'auto',
+  })) await expect(note).toHaveCSS(property, value);
+  await expect(note).not.toHaveAttribute('maxlength');
   await test.info().attach('comment-composer-surface', { body: await page.screenshot(), contentType: 'image/png' });
   await captureLane4CommentState(page, '05-input-element-selected');
   // A floating sidebar covers the toolbar. With a composer open, hiding the

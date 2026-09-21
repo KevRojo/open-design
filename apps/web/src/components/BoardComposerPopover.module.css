@@ -1,3 +1,19 @@
+.surface:global(.comment-popover) textarea {
+  padding: 8px 10px;
+  border: 1px solid #E3E3E6;
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: #333333;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.surface:global(.comment-popover) textarea[readonly] {
+  background: #F6F6F7;
+  border-color: #EFEFEF;
+  color: #666666;
+}
+
 /* Floating annotation card only; the docked composer keeps its host surface. */
 .surface:global(.comment-popover) {
   padding: 12px;

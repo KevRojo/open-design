@@ -31,11 +31,12 @@ const target: PreviewCommentSnapshot = {
   selectionKind: 'element',
 };
 
-function renderPopover(docked = false) {
+function renderPopover(docked = false, canEditComment = true) {
   return render(
     <BoardComposerPopover
       target={target}
       docked={docked}
+      canEditComment={canEditComment}
       existing={null}
       draft="Tighten this heading"
       notes={[]}
@@ -56,6 +57,13 @@ function renderPopover(docked = false) {
 }
 
 describe('BoardComposerPopover action row', () => {
+  it('exposes native readonly state without a client length cap', () => {
+    renderPopover(false, false);
+    const note = screen.getByTestId('comment-popover-input');
+    expect(note).toHaveAttribute('readonly');
+    expect(note).not.toHaveAttribute('maxlength');
+    expect(note).toHaveValue('Tighten this heading');
+  });
   it('leaves docked cards on their existing host surface', () => {
     renderPopover(true);
     expect(screen.getByTestId('comment-popover').className).not.toContain('surface');
