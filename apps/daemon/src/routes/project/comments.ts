@@ -154,6 +154,12 @@ export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'proj
   ) => Promise<void> | void;
 }
 
+/** External authors cannot be claimed through a member-only editing endpoint. */
+function hasExternalCommentAuthor(comment: PreviewComment): boolean {
+  return comment.authorKind === 'user'
+    || (typeof comment.authorAppUserId === 'string' && comment.authorAppUserId.trim().length > 0);
+}
+
 export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectCommentRoutesDeps): void {
   const { db } = ctx;
   const { updateProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
@@ -506,6 +512,9 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
         );
         if (!existing) {
           return res.status(404).json({ error: 'comment not found' });
+        }
+        if (hasExternalCommentAuthor(existing)) {
+          return res.status(403).json({ error: 'not permitted' });
         }
         const existingAuthor = existing.authorMemberId ?? null;
         if (existingAuthor) {
