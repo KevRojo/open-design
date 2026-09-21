@@ -2949,6 +2949,11 @@ for (const published of [false, true]) {
       await expectWorkspaceReady(page);
       await page.locator('.chrome-share-menu--unified > button[aria-label="分享"]').click();
       await expect(trigger).toHaveText(label);
+      if (published) {
+        const copyButton = menu.getByRole('button', { name: locale === 'zh-CN' ? '复制链接' : '複製連結', exact: true });
+        await expect(copyButton).toBeEnabled();
+        await expect(copyButton).toHaveCSS('height', '32px');
+      }
       await expect(trigger).toBeEnabled();
       await trigger.click();
       const teamOption = menu.getByRole('option', { name: label, exact: true });
@@ -2978,6 +2983,11 @@ for (const published of [false, true]) {
       await expectWorkspaceReady(page);
       await page.locator('.chrome-share-menu--unified > button[aria-label="分享"]').click();
       await expect(trigger).toHaveText(label);
+      if (published) {
+        const copyButton = menu.getByRole('button', { name: locale === 'zh-CN' ? '复制链接' : '複製連結', exact: true });
+        await expect(copyButton).toBeEnabled();
+        await expect(copyButton).toHaveCSS('height', '32px');
+      }
       const privateDescription = menu.getByText(descriptionText, { exact: true });
       await expect(privateDescription).toBeVisible();
       await expect(privateDescription).toHaveCSS('font-size', '12px');

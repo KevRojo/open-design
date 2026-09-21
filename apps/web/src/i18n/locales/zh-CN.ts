@@ -3441,7 +3441,7 @@ export const zhCN: Dict = {
   "fileViewer.workspaceUnshareSuccess": "已移回仅自己可见",
   "fileViewer.workspaceUnshareFailed": "移回仅自己可见失败",
   "fileViewer.readonlySharedNoExport": "共享项目只读：可以评论，不能编辑或导出",
-  "fileViewer.copyShareLink": "复制分享链接",
+  "fileViewer.copyShareLink": "复制链接",
   "fileViewer.copyLinkManually": "无法自动复制，请手动复制上方链接。",
   "fileViewer.openSharePage": "打开分享页面",
   "fileViewer.shareLinkRequiresDeploy": "先发布到线上以获取链接",
