@@ -2220,6 +2220,7 @@ process.stdin.on("end", () => {
     expect(handoffScript).toContain('"report"');
     expect(handoffScript).toContain('"convergence"');
     expect(convergenceWorkflow).toContain("handoff.py resolve-run-artifact convergence ci-results");
+    expect(convergenceWorkflow).toContain("artifact-ids: ${{ steps.artifact.outputs.id }}");
     expect(convergenceWorkflow).toContain("Checkout trusted convergence code");
     expect(convergenceWorkflow).toContain("convergence.py admit");
     expect(convergenceWorkflow).toContain("python3 .github/scripts/convergence.py publish");

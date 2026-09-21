@@ -33,7 +33,7 @@ from lib.github import (
     download_artifact,
     event_payload,
     run_jobs,
-    unique_run_artifact,
+    latest_run_artifact,
 )
 from lib.r2 import R2Client, R2Credentials, R2Error, R2PreconditionFailed, self_check as r2_self_check
 from lib.workload_products import materialize_products
@@ -1682,7 +1682,7 @@ def stage_products_command(args: argparse.Namespace) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     staged = []
     for source in candidate_product_sources(args.candidate):
-        artifact = unique_run_artifact(repository, run_id, source)
+        artifact = latest_run_artifact(repository, run_id, source)
         if artifact is None:
             raise ConfigError(f"current-run product artifact is missing: {source}")
         destination = args.output_dir / f"{source}.zip"

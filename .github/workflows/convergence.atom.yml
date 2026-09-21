@@ -78,7 +78,7 @@ jobs:
         if: ${{ inputs.pending_artifact == '' }}
         uses: actions/download-artifact@v8
         with:
-          name: ${{ steps.artifact.outputs.name }}
+          artifact-ids: ${{ steps.artifact.outputs.id }}
           path: ${{ runner.temp }}/handoff-convergence
       - name: '[collect] Frozen execution plan'
         if: ${{ inputs.pending_artifact != '' }}

@@ -873,6 +873,24 @@ for response in ({}, {"jobs": None}, {"jobs": [None]}):
     expect(result.status, result.stderr).toBe(0);
   });
 
+  test("selects the newest same-name artifact after a failed-job rerun", () => {
+    const result = spawnSync("python3", ["-c", `
+import sys
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+from lib import github as g
+older = {"id": 20, "name": "handoff-convergence-ci-results", "expired": False, "created_at": "2026-09-21T08:16:09Z"}
+newer = {"id": 10, "name": "handoff-convergence-ci-results", "expired": False, "created_at": "2026-09-21T08:22:11Z"}
+with patch("lib.github.run_artifacts", return_value=[older, newer]):
+    assert g.latest_run_artifact("example/repo", 12, newer["name"])["id"] == 10
+with patch("lib.github.run_artifacts", return_value=[older, {**newer, "created_at": ""}]):
+    try: g.latest_run_artifact("example/repo", 12, newer["name"])
+    except g.GitHubError: pass
+    else: raise AssertionError("accepted artifact without creation time")
+`, path.dirname(convergenceScript)], { cwd: repoRoot, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test.each(["job", "steps"])("contributes independent %s successes but rejects forged successful-step evidence", (boundary) => {
     const fixture = createRepository();
     const config = JSON.parse(readFileSync(fixture.configPath, "utf8"));
