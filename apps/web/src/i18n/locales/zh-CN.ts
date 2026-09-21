@@ -3414,7 +3414,7 @@ export const zhCN: Dict = {
   "fileViewer.openFileForHistory": "打开文件后查看历史版本",
   "fileViewer.workspaceVisibilityTitle": "工作区内可见范围",
   "fileViewer.workspaceShareTitle": "在工作空间中分享项目",
-  "fileViewer.workspaceSharePrivateDescription": "仅你可以访问此项目。选择团队成员后，即可分享给团队。",
+  "fileViewer.workspaceSharePrivateDescription": "只有你可以在工作区内访问此项目。",
   "fileViewer.workspaceShareWorkspaceDescription": "此工作空间的成员可以访问此项目。",
   "fileViewer.workspaceAccessPrivate": "仅自己",
   "fileViewer.workspaceAccessMembers": "团队成员",

@@ -3423,7 +3423,7 @@ export const zhTW: Dict = {
   "fileViewer.openFileForHistory": "打开文件后查看历史版本",
   "fileViewer.workspaceVisibilityTitle": "工作區內可見範圍",
   "fileViewer.workspaceShareTitle": "在工作空間中分享專案",
-  "fileViewer.workspaceSharePrivateDescription": "只有你可以存取此專案。選擇團隊成員後，即可分享給團隊。",
+  "fileViewer.workspaceSharePrivateDescription": "只有你可以在工作區內存取此專案。",
   "fileViewer.workspaceShareWorkspaceDescription": "此工作空間的成員可以存取此專案。",
   "fileViewer.workspaceAccessPrivate": "只有自己",
   "fileViewer.workspaceAccessMembers": "團隊成員",

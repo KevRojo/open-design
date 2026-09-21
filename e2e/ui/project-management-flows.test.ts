@@ -2960,6 +2960,34 @@ for (const published of [false, true]) {
       await expect(menu).not.toContainText(locale === 'zh-CN' ? '工作空间成员' : '工作空間成員');
       await test.info().attach(`team-scope-${locale}-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
     }
+
+    // Private workspace visibility is independent of the public file link.
+    await page.route(`**/api/projects/${projectId}/collab/status`, route => route.fulfill({
+      json: { publishedVersion: null, materializedVersion: null, syncState: 'local_only' },
+    }));
+    await page.route('**/api/workspace/projects/team', route => route.fulfill({ json: { projects: [] } }));
+    for (const [locale, label, descriptionText] of [
+      ['zh-CN', '仅自己', '只有你可以在工作区内访问此项目。'],
+      ['zh-TW', '只有自己', '只有你可以在工作區內存取此專案。'],
+    ] as const) {
+      await page.evaluate(locale => {
+        localStorage.setItem('open-design:locale', locale);
+        localStorage.setItem('open-design:locale-source', 'manual');
+      }, locale);
+      await page.reload();
+      await expectWorkspaceReady(page);
+      await page.locator('.chrome-share-menu--unified > button[aria-label="分享"]').click();
+      await expect(trigger).toHaveText(label);
+      const privateDescription = menu.getByText(descriptionText, { exact: true });
+      await expect(privateDescription).toBeVisible();
+      await expect(privateDescription).toHaveCSS('font-size', '12px');
+      await expect(privateDescription).toHaveCSS('line-height', '18px');
+      if (published) await expect(menu.getByText(`https://example.test/artifact/${projectId}/stable-alias`, { exact: true })).toBeVisible();
+      else await expect(menu.getByRole('menuitem', { name: locale === 'zh-CN' ? '生成并复制链接' : '產生並複製連結', exact: true })).toBeVisible();
+      await trigger.click();
+      await expect(menu.getByRole('option', { name: label, exact: true })).toHaveAttribute('aria-selected', 'true');
+      await test.info().attach(`team-scope-private-${locale}-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
+    }
   });
 }
 

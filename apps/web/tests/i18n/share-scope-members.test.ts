@@ -4,11 +4,10 @@ import { zhTW } from '../../src/i18n/locales/zh-TW';
 
 describe('Chinese workspace scope member labels', () => {
   it.each([
-    { locale: 'zh-CN', dict: zhCN, label: '团队成员', oldLabel: '工作空间成员' },
-    { locale: 'zh-TW', dict: zhTW, label: '團隊成員', oldLabel: '工作空間成員' },
-  ])('$locale matches the canvas and its private-state instruction', ({ dict, label, oldLabel }) => {
+    { locale: 'zh-CN', dict: zhCN, label: '团队成员', privateDescription: '只有你可以在工作区内访问此项目。' },
+    { locale: 'zh-TW', dict: zhTW, label: '團隊成員', privateDescription: '只有你可以在工作區內存取此專案。' },
+  ])('$locale matches the canvas and its private-state instruction', ({ dict, label, privateDescription }) => {
     expect(dict['fileViewer.workspaceAccessMembers']).toBe(label);
-    expect(dict['fileViewer.workspaceSharePrivateDescription']).toContain(label);
-    expect(dict['fileViewer.workspaceSharePrivateDescription']).not.toContain(oldLabel);
+    expect(dict['fileViewer.workspaceSharePrivateDescription']).toBe(privateDescription);
   });
 });
