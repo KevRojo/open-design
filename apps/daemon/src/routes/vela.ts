@@ -63,6 +63,7 @@ import {
 import { classifyAmrAccountFailure } from '../integrations/vela-errors.js';
 import {
   createTouchpointContentCache,
+  MAX_CONTENT_BYTES,
   type HeldContentRef,
   type TouchpointContentCache,
   type TouchpointContentKey,
@@ -444,19 +445,45 @@ function proxyVelaMessageCenterRequest(
 }
 
 /**
+ * The largest upstream body this proxy will hold in memory to assemble content.
+ *
+ * Assembly is the only reason this route reads a body instead of forwarding it,
+ * and it can only ever produce a package the browser's own budget accepts
+ * (`MAX_CONTENT_BYTES`, mirrored by the web host). A body that cannot fit that
+ * budget is un-assemblable by construction, so holding it buys nothing and
+ * costs the daemon its memory — and, through the synchronous decompressors
+ * below, its event loop, which for a privileged local process means the whole
+ * app stops. Past this ceiling the route degrades back to what it replaced: a
+ * stream. Base64 inflates resource bytes by 4/3 and the decision carries
+ * manifest and metadata around them, hence the headroom.
+ */
+const MAX_BUFFERED_DECISION_BYTES = 4 * MAX_CONTENT_BYTES;
+
+/**
  * Decode an upstream body the daemon has to read rather than forward.
  *
- * Returns `null` for an encoding this build cannot decode, which the caller
- * treats as "hand the original bytes back untouched" — reading the body is an
- * optimization, never a precondition for answering the browser.
+ * Returns `null` for an encoding this build cannot decode, and for one whose
+ * decoded size passes `maxOutputBytes`. Both mean the same thing to the caller
+ * — "hand the original bytes back untouched" — because reading the body is an
+ * optimization, never a precondition for answering the browser. Refusing on
+ * size matters because compression ratios are unbounded: a 200KB reply can name
+ * 200MB of output, and without a limit zlib allocates every byte of it before
+ * anyone downstream is in a position to say no.
  */
-function decodeProxyBody(body: Buffer, encoding: string | undefined): Buffer | null {
+function decodeProxyBody(
+  body: Buffer,
+  encoding: string | undefined,
+  maxOutputBytes: number,
+): Buffer | null {
   const label = (encoding ?? '').trim().toLowerCase();
+  // zlib raises ERR_BUFFER_TOO_LARGE instead of expanding past this, so the
+  // refusal costs nothing and the catch below turns it into the normal path.
+  const limits = { maxOutputLength: maxOutputBytes };
   try {
-    if (!label || label === 'identity') return body;
-    if (label === 'gzip' || label === 'x-gzip') return zlib.gunzipSync(body);
-    if (label === 'deflate') return zlib.inflateSync(body);
-    if (label === 'br') return zlib.brotliDecompressSync(body);
+    if (!label || label === 'identity') return body.byteLength <= maxOutputBytes ? body : null;
+    if (label === 'gzip' || label === 'x-gzip') return zlib.gunzipSync(body, limits);
+    if (label === 'deflate') return zlib.inflateSync(body, limits);
+    if (label === 'br') return zlib.brotliDecompressSync(body, limits);
   } catch {
     return null;
   }
@@ -610,18 +637,58 @@ function proxyTouchpointRuntimeRequest(
       const chunks: Buffer[] = [];
       let size = 0;
       let failed = false;
+      let streaming = false;
+      const forward = (chunk: Buffer): void => {
+        if (!chunk.byteLength) return;
+        if (!res.write(chunk)) {
+          upstreamRes.pause();
+          res.once('drain', () => upstreamRes.resume());
+        }
+      };
+      /**
+       * Assembly gives up the moment the body stops being assemblable.
+       *
+       * From here the route is the pipe it was before content assembly existed:
+       * what is already buffered goes out first, the rest is forwarded chunk by
+       * chunk against the socket's own backpressure, and the daemon's memory
+       * stays bounded by `MAX_BUFFERED_DECISION_BYTES`. Degrading rather than
+       * refusing keeps this to a single WAN fetch, and the browser cannot tell
+       * the difference: it gets the same bytes, framed the same way.
+       */
+      const degradeToStreaming = (): void => {
+        streaming = true;
+        res.status(upstreamRes.statusCode ?? 502);
+        res.setHeader('content-type', upstreamRes.headers['content-type'] ?? 'application/json');
+        const contentEncoding = upstreamRes.headers['content-encoding'];
+        if (typeof contentEncoding === 'string' && contentEncoding)
+          res.setHeader('content-encoding', contentEncoding);
+        const buffered = Buffer.concat(chunks, size);
+        chunks.length = 0;
+        size = 0;
+        forward(buffered);
+      };
       upstreamRes.on('error', () => {
         failed = true;
         if (!res.headersSent) res.status(502).json({ error: 'touchpoint_runtime_unavailable' });
         else res.end();
       });
       upstreamRes.on('data', (chunk: Buffer) => {
+        if (streaming) {
+          forward(chunk);
+          return;
+        }
         chunks.push(chunk);
         size += chunk.length;
+        if (size > MAX_BUFFERED_DECISION_BYTES) degradeToStreaming();
       });
       upstreamRes.on('end', () => {
+        if (streaming) {
+          res.end();
+          return;
+        }
         if (failed || res.headersSent) return;
         const raw = Buffer.concat(chunks, size);
+        chunks.length = 0;
         const echo = () => {
           res.status(upstreamRes.statusCode ?? 502);
           res.setHeader('content-type', upstreamRes.headers['content-type'] ?? 'application/json');
@@ -630,7 +697,11 @@ function proxyTouchpointRuntimeRequest(
             res.setHeader('content-encoding', contentEncoding);
           res.end(raw);
         };
-        const decoded = decodeProxyBody(raw, upstreamRes.headers['content-encoding'] as string | undefined);
+        const decoded = decodeProxyBody(
+          raw,
+          upstreamRes.headers['content-encoding'] as string | undefined,
+          MAX_BUFFERED_DECISION_BYTES,
+        );
         if (!decoded || upstreamRes.statusCode !== 200) {
           echo();
           return;
