@@ -29,6 +29,14 @@
   margin-block-start: 20px;
 }
 
+.scopeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
 .scopeDescription {
   margin: 0;
   color: #888888;
@@ -47,7 +55,8 @@
 }
 
 .panel :global(.chrome-access-select) {
-  padding-inline: 0;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 /* S1-T/S4-T: compact scope trigger; legacy viewer and option rows are untouched. */
@@ -85,6 +94,8 @@
   box-sizing: border-box;
   width: max-content;
   min-width: 168px;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
   max-width: 100%;
   padding: 4px;
   display: flex;

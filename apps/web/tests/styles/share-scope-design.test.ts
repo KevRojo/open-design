@@ -56,6 +56,16 @@ describe('S1-T2 scope option rows', () => {
 });
 
 describe('S1-T/S4-T shared scope trigger', () => {
+  it('places title and trigger in a canvas row and anchors the menu inward', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const values = (selector: string) => {
+      const result: Record<string, string> = {};
+      css.walkRules(selector, rule => { rule.walkDecls(decl => { result[decl.prop] = decl.value; }); });
+      return result;
+    };
+    expect(values('.scopeRow')).toMatchObject({ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', gap: '12px', 'min-height': '28px' });
+    expect(values('.panel :global(.chrome-access-options)')).toMatchObject({ 'inset-inline-start': 'auto', 'inset-inline-end': '0' });
+  });
   it('adds the 20px section offset only when scope follows another section', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
     const values: Record<string, string> = {};
@@ -73,7 +83,7 @@ describe('S1-T/S4-T shared scope trigger', () => {
     css.walkRules('.panel :global(.chrome-access-select)', rule => {
       rule.walkDecls(decl => { values[decl.prop] = decl.value; });
     });
-    expect(values).toEqual({ 'padding-inline': '0' });
+    expect(values).toEqual({ padding: '0', 'flex-shrink': '0' });
   });
   it('uses canvas scope heading typography without inheriting menu item insets', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));

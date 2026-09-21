@@ -235,6 +235,10 @@ describe('Shared share shell header', () => {
       ? await screen.findByRole('button', { name: /copy share link/i })
       : await screen.findByRole('menuitem', { name: /Generate and copy link/i });
     const scope = screen.getByText('Visibility in workspace');
+    const trigger = document.querySelector('.chrome-access-trigger')!;
+    const row = scope.parentElement!.parentElement!;
+    expect(trigger.parentElement!.parentElement).toBe(row);
+    expect(row.nextElementSibling).toHaveTextContent('Only you can access this project. Choose workspace members to share it with the team.');
     const deploy = screen.getByRole('menuitem', { name: /Deploy to Vercel/i });
     expect(action.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scope.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

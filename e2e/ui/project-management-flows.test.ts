@@ -2832,7 +2832,7 @@ for (const published of [false, true]) {
      await expect(heading).toHaveText('Visibility in workspace');
      const publicBlock = published ? menu.locator('.chrome-publish-plain') : menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true });
      const publicBounds = (await publicBlock.boundingBox())!;
-     expect((await heading.boundingBox())!.y - publicBounds.y - publicBounds.height).toBe(32);
+     expect((await heading.locator('..').boundingBox())!.y - publicBounds.y - publicBounds.height).toBe(32);
      for (const [property, value] of Object.entries({ padding: '0px', color: 'rgb(51, 51, 51)', 'font-size': '13px', 'font-weight': '500', 'line-height': '20px' })) {
        await expect(heading).toHaveCSS(property, value);
      }
@@ -2847,7 +2847,11 @@ for (const published of [false, true]) {
      await expect(deployHeading).toHaveCSS('font-size', '12px');
      await expect(deployHeading).toHaveCSS('font-weight', '700');
      const trigger = menu.locator('.chrome-access-trigger');
-     expect((await heading.boundingBox())?.x).toBe((await trigger.boundingBox())?.x);
+     const headingBounds = (await heading.boundingBox())!;
+     const triggerBounds = (await trigger.boundingBox())!;
+     expect(headingBounds.y + headingBounds.height / 2).toBe(triggerBounds.y + triggerBounds.height / 2);
+     expect(triggerBounds.x).toBeGreaterThan(headingBounds.x + headingBounds.width);
+     expect((await description.boundingBox())!.y - triggerBounds.y - triggerBounds.height).toBe(4);
     await expect(trigger).toBeEnabled();
     await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
     await expect(trigger.locator(':scope > svg')).toHaveCSS('width', '12px');
@@ -2868,6 +2872,9 @@ for (const published of [false, true]) {
     })) await expect(scopeMenu).toHaveCSS(property, value);
     await expect(scopeMenu).toHaveCSS('min-width', '168px');
     await expect(scopeMenu).toHaveCSS('width', '168px');
+    const scopeBounds = (await scopeMenu.boundingBox())!;
+    const anchorBounds = (await trigger.boundingBox())!;
+    expect(scopeBounds.x + scopeBounds.width).toBe(anchorBounds.x + anchorBounds.width);
     const options = menu.getByRole('option');
     for (const option of await options.all()) {
       await expect(option.locator(':scope > .share-menu-icon')).toBeHidden();
