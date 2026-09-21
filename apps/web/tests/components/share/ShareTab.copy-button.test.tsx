@@ -41,6 +41,11 @@ describe('S3/S4/S4-C copy-button rendering seam', () => {
     const busy = screen.getByRole('button', { name: 'fileViewer.copyingLink' });
     expect(busy).toBeDisabled();
     expect(busy).toHaveAttribute('aria-busy', 'true');
+    const spinner = busy.querySelector('svg')!;
+    expect(spinner).toHaveAttribute('viewBox', '0 0 24 24');
+    expect(spinner).toHaveAttribute('stroke-width', '2');
+    expect(spinner).toHaveClass('icon-spin');
+    expect(spinner.querySelector('path')).toHaveAttribute('d', 'M12 3a9 9 0 1 0 9 9');
     expect(screen.getByText(input.publishedFileUrl)).toBeVisible();
     fireEvent.click(busy);
     expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(1);
@@ -170,5 +175,8 @@ describe('S3/S4/S4-C copy-button rendering seam', () => {
     });
     expect(declarations('button.copyButton:hover:not(:disabled)')).toMatchObject({ background: '#29292B' });
     expect(declarations('.copiedIcon')).toMatchObject({ color: '#82D994' });
+    expect(declarations('button.copyButton[aria-busy="true"]:disabled')).toMatchObject({
+      background: '#5A5A5C', color: '#FFFFFF', opacity: '1',
+    });
   });
 });

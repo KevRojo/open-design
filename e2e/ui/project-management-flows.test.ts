@@ -3269,6 +3269,14 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(copying).toBeVisible();
   await expect(copying).toBeDisabled();
   await expect(copying).toHaveAttribute('aria-busy', 'true');
+  await expect(copying).toHaveCSS('background-color', 'rgb(90, 90, 92)');
+  await expect(copying).toHaveCSS('color', 'rgb(255, 255, 255)');
+  await expect(copying).toHaveCSS('opacity', '1');
+  const copySpinner = copying.locator('svg');
+  await expect(copySpinner).toHaveAttribute('stroke-width', '2');
+  await expect(copySpinner.locator('path')).toHaveAttribute('d', 'M12 3a9 9 0 1 0 9 9');
+  await expect(copySpinner).toHaveCSS('width', '13px');
+  expect(await copySpinner.evaluate((node) => getComputedStyle(node).animationName)).not.toBe('none');
   await expect(fallback).toHaveText(publicUrl);
   await test.info().attach('s4-c-copy-pending', { body: await page.screenshot(), contentType: 'image/png' });
   await page.evaluate(() => window.dispatchEvent(new Event('test:release-copy')));

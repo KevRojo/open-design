@@ -137,21 +137,23 @@ export function ShareTab({
                                 <svg
                                   width="13"
                                   height="13"
-                                  viewBox={publishLinkFeedback === 'copied' ? '0 0 16 16' : '0 0 24 24'}
+                                  viewBox={!copyingLink && publishLinkFeedback === 'copied' ? '0 0 16 16' : '0 0 24 24'}
                                   fill="none"
                                   stroke="currentColor"
-                                  strokeWidth="1.8"
+                                  strokeWidth={copyingLink ? 2 : 1.8}
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                   aria-hidden="true"
                                   focusable="false"
-                                  className={publishLinkFeedback === 'copied' ? styles.copiedIcon : undefined}
+                                  className={copyingLink ? 'icon-spin' : publishLinkFeedback === 'copied' ? styles.copiedIcon : undefined}
                                 >
-                                  <path d={publishLinkFeedback === 'copied'
+                                  <path d={copyingLink
+                                    ? 'M12 3a9 9 0 1 0 9 9'
+                                    : publishLinkFeedback === 'copied'
                                     ? 'm3 8 3 3 7-7'
                                     : 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7'} />
                                 </svg>
-{copyingLink
+                                {copyingLink
                                   ? t('fileViewer.copyingLink')
                                   : publishLinkFeedback === 'copied'
                                   ? t('fileViewer.copied')

@@ -190,6 +190,13 @@ button.copyButton:disabled {
   color: var(--text-faint);
 }
 
+/* Waiting is not an unavailable action: keep the canvas busy palette readable. */
+button.copyButton[aria-busy="true"]:disabled {
+  background: #5A5A5C;
+  color: #FFFFFF;
+  opacity: 1;
+}
+
 .copyButton > svg {
   flex-shrink: 0;
 }
