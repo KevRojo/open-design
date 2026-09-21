@@ -17,6 +17,7 @@
 // mock-call assertion the bug review explicitly ruled insufficient.
 
 import http from 'node:http';
+import { createPublicFileMutations, type PublicFileMutations } from '../../src/collab/public-file-mutations.js';
 import express from 'express';
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -114,6 +115,7 @@ function fakeHub() {
 async function startServer(
   hub: ReturnType<typeof fakeHub>,
   stopPublicFilesBeforeDelete?: (projectId: string) => Promise<void>,
+  publicFileMutations?: PublicFileMutations,
 ) {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-delete-unshare-'));
   projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-delete-unshare-dir-'));
@@ -129,6 +131,7 @@ async function startServer(
   registerProjectRoutes(app, {
     db,
     stopPublicFilesBeforeDelete,
+    publicFileMutations,
     design: { runs: { list: () => [], cancel: async () => {} } },
     http: { sendApiError, createSseResponse: () => ({ send: () => {} }) },
     paths: { PROJECTS_DIR: projectsDir },
@@ -199,6 +202,28 @@ async function startServer(
   const port = typeof address === 'object' && address ? address.port : 0;
   return { baseUrl: `http://127.0.0.1:${port}`, db };
 }
+
+it('waits for in-flight public mutation before entering project deletion', async () => {
+  const gate = createPublicFileMutations();
+  let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve; });
+  const order: string[] = [];
+  const active = gate.run('locked-project', async () => { order.push('publish'); await blocked; order.push('published'); });
+  // Mark arrival explicitly so no sleep is needed to prove DELETE is queued.
+  let entered!: () => void; const arrival = new Promise<void>(resolve => { entered = resolve; });
+  const lock: PublicFileMutations = { run(id, operation) { entered(); return gate.run(id, operation); } };
+  const hub = fakeHub();
+  const { baseUrl, db } = await startServer(hub, async () => { order.push('stop'); }, lock);
+  insertProject(db, { id: 'locked-project', name: 'Locked', createdAt: 1, updatedAt: 1 });
+  ensureWorkspaceProject(db, { projectId: 'locked-project', workspaceId: WORKSPACE_ID, visibility: 'personal', createdByWorkspaceMemberId: OWNER_MEMBER_ID });
+  const request = fetch(`${baseUrl}/api/projects/locked-project`, { method: 'DELETE', headers: ownerHeaders() });
+  try {
+    const reached = await Promise.race([arrival.then(() => 'lock'), request.then(() => 'response')]);
+    expect(reached).toBe('lock');
+    expect(order).toEqual(['publish']); expect(getProject(db, 'locked-project')).toBeTruthy();
+  } finally { release(); await active; }
+  expect((await request).status).toBe(200);
+  expect(order).toEqual(['publish', 'published', 'stop']);
+});
 
 it.each([true, false])('runs public stop before catalog and local deletion, stop fails=%s', async (fails) => {
   const hub = fakeHub();
