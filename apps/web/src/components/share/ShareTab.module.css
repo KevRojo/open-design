@@ -15,6 +15,25 @@
   color: #333333;
 }
 
+/* S1-T/S4-T: compact scope trigger; legacy viewer and option rows are untouched. */
+.panel :global(.chrome-access-trigger) {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: fit-content;
+  min-width: 88px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  gap: 8px;
+  border: 0;
+  border-radius: 5px;
+  background: #F6F6F6;
+  color: #555555;
+  font-size: 12px;
+}
+
 .panel:global(.chrome-unified-panel) {
   padding: 0;
   gap: 12px;

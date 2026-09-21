@@ -2702,6 +2702,42 @@ test('[P1] project detail assistant completion actions support copy, fork, and f
     .not.toBe(conversationId);
 });
 
+for (const published of [false, true]) {
+  test(`[P1] team scope trigger canvas published=${published}`, async ({ page }) => {
+    await mockWritablePersonalProjectScope(page);
+    const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
+    const context = { ...AMR_PERSONAL_WORKSPACE_CONTEXT, workspaceType: 'team', teamId: 'scope-visual-team' };
+    await page.route(`**/api/projects/${projectId}/workspace-scope`, route => route.fulfill({
+      json: { scope: { kind: 'team', projectId, workspaceId: context.workspaceId, visibility: 'team', context } },
+    }));
+    await page.route(`**/api/projects/${projectId}/collab/status`, route => route.fulfill({
+      json: { publishedVersion: null, materializedVersion: null, syncState: 'local_only', ownerMemberId: context.workspaceMemberId },
+    }));
+    await page.route(`**/api/projects/${projectId}/files/index.html/publish-public`, route => route.fulfill({
+      json: { publication: published ? { url: `https://example.test/artifact/${projectId}/stable-alias`, slug: 'stable-alias', fileName: 'index.html' } : null },
+    }));
+    await page.goto(`/projects/${projectId}/conversations/${conversationId}`);
+    await expectWorkspaceReady(page);
+    await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
+    const menu = page.locator('.share-menu-popover[role="menu"]');
+    if (published) await expect(menu.getByRole('button', { name: 'Stop sharing', exact: true })).toBeVisible();
+    else await expect(menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true })).toBeVisible();
+    const trigger = menu.locator('.chrome-access-trigger');
+    await expect(trigger).toBeEnabled();
+    for (const [property, value] of Object.entries({
+      height: '28px', 'min-height': '28px', 'min-width': '88px', padding: '0px 8px', gap: '8px',
+      'border-top-width': '0px', 'border-radius': '5px', 'background-color': 'rgb(246, 246, 246)',
+      color: 'rgb(85, 85, 85)', 'font-size': '12px', display: 'flex',
+    })) await expect(trigger).toHaveCSS(property, value);
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await expect(menu.getByRole('option')).toHaveCount(2);
+    await test.info().attach(`team-scope-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await trigger.click();
+    await expect(menu.getByRole('listbox')).toBeHidden();
+  });
+}
+
 test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the card menu focused', async ({ page }) => {
   await mockWritablePersonalProjectScope(page);
   const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
