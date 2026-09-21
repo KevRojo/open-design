@@ -1,4 +1,6 @@
 import type { Express, Request, Response } from 'express';
+import { publicFileMutationHandler } from './public-file-mutation-handler.js';
+import type { PublicFileMutations } from '../collab/public-file-mutations.js';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -224,6 +226,7 @@ export interface RegisterCollabSyncRoutesDeps {
   resolveProjectDir?: (projectId: string) => string | Promise<string>;
   /** Durable publication metadata used to restore public links after restart. */
   publicFilePublicationStore?: PublicFilePublicationStore;
+  publicFileMutations?: PublicFileMutations;
   resolvePullDir?: (projectId: string) => string;
   /** Read the durable local materialization cursor for this exact team mirror. */
   readMaterializedVersion?: (
@@ -1247,7 +1250,7 @@ export function registerCollabSyncRoutes(
     return res.json({ ok: true });
   });
 
-  app.post(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
+  app.post(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, publicFileMutationHandler(deps.publicFileMutations, async (req, res) => {
     // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.
     const params = req.params as unknown as { 0?: string; 1?: string };
     const projectId = String(params[0] ?? '');
@@ -1400,9 +1403,9 @@ export function registerCollabSyncRoutes(
     } finally {
       await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
-  });
+  }));
 
-  app.delete(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
+  app.delete(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, publicFileMutationHandler(deps.publicFileMutations, async (req, res) => {
     // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.
     const params = req.params as unknown as { 0?: string; 1?: string };
     const projectId = String(params[0] ?? '');
@@ -1456,7 +1459,7 @@ export function registerCollabSyncRoutes(
       console.warn('[od] failed to unpublish public project file:', error);
       return res.status(502).json({ error: 'PUBLIC_FILE_UNPUBLISH_UNAVAILABLE' });
     }
-  });
+  }));
 
   app.get(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
     // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.

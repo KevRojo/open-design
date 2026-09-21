@@ -958,6 +958,7 @@ import { createCollabRuntime } from './collab/runtime.js';
 import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
 import { createVelaPublicFileStop } from './collab/vela-public-file-stop.js';
 import { createProjectPublicFileStop } from './collab/project-public-file-stop.js';
+import { createPublicFileMutations } from './collab/public-file-mutations.js';
 import { resolveLocalProjectCommentWorkspaceContext } from './collab/project-comment-workspace-context.js';
 import { commentRelayScope, personalCommentRelayFilePaths } from './collab/comment-relay-scope.js';
 import {
@@ -4375,6 +4376,7 @@ export async function startServer({
     console.warn('[od] design-system workspace-resource backfill failed:', error);
   });
   const publicFilePublicationStore = createSqlitePublicFilePublicationStore(db);
+  const publicFileMutations = createPublicFileMutations();
   const collabCloudClient = velaCliCollabClient ?? createCollabCloudClientFromEnv();
   const resolveBoundProjectWorkspaceContext = async (
     projectId: string,
@@ -5173,6 +5175,7 @@ export async function startServer({
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     publicFilePublicationStore,
+    publicFileMutations,
     verifyWorkspaceRequest: verifiedWorkspaceContextForRequest,
     verifyWorkspaceReadRequest: verifiedWorkspaceReadContextForRequest,
     verifyWorkspaceScope: verifiedTeamMirrorScope,
@@ -8592,6 +8595,7 @@ export async function startServer({
   );
   registerProjectRoutes(app, {
     db,
+    publicFileMutations,
     stopPublicFilesBeforeDelete: async (projectId) => {
       const binding = getWorkspaceProjectByProjectId(db, projectId);
       if (!binding?.workspaceId || !binding.createdByWorkspaceMemberId) {

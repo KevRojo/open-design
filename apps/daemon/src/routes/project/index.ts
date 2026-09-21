@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { publicFileMutationHandler } from '../public-file-mutation-handler.js';
+import type { PublicFileMutations } from '../../collab/public-file-mutations.js';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { load } from 'cheerio';
@@ -333,6 +335,7 @@ function assertProjectCreatePreparationWithinDeadline(
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
   /** Stop public bindings before any catalog/local deletion; production supplies this capability. */
   stopPublicFilesBeforeDelete?: (projectId: string) => Promise<void>;
+  publicFileMutations?: PublicFileMutations;
   /**
    * Request-wide deadline for the read-only preparation POST /api/projects
    * runs before its transaction. Production keeps the 15s default; tests and
@@ -5463,7 +5466,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     }
   });
 
-  app.delete('/api/projects/:id', async (req, res) => {
+  app.delete('/api/projects/:id', publicFileMutationHandler(ctx.publicFileMutations, async (req, res) => {
     try {
       const project = getProject(db, req.params.id);
       if (!project) {
@@ -5514,7 +5517,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       // Stop any live agent run in this project before its row and directory
       // are removed, otherwise the CLI subprocess is orphaned — it keeps
       // billing and writes into a directory that no longer exists (#5468).
-      await cancelRunsOwnedBy(design.runs, { projectId: req.params.id });
+      await cancelRunsOwnedBy(design.runs, { projectId: project.id });
       dbDeleteProject(db, req.params.id);
       await removeProjectDir(PROJECTS_DIR, req.params.id).catch(() => {});
       /** @type {import('@open-design/contracts').OkResponse} */
@@ -5523,7 +5526,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     } catch (err: any) {
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
     }
-  });
+  }));
 
   // SSE stream of file-changed events for a project. Drives preview live-reload.
   // Receipt of a `file-changed` event triggers a file-list refresh, which
