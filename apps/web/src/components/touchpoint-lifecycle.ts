@@ -151,6 +151,16 @@ export const REQUEST_TIMEOUT_MS = 15_000;
  * a lease the server will not renew in time is one that ought to lapse.
  */
 export const RETRY_BACKOFF_MS = [1_000, 3_000] as const;
+/**
+ * The largest delay a single `setTimeout` can name. This bounds one timer
+ * SEGMENT and nothing else: `armExpiry` and the `waiting` boundary both cut a
+ * longer wait into segments of at most this, so no individual timer overflows
+ * into firing immediately.
+ *
+ * It is NOT a bound on how long display may be authorized. Those are two
+ * different questions, and the whole of OPEND-3366 is what happens when one
+ * answer is used for both.
+ */
 const MAX_TIMER_MS = 2_147_483_647;
 /**
  * The client's own bound on production display authority, shared by every
@@ -158,14 +168,32 @@ const MAX_TIMER_MS = 2_147_483_647;
  *
  * It is a backstop against a server clock that grants past the activity, not a
  * policy: `resolveAuthorizationDeadline` already takes the minimum of the
- * authorization, `endsAt` and this. A five-minute value made it the binding
- * term instead, so a long authorization was silently truncated to five minutes
- * and a client that could not reach the server went blank in the middle of an
- * activity that was still running. At the longest interval a timer can name it
- * stops binding, and `endsAt` governs, which is what the server means.
- * `armExpiry` segments the resulting wait, so no single timer overflows.
+ * authorization, `endsAt` and this. What the backstop is for is skew, and only
+ * skew — `validForMs` is `deadline - serverTime`, so a `serverTime` that has
+ * fallen a month behind buys a month of display that `endsAt` cannot catch,
+ * because `endsAt` is the very thing the lag is measured against. Hence a
+ * finite value, rather than dropping the term.
+ *
+ * Twice now this constant has been given a number that answered a different
+ * question and so became the binding term instead:
+ *
+ *  - Five minutes, which is an interval between polls, truncated every longer
+ *    authorization to five minutes; a client that could not reach the server
+ *    went blank in the middle of an activity that was still running.
+ *  - `MAX_TIMER_MS`, which is the reach of one timer, truncated every schedule
+ *    longer than ~24.9 days. `armExpiry` already segments a longer wait, so the
+ *    timer limit was never the lease's problem to solve; borrowing it merely
+ *    moved the same defect up a tier. A device offline past that point woke to
+ *    what looked like a new presentation, and the device impression retired a
+ *    campaign the server was still running — permanently, for that device.
+ *
+ * So the value has to answer its own question: a duration no operator's
+ * schedule can plausibly reach, which therefore never binds in practice, while
+ * still finite enough to cap a badly skewed clock. The server enforces no
+ * maximum schedule length at all, and its own production-runtime fixtures run
+ * multi-year windows, so "plausible" here is measured in years.
  */
-export const PRODUCTION_MAX_LEASE_MS = MAX_TIMER_MS;
+export const PRODUCTION_MAX_LEASE_MS = 10 * 365 * 24 * 60 * 60_000;
 /** Only a failure carrying the server's own withdrawal may end a live lease. */
 export const touchpointWithdrawsDisplay = (error: unknown) =>
 	typeof error === "object" && error !== null && (error as { touchpointWithdrawal?: unknown }).touchpointWithdrawal === true;
