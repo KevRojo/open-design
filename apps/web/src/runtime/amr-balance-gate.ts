@@ -120,13 +120,15 @@ export function amrWalletBalanceInsufficient(
 async function fetchWorkspaceWalletSnapshot(
   scope: AmrBalanceGateScope,
   accountSnapshot: AmrWalletSnapshot | null,
-  modelId?: string | null,
+  options: { modelId?: string | null; includePreflight?: boolean } = {},
 ): Promise<(AmrWalletSnapshot & { preflight: WorkspaceBillingPreflight | null }) | null> {
   const workspaceId = scope.workspaceId.trim();
   const workspaceMemberId = scope.workspaceMemberId.trim();
   if (!workspaceId || !workspaceMemberId) return null;
+  const includePreflight = options.includePreflight === true;
+  const modelId = includePreflight ? options.modelId?.trim() : undefined;
   const response = await fetch(
-    `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}&freshness=authoritative&includePreflight=1${modelId?.trim() ? `&modelId=${encodeURIComponent(modelId.trim())}` : ''}`,
+    `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}&freshness=authoritative${includePreflight ? '&includePreflight=1' : ''}${modelId ? `&modelId=${encodeURIComponent(modelId)}` : ''}`,
     { cache: 'no-store' },
   );
   if (!response.ok) return null;
@@ -162,7 +164,7 @@ async function fetchWorkspaceWalletSnapshot(
     preflight:
       body.preflight?.workspaceId === workspaceId &&
       body.preflight.workspaceMemberId === workspaceMemberId &&
-      body.preflight.modelId === (modelId?.trim() || null) &&
+      body.preflight.modelId === (modelId || null) &&
       Math.abs(Date.now() - Date.parse(body.preflight.generatedAt)) < 60_000
         ? body.preflight
         : null,
@@ -227,11 +229,10 @@ export async function fetchAmrBalanceCardWalletSnapshot(
 
 async function checkWorkspaceBalanceGate(
   scope: AmrBalanceGateScope,
-  modelId?: string | null,
 ): Promise<AmrBalanceGateResult> {
   const [accountSnapshot, workspaceSnapshot] = await Promise.all([
     fetchAmrWalletSnapshot().catch(() => null),
-    fetchWorkspaceWalletSnapshot(scope, null, modelId).catch(() => null),
+    fetchWorkspaceWalletSnapshot(scope, null).catch(() => null),
   ]);
   if (accountSnapshot?.status === 'signed_out') {
     const fresh = await fetchAmrWalletSnapshot({ refresh: true }).catch(() => null);
@@ -246,10 +247,10 @@ async function checkWorkspaceBalanceGate(
 
 export async function checkAmrBalanceGate(
   scope?: AmrBalanceGateScope,
-  modelId?: string | null,
+  _modelId?: string | null,
 ): Promise<AmrBalanceGateResult> {
   try {
-    if (scope) return await checkWorkspaceBalanceGate(scope, modelId);
+    if (scope) return await checkWorkspaceBalanceGate(scope);
     const cached = await fetchAmrWalletSnapshot().catch(() => null);
     if (cached?.status === 'signed_out') {
       const fresh = await fetchAmrWalletSnapshot({ refresh: true }).catch(() => null);
@@ -274,7 +275,10 @@ export async function hasAmrFundingRecovered(
       snapshot && !snapshot.stale && !snapshot.error && (amrWalletBalanceUsd(snapshot) ?? 0) > 0,
     );
   }
-  const snapshot = await fetchWorkspaceWalletSnapshot(scope, null, modelId).catch(() => null);
+  const snapshot = await fetchWorkspaceWalletSnapshot(scope, null, {
+    modelId,
+    includePreflight: true,
+  }).catch(() => null);
   if (!snapshot) return false;
   if (snapshot.preflight)
     return (

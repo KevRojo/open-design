@@ -189,7 +189,8 @@ describe('checkAmrBalanceGate', () => {
     const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify({ ...body, ...(funding ? { preflight: { funding } } : {}) })));
     vi.stubGlobal('fetch', fetcher);
     await expect(checkAmrBalanceGate({ workspaceType: 'team', workspaceId: 'ws', workspaceMemberId: 'member' }, 'model/a+b')).resolves.toEqual({ kind: 'allow' });
-    expect(String(fetcher.mock.calls[0]?.[0])).toContain('modelId=model%2Fa%2Bb');
+    expect(String(fetcher.mock.calls[0]?.[0])).not.toContain('includePreflight=1');
+    expect(String(fetcher.mock.calls[0]?.[0])).not.toContain('modelId=');
   });
 
   it('does not authorize a positive balance from a daemon that cannot prove an authoritative read', async () => {
@@ -463,11 +464,14 @@ describe('funding recovery', () => {
     { funding: 'gateway', modelCovered: true, recovered: false },
     { funding: 'coding_plan', modelCovered: null, recovered: false },
   ])('requires positive funding evidence: $funding / $modelCovered', async ({ funding, modelCovered, recovered }) => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify({
       ...authoritativeWorkspaceBillingResponse('ws', 'member', '0'),
       preflight: { workspaceId: 'ws', workspaceMemberId: 'member', modelId: 'model', generatedAt: new Date().toISOString(), funding, modelCovered },
-    }))));
+    })));
+    vi.stubGlobal('fetch', fetcher);
     expect(await hasAmrFundingRecovered(scope, 'model')).toBe(recovered);
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('includePreflight=1');
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('modelId=model');
   });
   it('does not recover on old capability or a mismatched model/member', async () => {
     for (const preflight of [undefined,

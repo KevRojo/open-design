@@ -293,7 +293,7 @@ describe('account menu billing card — scoped USD balance (recvqgaMLxEdZX)', ()
     });
 
     const card = billingCard();
-    expect(card.getByText('额度')).toBeTruthy();
+    expect(card.getByText('钱包余额')).toBeTruthy();
     expect(card.getByText('$9.99')).toBeTruthy();
     expect(card.queryByText('999,330')).toBeNull();
     expect(card.queryByText('余额')).toBeNull();
