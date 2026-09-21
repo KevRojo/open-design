@@ -409,11 +409,22 @@ export function createPublicFileStopStartup(
       const id = stopTaskKey(key);
       if (seen.has(id)) continue;
       seen.add(id);
+      const stillOwnsTask = () => {
+        const currentTask = store.listStops().find(item => stopTaskKey(item) === id);
+        if (!currentTask || currentTask.publicationRevision !== task.publicationRevision
+          || currentTask.failureCount !== task.failureCount) return false;
+        const current = store.getRevision(key);
+        // Legacy tasks can retry orphaned slugs, but never claim a live witness.
+        return !current || (current.slug === task.slug
+          && current.token === task.publicationRevision);
+      };
+      if (!stillOwnsTask()) { result.deferred++; continue; }
       let operation: PreparedPublicFileStop | null = null;
       try { operation = await prepare?.(Object.freeze(key)) ?? null; } catch { /* No verified operation. */ }
       if (!operation
         || operation.resourceTeamId !== key.resourceTeamId
-        || operation.ownerMemberId !== key.ownerMemberId) {
+        || operation.ownerMemberId !== key.ownerMemberId
+        || !stillOwnsTask()) {
         result.deferred++;
         continue;
       }
@@ -421,10 +432,20 @@ export function createPublicFileStopStartup(
       try { await operation.stop(); } catch { failed = true; }
       // Persistence errors must not masquerade as network failures or success.
       try {
+        if (!stillOwnsTask()) {
+          result.deferred++;
+          continue;
+        }
         if (failed) {
           store.recordStopFailure(key);
           result.failed++;
         } else {
+          const current = store.getRevision(key);
+          if (current && (task.publicationRevision === undefined
+            || !store.deleteIfRevisionMatches(key, { slug: task.slug, token: task.publicationRevision }))) {
+            result.deferred++;
+            continue;
+          }
           store.completeStop(key);
           result.stopped++;
         }
