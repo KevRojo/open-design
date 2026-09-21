@@ -79,7 +79,7 @@ describe('S1 first-publish visual seam', () => {
       rule.walkDecls(decl => { values[decl.prop] = decl.value; });
     });
     expect(values).toMatchObject({
-      width: '360px', 'max-width': 'calc(100vw - 32px)', padding: '16px 20px', gap: '12px',
+      width: '360px', 'max-width': 'calc(100vw - 32px)', padding: '16px 20px', gap: '12px', 'font-weight': '400',
       border: '1px solid #00000008', 'border-radius': '12px', background: '#FFFFFF',
       'box-shadow': '0 8px 28px #00000010, 0 2px 6px #00000006',
     });
