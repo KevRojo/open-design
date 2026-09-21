@@ -56,6 +56,17 @@ describe('S1-T2 scope option rows', () => {
 });
 
 describe('S1-T/S4-T shared scope trigger', () => {
+  it('hides decorative icons but preserves the busy slot and sizes the chevron', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const declarations = (selector: string) => {
+      const values: Record<string, string> = {};
+      css.walkRules(selector, rule => { rule.walkDecls(decl => { values[decl.prop] = decl.value; }); });
+      return values;
+    };
+    expect(declarations('.panel :global(.chrome-access-trigger > .share-menu-icon:not(:has(.icon-spin)))')).toMatchObject({ display: 'none' });
+    expect(declarations('.panel :global(.chrome-access-trigger > svg)')).toMatchObject({ width: '12px', height: '12px', 'flex-shrink': '0' });
+    expect(declarations('.panel :global(.chrome-access-trigger > .share-menu-icon)')).not.toHaveProperty('display');
+  });
   it('uses the compact canvas trigger only under ShareTab', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
     const values: Record<string, string> = {};

@@ -34,6 +34,17 @@
   font-size: 12px;
 }
 
+/* Static scope icons are decorative; never hide the pending-request spinner. */
+.panel :global(.chrome-access-trigger > .share-menu-icon:not(:has(.icon-spin))) {
+  display: none;
+}
+
+.panel :global(.chrome-access-trigger > svg) {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
 /* S1-T2: canvas minimum width; grow for translations within the panel. */
 .panel :global(.chrome-access-options) {
   box-sizing: border-box;

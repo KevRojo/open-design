@@ -2724,6 +2724,9 @@ for (const published of [false, true]) {
     else await expect(menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true })).toBeVisible();
     const trigger = menu.locator('.chrome-access-trigger');
     await expect(trigger).toBeEnabled();
+    await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
+    await expect(trigger.locator(':scope > svg')).toHaveCSS('width', '12px');
+    await expect(trigger.locator(':scope > svg')).toHaveCSS('height', '12px');
     for (const [property, value] of Object.entries({
       height: '28px', 'min-height': '28px', 'min-width': '88px', padding: '0px 8px', gap: '8px',
       'border-top-width': '0px', 'border-radius': '5px', 'background-color': 'rgb(246, 246, 246)',
@@ -2775,6 +2778,35 @@ for (const published of [false, true]) {
     await test.info().attach(`team-scope-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
     await trigger.click();
     await expect(menu.getByRole('listbox')).toBeHidden();
+
+    // A real confirmation/request drives busy state; do not inject DOM classes.
+    const movePath = `/api/workspaces/${context.workspaceId}/projects/${projectId}/move`;
+    let releaseMove = () => {};
+    const moveGate = new Promise<void>(resolve => { releaseMove = resolve; });
+    await page.route(`**${movePath}`, async route => {
+      await moveGate;
+      await route.fulfill({ status: 503, json: { error: { message: 'visual busy-state fixture' } } });
+    });
+    try {
+      await trigger.click();
+      await privateOption.click();
+      const confirmation = page.getByRole('alertdialog', { name: 'Move out of team space' });
+      const [request] = await Promise.all([
+        page.waitForRequest(request => new URL(request.url()).pathname === movePath && request.method() === 'POST'),
+        confirmation.getByRole('button', { name: 'Confirm move', exact: true }).click(),
+      ]);
+      expect(request.postDataJSON()).toEqual({ visibility: 'personal' });
+      // Confirmation is outside the anchored popover and dismisses it.
+      await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
+      await expect(trigger).toBeDisabled();
+      await expect(trigger.locator('.share-menu-icon .icon-spin')).toBeVisible();
+      await test.info().attach(`team-scope-busy-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
+    } finally {
+      releaseMove();
+    }
+    await expect(trigger).toBeEnabled();
+    await expect(trigger.locator(':scope > .share-menu-icon')).toBeHidden();
+    await expect(trigger).toHaveText('Workspace members');
   });
 }
 
