@@ -452,6 +452,42 @@ export const SHARE_COMMENT_VALIDATION_ORDER: readonly ShareCommentErrorCode[] = 
 ] as const;
 
 /**
+ * The failure envelope the vela CLI writes to stdout when a single comment
+ * push fails, and the field names the daemon must read it by.
+ *
+ * This exists because the two halves were built to different names and both
+ * sides' tests passed: the Go side emitted `errorCode`, the daemon parser
+ * required `code`, so the parse returned null, no structured error was ever
+ * produced, and the daemon's terminal-cancel could not fire. Nothing was red.
+ * An agreement that lives only in two implementations is not an agreement.
+ *
+ * `errorCode` is the name, because the batch push path shipped it first
+ * (`collabCommentPushBatchItemResult`); the parser is what moves.
+ *
+ * Both fields are required to act on it. A code alone must never cancel
+ * data: cancelling discards a comment the user already wrote, so a loose
+ * match — an upstream proxy whose prose happens to contain the code — would
+ * destroy it. Status without code is equally insufficient.
+ */
+export const VELA_CLI_FAILURE_ENVELOPE_FIELDS = {
+  /** Human-readable text. Must never, on its own, decide anything. */
+  message: 'error',
+  /** The API error code, e.g. `SHARE_STOPPED`. */
+  code: 'errorCode',
+  /** The HTTP status the API answered with. Omitted when zero. */
+  status: 'status',
+} as const;
+
+/**
+ * The one condition under which a queued comment is discarded rather than
+ * retried. Both halves are required — see above for why.
+ */
+export const SHARE_COMMENT_TERMINAL_REJECTION = {
+  status: 410,
+  code: 'SHARE_STOPPED',
+} as const;
+
+/**
  * Error body for the share comment API.
  *
  * vela today answers errors in TWO different shapes depending on the route
