@@ -1886,6 +1886,19 @@ describe("ProductionCampaignModal device impressions", () => {
 		await act(async () => { fireEvent(document, new Event("visibilitychange")); });
 		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
 		expect(screen.queryByRole("dialog")).toBeNull();
+
+		// Control. Both assertions above are absences, and an absence is what a
+		// lifecycle that never came back at all also looks like — a `wake` that
+		// stopped waking would leave this case fully green while proving nothing.
+		// Drop the impression and wake once more, through the same event and the
+		// same advance as the assertion above, so the impression is the only
+		// difference between the two outcomes: the same path now has to PRESENT,
+		// which is what makes the nulls above readable as the impression gate
+		// closing a live offer rather than as no offer arriving.
+		localStorage.removeItem(marker());
+		await act(async () => { fireEvent(document, new Event("visibilitychange")); });
+		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+		expect(screen.getByRole("dialog")).toBeTruthy();
 	});
 	it("keeps the displayed campaign on screen when a poll fails and its retry recovers", async () => {
 		// A transport failure is not a withdrawal: the lifecycle keeps the lease
