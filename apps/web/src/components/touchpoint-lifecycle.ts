@@ -78,6 +78,17 @@ export const touchpointContentIdentity = (decision: {
  * So they do not survive into the lease. The type says so, and the value really
  * does not carry them, which keeps the guarantee true for a consumer that casts
  * its way around the type.
+ *
+ * Scope, because this reads like a property of the hook and is not one: it
+ * holds wherever this helper is applied, which is the three PRODUCTION
+ * placements — Modal, Badge and Hover. `useTouchpointLifecycle` has a fourth
+ * consumer, `TestCampaignModal`, whose lease value retains whole decisions with
+ * their timing intact. That is deliberate: the Test channel exists to show an
+ * operator what the schedule is doing, its authorization is capped at sixty
+ * seconds, and every round recomputes from a fresh `serverTime`, so nothing it
+ * retains can be stale by more than one poll. Nothing enforces the boundary
+ * either — a fifth consumer would inherit neither the helper nor this note — so
+ * read it as three audited call sites rather than as an invariant of the hook.
  */
 export type TouchpointAuthorizationTimingField =
 	| "serverTime"
