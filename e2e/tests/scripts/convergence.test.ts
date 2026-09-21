@@ -1145,14 +1145,42 @@ print("snapshot and candidate binding passed")
     expect(arc).not.toBe(hosted);
   });
 
-  test("keeps broad test workloads on tracked-tree inputs until their closure is proven", () => {
+  test("keeps independently reusable test shards on their proven suite closures", () => {
     const config = JSON.parse(readFileSync(
       path.join(repoRoot, ".github", "config", "convergence.json"),
       "utf8",
     )) as any;
 
-    expect(config.workflows.ci.workloads.daemon_unit_tests.inputs).toEqual(["*"]);
-    expect(config.workflows.ci.workloads.e2e_vitest.inputs).toEqual(["*"]);
+    expect(config.suites["workspace-install"]).toContain(".github/workflows/ci.yml");
+    for (const shard of [1, 2, 3, 4]) {
+      expect(config.workflows.ci.workloads[`daemon_unit_${shard}`].inputs).toEqual(["suite://daemon"]);
+    }
+    for (const shard of [1, 2]) {
+      expect(config.workflows.ci.workloads[`web_workspace_${shard}`].inputs).toEqual(["suite://web"]);
+    }
+    expect(config.workflows.ci.workloads.e2e_vitest.inputs).toEqual(["suite://e2e-runtime"]);
+    expect(config.workflows.ci.matrices.daemon).toEqual(
+      [1, 2, 3, 4].map((shard) => ({
+        name: `Daemon tests (${shard}/4)`, workload: `daemon_unit_${shard}`, shard,
+      })),
+    );
+    expect(config.workflows.ci.matrices.web).toEqual(
+      [1, 2].map((shard) => ({
+        name: `Web workspace tests (${shard}/2)`, workload: `web_workspace_${shard}`, shard,
+      })),
+    );
+    expect(config.workflows.ci.matrices.ui_p0.map((entry: any) => entry.workload)).toEqual([
+      "ui_p0_entry_settings",
+      "ui_p0_project_workspace",
+      "ui_p0_project_workspace_editor",
+      "ui_p0_project_collab",
+      "ui_p0_project_runtime",
+      "ui_p0_workspace_restoration",
+    ]);
+    for (const entry of config.workflows.ci.matrices.ui_p0) {
+      expect(config.workflows.ci.workloads[entry.workload].inputs).toEqual(["suite://ui-runtime"]);
+      expect(config.workflows.ci.workloads[entry.workload].reusable).toBe(true);
+    }
   });
 
   test("materializes the convergence handoff from the GitHub event context", () => {

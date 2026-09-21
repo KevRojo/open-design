@@ -293,8 +293,8 @@ async function runScopesPrint(eventName: string, eventPayload: unknown, changedF
     run_playwright_critical: value.enabled.playwright_critical,
     run_playwright_visual: value.enabled.playwright_visual,
     run_preflight: value.enabled.preflight,
-    run_ui_p0: value.enabled.ui_p0,
-    run_web_workspace_tests: value.enabled.web_workspace_tests,
+    run_ui_p0: Object.entries(value.enabled).some(([id, enabled]) => id.startsWith("ui_p0_") && enabled),
+    run_web_workspace_tests: [1, 2].some((shard) => value.enabled[`web_workspace_${shard}`]),
     run_windows_tools_pack_payload_tests: value.enabled.windows_tools_pack_payload_tests,
     run_workspace_unit_tests: value.enabled.workspace_unit_tests,
   };
@@ -1366,12 +1366,12 @@ process.stdin.on("end", () => {
     const validate = sectionBetween(workflow, "  validate:", "  runtime_summary:");
 
     expect(workflow).toContain("ci_mode:");
-    expect(plan).toContain("run: ${{ steps.convergence.outputs.run }}");
+    expect(plan).toContain("run: ${{ steps.gate.outputs.run }}");
     expect(plan).toContain("scopes: ${{ steps.scopes.outputs.scopes }}");
     expect(plan).toContain("github.event_name == 'merge_group'");
     expect(plan).toContain("github.event.pull_request.head.repo.full_name == github.repository");
     expect(plan).toContain("&& 'enforce' || 'shadow'");
-    expect(workflow).toContain("fromJSON(needs.plan.outputs.run).ui_p0");
+    expect(workflow).toContain("needs.plan.outputs.ui_p0_count != '0'");
     expect(validate).toContain("[$run | to_entries[] | select(.value) | .key]");
 
     await expect(runScopesPrint("workflow_dispatch", { inputs: { ci_mode: "hot" } }, ["apps/web/src/app/page.tsx"])).resolves.toMatchObject({
@@ -1547,9 +1547,9 @@ process.stdin.on("end", () => {
     const daemonTests = sectionBetween(workflow, "  daemon_unit_tests:", "  windows_tools_pack_payload_tests:");
     const validate = sectionBetween(workflow, "  validate:", "  runtime_summary:");
 
-    expect(daemonTests).toContain("if: ${{ fromJSON(needs.plan.outputs.run).daemon_unit_tests }}");
+    expect(daemonTests).toContain("if: ${{ needs.plan.outputs.daemon_count != '0' }}");
     expect(daemonTests).toContain("fail-fast: false");
-    expect(daemonTests).toContain("shard: [1, 2, 3, 4]");
+    expect(daemonTests).toContain("matrix: ${{ fromJSON(needs.plan.outputs.daemon_matrix) }}");
     expect(daemonTests).toContain("pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4");
     expect(validate).toContain("- daemon_unit_tests");
     expect(validate).toContain("[$run | to_entries[] | select(.value) | .key]");
@@ -1786,19 +1786,24 @@ process.stdin.on("end", () => {
     expect(runners).toContain("python3 .github/scripts/runners.py");
     expect(plan).toContain("needs: [runners]");
     expect(plan).toContain("fromJSON(needs.runners.outputs.runs_on).control");
+    expect(plan).toContain("daemon_matrix: ${{ steps.convergence.outputs.daemon_matrix }}");
+    expect(plan).toContain("web_matrix: ${{ steps.convergence.outputs.web_matrix }}");
+    expect(plan).toContain("ui_p0_matrix: ${{ steps.convergence.outputs.ui_p0_matrix }}");
+    expect(plan).toContain("Project workload decisions onto CI jobs");
     expect(staticGate).toContain("needs: [plan, runners]");
     expect(staticGate).toContain("fromJSON(needs.runners.outputs.runs_on).control");
     expect(workspaceUnitTests).toContain("fromJSON(needs.runners.outputs.runs_on).workspace_unit");
     expect(workspaceUnitTests).toContain("toJSON(fromJSON(needs.runners.outputs.runs_on).workspace_unit)");
     expect(daemonUnitTests).toContain("fromJSON(needs.runners.outputs.runs_on).workspace_unit");
     expect(daemonUnitTests).toContain("toJSON(fromJSON(needs.runners.outputs.runs_on).workspace_unit)");
+    expect(daemonUnitTests).toContain("matrix: ${{ fromJSON(needs.plan.outputs.daemon_matrix) }}");
     expect(webWorkspaceTests).toContain("fromJSON(needs.runners.outputs.runs_on).js_hot");
     expect(webWorkspaceTests).toContain("toJSON(fromJSON(needs.runners.outputs.runs_on).js_hot)");
     expect(webWorkspaceTests).not.toContain('"od-persistent-ci"');
     // Pin two-way vitest sharding so a later YAML edit cannot collapse the split or restore the
     // monolithic `pnpm --filter @open-design/web test` command while this suite still passes.
     expect(webWorkspaceTests).toContain("fail-fast: false");
-    expect(webWorkspaceTests).toContain("shard: [1, 2]");
+    expect(webWorkspaceTests).toContain("matrix: ${{ fromJSON(needs.plan.outputs.web_matrix) }}");
     expect(webWorkspaceTests).toContain(
       "pnpm --filter @open-design/web exec vitest run -c vitest.config.ts --maxWorkers=2 --shard=${{ matrix.shard }}/2",
     );
@@ -1813,7 +1818,8 @@ process.stdin.on("end", () => {
     expect(uiP0).toContain(
       "toJSON(matrix.shard == 'project-collab' && fromJSON(needs.runners.outputs.runs_on).ui_p0_heavy || fromJSON(needs.runners.outputs.runs_on).ui_p0)",
     );
-    expect(uiP0).toContain("include: ${{ fromJSON(needs.plan.outputs.ui_p0_matrix) }}");
+    expect(uiP0).toContain("matrix: ${{ fromJSON(needs.plan.outputs.ui_p0_matrix) }}");
+    expect(uiP0).toContain("if: ${{ needs.plan.outputs.ui_p0_count != '0' }}");
     expect(uiP0CiMatrix.map((entry) => entry.name)).toEqual([
       "entry-settings",
       "project-workspace",
