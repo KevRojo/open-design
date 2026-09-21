@@ -2713,6 +2713,25 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(shareButtons).toHaveCount(2);
   const firstShare = shareButtons.nth(0);
   const secondShare = shareButtons.nth(1);
+  // E0/G1 share-only seams must survive the production global CSS cascade.
+  const toolbarShare = page.locator('.chrome-share-menu--unified > button[aria-label="Share"]');
+  await expect(toolbarShare).toBeVisible();
+  for (const [property, value] of Object.entries({
+    height: '28px', 'border-radius': '6px', gap: '5px',
+    'padding-left': '12px', 'padding-right': '12px',
+    'background-color': 'rgb(40, 40, 40)', color: 'rgb(255, 255, 255)',
+    'font-size': '12px', 'font-weight': '500', 'border-top-width': '0px',
+  })) {
+    await expect(toolbarShare).toHaveCSS(property, value);
+  }
+  for (const [property, value] of Object.entries({
+    height: '30px', 'border-radius': '6px', gap: '5px',
+    'background-color': 'rgb(237, 237, 240)', color: 'rgb(51, 51, 51)',
+    'font-size': '12px', 'font-weight': '500', 'border-top-width': '0px',
+    'backdrop-filter': 'none', 'box-shadow': 'none',
+  })) {
+    await expect(secondShare).toHaveCSS(property, value);
+  }
   const firstAnchor = await firstShare.getAttribute('data-artifact-anchor');
   const secondAnchor = await secondShare.getAttribute('data-artifact-anchor');
   expect(firstAnchor).toBeTruthy();

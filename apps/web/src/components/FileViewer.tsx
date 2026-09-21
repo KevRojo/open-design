@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
+import shareEntryStyles from './share/ShareEntry.module.css';
 import { AnchoredMenuShell } from './chat/AnchoredMenuShell';
 import { createPortal, flushSync } from 'react-dom';
 import { Button, Input, Select } from '@open-design/components';
@@ -17195,7 +17196,7 @@ function HtmlViewer({
                 ) : null}
                   <button
                     type="button"
-                    className="chrome-action chrome-action-secondary chrome-action-with-label chrome-action-text-only chrome-action-unified"
+                    className={`chrome-action chrome-action-secondary chrome-action-with-label chrome-action-text-only chrome-action-unified ${shareEntryStyles.toolbar}`}
                     aria-haspopup="menu"
                     aria-expanded={deployMenuOpen && unifiedActionTab === 'share'}
                     aria-label={shareMenuLabel}
