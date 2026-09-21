@@ -299,6 +299,53 @@ describe('mergeSyncedPreviewComment', () => {
     }
   });
 
+  it.each([false, true, undefined, null, 0, 'stored'])(
+    'does not advance a pull on an invalid persistence acknowledgement: %s', async (invalid) => {
+      const db = seededDb();
+      const records = [cloudComment('first', { seq: 1 }), cloudComment('second', { seq: 2 })];
+      const requests: Array<{ sinceSeq: number; etag: string | null | undefined }> = [];
+      const errors: unknown[] = [];
+      const onMerged = vi.fn();
+      let merges = 0;
+      const service = createCollabCloudService({
+        client: {
+          pullComments: async (_team: string, _project: string, sinceSeq: number, etag?: string | null) => {
+            requests.push({ sinceSeq, etag });
+            const latestSeq = requests.length === 1 ? 1 : 2;
+            return {
+              comments: records.filter((comment) => comment.seq > sinceSeq && comment.seq <= latestSeq),
+              latestSeq, etag: `etag-${latestSeq}`, notModified: false,
+            };
+          },
+        } as unknown as CollabCloudClient,
+        listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local',
+        mergeComment: ({ projectId, conversationId, comment }) => {
+          // Deliberately violate the typed seam to model an old/incorrect adapter.
+          if (++merges === 2) return invalid as unknown as ReturnType<typeof mergeSyncedPreviewComment>;
+          return mergeSyncedPreviewComment(db, projectId, conversationId, comment);
+        },
+        onMerged, onError: (error) => errors.push(error),
+      });
+      try {
+        expect(await service.pullProject('p1', teamContext())).toBe(true);
+        expect(await service.pullProject('p1', teamContext())).toBe(false);
+        expect(errors).toHaveLength(1);
+        expect(onMerged).toHaveBeenCalledTimes(1);
+        expect(listPreviewComments(db, 'p1', 'conv-local').map((comment) => comment.id)).toEqual(['first']);
+        expect(await service.pullProject('p1', teamContext())).toBe(true);
+        expect(await service.pullProject('p1', teamContext())).toBe(true);
+        expect(requests).toEqual([
+          { sinceSeq: 0, etag: undefined },
+          { sinceSeq: 1, etag: 'etag-1' },
+          { sinceSeq: 1, etag: 'etag-1' },
+          { sinceSeq: 2, etag: 'etag-2' },
+        ]);
+        expect(listPreviewComments(db, 'p1', 'conv-local').map((comment) => comment.id)).toEqual(['first', 'second']);
+        expect(onMerged.mock.calls).toEqual([[{ projectId: 'p1', inserted: 1 }], [{ projectId: 'p1', inserted: 1 }]]);
+      } finally { service.dispose(); }
+    },
+  );
+
   it('replays skipped external authors on a fresh service without resetting stored comments', async () => {
     const db = seededDb();
     const member = cloudComment('existing-member', { seq: 2, authorKind: 'member' });
