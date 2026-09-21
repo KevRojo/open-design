@@ -4530,15 +4530,13 @@ function CommentAuthorIdentityContent({
   const avatarColor = commentAuthorAvatarColor(seed ?? '');
   return (
     <span className="comment-side-author" data-author-kind={comment.authorKind ?? 'member'}>
-      {displayName ? (
-        <span
-          className="comment-side-avatar"
-          style={{ background: avatarColor.bg, color: avatarColor.fg }}
-          aria-hidden="true"
-        >
-          {commentAuthorInitials(displayName)}
-        </span>
-      ) : null}
+      <span
+        className="comment-side-avatar"
+        style={{ background: avatarColor.bg, color: avatarColor.fg }}
+        aria-hidden="true"
+      >
+        {commentAuthorInitials(displayName)}
+      </span>
       <span className="comment-side-author-copy">
         <strong>{`${displayNumber}. ${commentDisplayLabel(comment, t)}`}</strong>
         {displayName ? (
@@ -4775,7 +4773,7 @@ export function CommentSidePanel({
       <div className="comment-side-header">
         <div className="comment-side-title">
           <RemixIcon name="message-3-line" size={15} />
-          <span>{commentsLabel}</span>
+          <span>{commentsLabel} <i>{comments.length}</i></span>
         </div>
         <div className="comment-side-header-actions">
           {/* The header's right slot owns collapse; select all moved below

@@ -369,6 +369,28 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(sidePanel.getByTestId('comment-side-item').filter({ hasText: 'Make the headline more specific.' }).first()).toBeVisible();
   await captureLane4CommentState(page, '06-panel-populated');
   await captureLane4CommentState(page, '06-author-self');
+  // K6/K7/O1–O7/OP4 share the Owner-board sidebar shell (◇ provenance).
+  const floatHost = page.locator('.comment-float-host').filter({ has: sidePanel });
+  await expect(floatHost).toHaveCSS('width', '320px');
+  await expect(floatHost).toHaveCSS('border-radius', '10px');
+  await expect(floatHost).toHaveCSS('background-color', 'rgb(250, 250, 250)');
+  const header = sidePanel.locator('.comment-side-header');
+  await expect(header).toHaveCSS('height', '56px');
+  await expect(header).toHaveCSS('padding', '0px 16px');
+  await expect(sidePanel.locator('.comment-side-title')).toHaveText('Comments 1');
+  await expect(sidePanel.locator('.comment-side-title i')).toHaveCSS('color', 'rgb(153, 153, 153)');
+  const list = sidePanel.locator('.comment-side-list');
+  await expect(list).toHaveCSS('padding', '8px 12px');
+  await expect(list).toHaveCSS('gap', '6px');
+  const item = sidePanel.getByTestId('comment-side-item').first();
+  await expect(item).toHaveCSS('padding', '6px 10px 6px 8px');
+  await expect(item).toHaveCSS('border-radius', '8px');
+  await expect(item.locator('.comment-side-body')).toHaveCSS('line-height', '20px');
+  await expect(item.locator('.comment-side-time')).toHaveCSS('font-size', '10.5px');
+  await expect(item.locator('.comment-side-time')).toHaveCSS('flex-shrink', '0');
+  await expect(item.locator('.comment-side-avatar')).toHaveCSS('width', '20px');
+  await expect(item.locator('.comment-side-avatar')).toHaveCSS('height', '20px');
+  await expect(item.locator('.comment-side-avatar')).toHaveCSS('font-weight', '500');
   await expect
     .poll(async () => {
       const selectAll = sidePanel.getByRole('button', { name: /select all/i }).first();
@@ -378,6 +400,17 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
     })
     .toBe(true);
   await expect(page.getByTestId('comment-side-send-claude')).toBeVisible();
+  const selectbar = sidePanel.getByTestId('comment-side-selectbar');
+  await expect(selectbar).toHaveCSS('height', '40px');
+  await expect(selectbar).toHaveCSS('padding', '4px 14px 8px');
+  await expect(item.locator('.comment-side-check')).toHaveCSS('width', '16px');
+  await expect(item.locator('.comment-side-check')).toHaveCSS('background-color', 'rgb(32, 32, 32)');
+  const sendComments = sidePanel.getByTestId('comment-side-send-claude');
+  await expect(sendComments).toHaveCSS('height', '28px');
+  await expect(sendComments).toHaveCSS('border-radius', '6px');
+  await expect(sendComments).toHaveCSS('font-weight', '500');
+  await sendComments.hover();
+  await expect(sendComments).toHaveCSS('background-color', 'rgb(32, 32, 32)');
 
   const runRequest = page.waitForRequest(isCreateRunRequest);
   const runEvents = page.waitForResponse((response) => {

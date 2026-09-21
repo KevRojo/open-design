@@ -13445,6 +13445,36 @@ describe('FileViewer tweaks toolbar', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/workspace/members'))).toBe(false);
   });
 
+  it.each(['', '   ', undefined])('O4 shows a question-mark avatar and no author line for blank name %s', async (authorDisplayName) => {
+    const comment: PreviewComment = {
+      id: 'blank-author', projectId: 'project-1', conversationId: 'conversation-1',
+      filePath: 'preview.html', elementId: 'hero-copy', selector: '[data-od-id="hero-copy"]',
+      label: 'Hero copy', text: 'Hero copy', htmlHint: '<p data-od-id="hero-copy">',
+      position: { x: 16, y: 24, width: 320, height: 48 }, note: 'Feedback.', status: 'open',
+      authorKind: 'user', authorDisplayName, authorKey: 'blank-name-key',
+      createdAt: 10, updatedAt: 10,
+    };
+    render(
+      <CommentSidePanel
+        comments={[comment]} selectedIds={new Set()} activeCommentId={null} collapsed={false}
+        onCollapsedChange={() => {}} onToggleSelect={() => {}} onSelectAll={() => {}}
+        onClearSelection={() => {}} onReply={() => {}} onSendSelected={() => {}}
+        sending={false} t={t}
+      />,
+    );
+    const item = await screen.findByTestId('comment-side-item');
+    const avatar = item.querySelector<HTMLElement>('.comment-side-avatar');
+    expect(avatar?.textContent).toBe('?');
+    const expectedColor = document.createElement('span');
+    const swatch = commentAuthorAvatarColor('blank-name-key');
+    expectedColor.style.background = swatch.bg;
+    expectedColor.style.color = swatch.fg;
+    expect(avatar?.style.background).toBe(expectedColor.style.background);
+    expect(avatar?.style.color).toBe(expectedColor.style.color);
+    expect(item.querySelector('.comment-side-author-copy small')).toBeNull();
+    expect(document.querySelector('.comment-side-title')?.textContent).toBe(`${t('chat.tabComments')} 1`);
+  });
+
   it('keeps relative comment-time boundaries stable across clock boundaries', () => {
     vi.useFakeTimers();
     try {
