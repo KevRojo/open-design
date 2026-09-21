@@ -2831,7 +2831,7 @@ for (const published of [false, true]) {
      const heading = menu.locator('.share-menu-section-label--help');
      const publicBlock = published ? menu.locator('.chrome-publish-plain') : menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true });
      const publicBounds = (await publicBlock.boundingBox())!;
-     expect((await heading.boundingBox())!.y).toBeGreaterThanOrEqual(publicBounds.y + publicBounds.height);
+     expect((await heading.boundingBox())!.y - publicBounds.y - publicBounds.height).toBe(32);
      for (const [property, value] of Object.entries({ padding: '0px', color: 'rgb(51, 51, 51)', 'font-size': '13px', 'font-weight': '500', 'line-height': '20px' })) {
        await expect(heading).toHaveCSS(property, value);
      }

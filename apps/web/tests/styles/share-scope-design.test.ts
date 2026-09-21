@@ -56,6 +56,17 @@ describe('S1-T2 scope option rows', () => {
 });
 
 describe('S1-T/S4-T shared scope trigger', () => {
+  it('adds the 20px section offset only when scope follows another section', () => {
+    const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
+    const values: Record<string, string> = {};
+    css.walkRules('.scopeHeading:not(:first-child)', rule => {
+      rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+    });
+    expect(values).toEqual({ 'margin-block-start': '20px' });
+    css.walkRules('.scopeHeading', rule => {
+      rule.walkDecls(decl => { expect(decl.prop).not.toMatch(/^margin/); });
+    });
+  });
   it('removes only the legacy horizontal scope inset, preserving the anchor', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
     const values: Record<string, string> = {};

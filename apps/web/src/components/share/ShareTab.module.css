@@ -23,6 +23,12 @@
   gap: 4px;
 }
 
+/* Canvas sections are 32px apart: the panel supplies 12px of that gap.
+   When public sharing is absent, scope is first and needs no extra offset. */
+.scopeHeading:not(:first-child) {
+  margin-block-start: 20px;
+}
+
 .scopeDescription {
   margin: 0;
   color: #888888;
