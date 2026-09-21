@@ -2943,6 +2943,32 @@ for (const published of [false, true]) {
       await expect(trigger).toBeDisabled();
       await expect(trigger.locator('.share-menu-icon .icon-spin')).toBeVisible();
       await test.info().attach(`team-scope-busy-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
+      const viewport = page.viewportSize()!;
+      // Give the preview the viewport through the real layout control.
+      await page.getByRole('button', { name: 'Collapse the conversation pane', exact: true }).click();
+      try {
+        await page.setViewportSize({ width: 320, height: 900 });
+        // Collapsing chat changes the anchor layout; reopen the workspace entry.
+        await expect(menu).toBeHidden();
+        await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
+        await expect(menu).toBeVisible();
+        const menuBox = (await menu.boundingBox())!;
+        const triggerBox = (await trigger.boundingBox())!;
+        const headingBox = (await heading.boundingBox())!;
+        await test.info().attach(`team-scope-narrow-bounds-${published ? 'published' : 'first'}`, {
+          body: JSON.stringify({ viewport: page.viewportSize(), menuBox, triggerBox, headingBox }), contentType: 'application/json',
+        });
+        expect(menuBox.x).toBeGreaterThanOrEqual(0);
+        expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(320);
+        expect(headingBox.x + headingBox.width + 12).toBeLessThanOrEqual(triggerBox.x);
+        expect(triggerBox.x + triggerBox.width).toBeLessThanOrEqual(menuBox.x + menuBox.width - 20);
+        expect(await heading.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+        await expect(trigger.locator('.share-menu-icon .icon-spin')).toBeVisible();
+        await test.info().attach(`team-scope-narrow-busy-${published ? 'published' : 'first'}`, { body: await page.screenshot(), contentType: 'image/png' });
+      } finally {
+        if (!page.isClosed()) await page.setViewportSize(viewport);
+      }
+      await expect(menu).toBeVisible();
     } finally {
       releaseMove();
     }

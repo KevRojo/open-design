@@ -47,6 +47,9 @@
 /* S1-T/S4-T scope label: align to the panel, not a padded deployment row.
    Only the scope heading has this help modifier inside ShareTab. */
 .panel :global(.share-menu-section-label--help) {
+  /* Allow narrow panels to wrap the heading instead of displacing the busy control. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 0;
   color: #333333;
   font-size: 13px;

@@ -91,7 +91,7 @@ describe('S1-T/S4-T shared scope trigger', () => {
     css.walkRules('.panel :global(.share-menu-section-label--help)', rule => {
       rule.walkDecls(decl => { values[decl.prop] = decl.value; });
     });
-    expect(values).toMatchObject({ padding: '0', color: '#333333', 'font-size': '13px', 'line-height': '20px', 'font-weight': '500' });
+    expect(values).toMatchObject({ padding: '0', 'min-width': '0', 'overflow-wrap': 'anywhere', color: '#333333', 'font-size': '13px', 'line-height': '20px', 'font-weight': '500' });
   });
   it('hides decorative icons but preserves the busy slot and sizes the chevron', () => {
     const css = postcss.parse(readFileSync(resolve('src/components/share/ShareTab.module.css'), 'utf8'));
