@@ -134,6 +134,7 @@ export interface Dict {
   'libraryPicker.add': string;
   'libraryPicker.loading': string;
   'common.save': string;
+  'fileViewer.commentSync.sessionMissing': string;
   'fileViewer.shareGuide.tryShare': string;
   'fileViewer.shareGuide.neverShowAgain': string;
   'fileViewer.shareGuide.awaitingDesign': string;

@@ -3,6 +3,7 @@ import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
 import { useShareScopeKeyboard } from './share/useShareScopeKeyboard';
 import { AfterExportShareGuide } from './share/AfterExportShareGuide';
+import { CommentSyncBanner } from './share/CommentSyncBanner';
 import { useAfterExportShareGuide } from './share/useAfterExportShareGuide';
 import { useShareGuideAppUserId } from './share/useShareGuideAppUserId';
 import { SharePanelHeader } from './share/SharePanelHeader';
@@ -4798,6 +4799,7 @@ export function CommentSidePanel({
           </button>
         </div>
       </div>
+      <CommentSyncBanner projectId={projectId} workspaceContext={workspaceContext} />
       {sendableCount > 0 ? (
         <div className="comment-side-toolbar">
           <button

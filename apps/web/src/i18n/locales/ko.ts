@@ -234,6 +234,7 @@ export const ko: Dict = {
   'libraryPicker.add': '가져오기',
   'libraryPicker.loading': '불러오는 중…',
   'common.save': '저장',
+  'fileViewer.commentSync.sessionMissing': "로그아웃되어 댓글 동기화가 일시 중지되었습니다. 방문자의 새 댓글을 일시적으로 볼 수 없습니다.",
   'fileViewer.shareGuide.tryShare': "공유해 보기",
   'fileViewer.shareGuide.neverShowAgain': "다시 표시하지 않기",
   'fileViewer.shareGuide.awaitingDesign': "디자인 원본 대기 중",

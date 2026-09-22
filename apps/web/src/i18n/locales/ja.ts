@@ -234,6 +234,7 @@ export const ja: Dict = {
   'libraryPicker.add': 'インポート',
   'libraryPicker.loading': '読み込み中…',
   'common.save': '保存',
+  'fileViewer.commentSync.sessionMissing': "ログインしていないためコメントの同期が一時停止しています。訪問者の新しいコメントは一時的に表示されません。",
   'fileViewer.shareGuide.tryShare': "共有してみる",
   'fileViewer.shareGuide.neverShowAgain': "今後表示しない",
   'fileViewer.shareGuide.awaitingDesign': "デザイン資料待ち",

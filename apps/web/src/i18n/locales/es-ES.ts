@@ -234,6 +234,7 @@ export const esES: Dict = {
   'libraryPicker.add': 'Importar',
   'libraryPicker.loading': 'Cargando…',
   'common.save': 'Guardar',
+  'fileViewer.commentSync.sessionMissing': "Sesión cerrada. La sincronización de comentarios está pausada; los nuevos comentarios de visitantes no están disponibles temporalmente.",
   'fileViewer.shareGuide.tryShare': "Probar compartir",
   'fileViewer.shareGuide.neverShowAgain': "No volver a mostrar",
   'fileViewer.shareGuide.awaitingDesign': "Pendiente del diseño original",

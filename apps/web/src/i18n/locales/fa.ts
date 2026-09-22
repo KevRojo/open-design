@@ -234,6 +234,7 @@ export const fa: Dict = {
   'libraryPicker.add': 'وارد کردن',
   'libraryPicker.loading': 'در حال بارگذاری…',
   'common.save': 'ذخیره',
+  'fileViewer.commentSync.sessionMissing': "وارد حساب نشده‌اید. همگام‌سازی نظرها موقتاً متوقف است؛ نظرهای جدید بازدیدکنندگان فعلاً نمایش داده نمی‌شوند.",
   'fileViewer.shareGuide.tryShare': "اشتراک‌گذاری را امتحان کنید",
   'fileViewer.shareGuide.neverShowAgain': "دیگر نمایش نده",
   'fileViewer.shareGuide.awaitingDesign': "در انتظار طرح اصلی",

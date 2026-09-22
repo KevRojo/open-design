@@ -234,6 +234,7 @@ export const it: Dict = {
   'libraryPicker.add': 'Importa',
   'libraryPicker.loading': 'Caricamento…',
   'common.save': 'Salva',
+  'fileViewer.commentSync.sessionMissing': "Accesso non effettuato. La sincronizzazione dei commenti è sospesa; i nuovi commenti dei visitatori sono temporaneamente invisibili.",
   'fileViewer.shareGuide.tryShare': "Prova a condividere",
   'fileViewer.shareGuide.neverShowAgain': "Non mostrare più",
   'fileViewer.shareGuide.awaitingDesign': "In attesa del design originale",

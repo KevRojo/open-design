@@ -27,6 +27,46 @@ test.beforeEach(async ({ page }) => {
   await applyStandardMocks(page);
 });
 
+test.use({ screenshot: 'off', video: 'off', trace: 'off' });
+test.describe('K8 scoped comment sync banner', () => {
+  test('real preview entry reads sync state and clears the banner after login refresh', async ({ page }) => {
+    await routeMockAgents(page);
+    const projectId = await createEmptyProject(page, 'K8 sync banner');
+    await seedHtmlArtifact(page, projectId, 'sync.html', manualEditHtml());
+    // First prove production registration on the actual tools-dev daemon.
+    // A local project has no verified cloud scope, so the honest result is null.
+    const actual = await page.request.get(`/api/projects/${projectId}/comment-sync-state`);
+    expect(actual.status()).toBe(200);
+    expect(await actual.json()).toBeNull();
+    let sessionMissing = true;
+    let reads = 0;
+    // Controlled upstream states prove the running UI consumption path, not
+    // successful cloud authentication or real scoped outbox delivery.
+    await page.route(`**/api/projects/${projectId}/comment-sync-state`, async route => {
+      expect(route.request().method()).toBe('GET');
+      reads += 1;
+      await route.fulfill({ json: { pending: sessionMissing ? 1 : 0, lastError: 'COMMENT_SYNC_DELIVERY_FAILED', sessionMissing, shareStopped: null } });
+    });
+    await page.goto(`/projects/${projectId}/files/sync.html`);
+    await openDesignFile(page, 'sync.html');
+    await expect(artifactPreview(page)).toBeVisible();
+    await clickPreviewToolbarAction(page, 'comment-panel-toggle', /^Comments \(\d+\)$/);
+    const panel = page.getByTestId('comment-side-panel');
+    await expect(panel).toBeVisible();
+    const banner = panel.getByRole('status');
+    await expect(banner).toContainText('Comment sync is paused');
+    await expect(banner.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled();
+    await expect(page.getByTestId('board-mode-toggle')).toBeEnabled();
+    const beforeLogin = reads;
+    sessionMissing = false;
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('od:amr-login-status-change', { detail: { reason: 'login' } })));
+    await expect.poll(() => reads).toBeGreaterThan(beforeLogin);
+    await expect(banner).toHaveCount(0);
+    await expect(panel).toBeVisible();
+    await expect(page.getByTestId('board-mode-toggle')).toBeEnabled();
+  });
+});
+
 test('[P0] manual edit inspector previews and persists page and selected element styles', async ({ page }) => {
   await routeMockAgents(page);
   const projectId = await createEmptyProject(page, 'Manual edit smoke');

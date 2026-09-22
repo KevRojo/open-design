@@ -234,6 +234,7 @@ export const id: Dict = {
   'libraryPicker.add': 'Impor',
   'libraryPicker.loading': 'Memuat…',
   'common.save': 'Simpan',
+  'fileViewer.commentSync.sessionMissing': "Belum masuk. Sinkronisasi komentar dijeda; komentar baru pengunjung sementara tidak terlihat.",
   'fileViewer.shareGuide.tryShare': "Coba bagikan",
   'fileViewer.shareGuide.neverShowAgain': "Jangan tampilkan lagi",
   'fileViewer.shareGuide.awaitingDesign': "Menunggu referensi desain",

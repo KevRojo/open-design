@@ -234,6 +234,7 @@ export const ru: Dict = {
   'libraryPicker.add': 'Импорт',
   'libraryPicker.loading': 'Загрузка…',
   'common.save': 'Сохранить',
+  'fileViewer.commentSync.sessionMissing': "Вы не вошли в аккаунт. Синхронизация комментариев приостановлена; новые комментарии посетителей временно не видны.",
   'fileViewer.shareGuide.tryShare': "Попробовать поделиться",
   'fileViewer.shareGuide.neverShowAgain': "Больше не показывать",
   'fileViewer.shareGuide.awaitingDesign': "Ожидание исходного дизайна",

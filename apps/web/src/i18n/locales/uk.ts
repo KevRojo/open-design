@@ -234,6 +234,7 @@ export const uk: Dict = {
   'libraryPicker.add': 'Імпортувати',
   'libraryPicker.loading': 'Завантаження…',
   'common.save': 'Зберегти',
+  'fileViewer.commentSync.sessionMissing': "Ви не ввійшли в обліковий запис. Синхронізацію коментарів призупинено; нові коментарі відвідувачів тимчасово не видно.",
   'fileViewer.shareGuide.tryShare': "Спробувати поділитися",
   'fileViewer.shareGuide.neverShowAgain': "Більше не показувати",
   'fileViewer.shareGuide.awaitingDesign': "Очікування оригінального дизайну",

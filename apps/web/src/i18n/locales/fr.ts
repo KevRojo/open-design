@@ -234,6 +234,7 @@ export const fr: Dict = {
   'libraryPicker.add': 'Importer',
   'libraryPicker.loading': 'Chargement…',
   'common.save': 'Enregistrer',
+  'fileViewer.commentSync.sessionMissing': "Vous êtes déconnecté. La synchronisation des commentaires est suspendue ; les nouveaux commentaires des visiteurs sont temporairement invisibles.",
   'fileViewer.shareGuide.tryShare': "Essayer le partage",
   'fileViewer.shareGuide.neverShowAgain': "Ne plus afficher",
   'fileViewer.shareGuide.awaitingDesign': "En attente du modèle",

@@ -242,6 +242,7 @@ export const zhCN: Dict = {
   "libraryPicker.add": "导入",
   "libraryPicker.loading": "加载中…",
   "common.save": "保存",
+  'fileViewer.commentSync.sessionMissing': "未登录，评论暂停同步，访客的新评论暂时看不到。",
   'fileViewer.shareGuide.tryShare': "试试分享",
   'fileViewer.shareGuide.neverShowAgain': "不再提示",
   'fileViewer.shareGuide.awaitingDesign': "待原图",
