@@ -3360,7 +3360,9 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
 
   // S4-C: hold only the external clipboard boundary; the real host settles feedback.
   // Pause before the copy creates its feedback timer; assert the actual boundary.
-  await page.clock.pauseAt(new Date());
+  // Anchor to the browser clock: Playwright actions may have advanced it beyond Node's time.
+  const pauseTime = await page.evaluate(() => Date.now() + 1_000);
+  await page.clock.pauseAt(pauseTime);
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
