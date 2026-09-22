@@ -1067,6 +1067,9 @@ export function shareEntryPresentation(input: {
 export interface ProjectFilePublicShareResponse {
   /** Local record of the published link; `null` when we hold none. */
   publication: PublicProjectFilePublication | null;
+  /** A durable publication can exist without a copyable URL. Re-reading after
+   * configuration is repaired can recover its link without uploading again. */
+  link?: SharePublishLinkUnavailable;
   /** From the lifecycle source, not inferred from `publication`. */
   status: ShareStatus;
   /** From a content fingerprint comparison; `unknown` until one is available. */
@@ -1517,9 +1520,23 @@ export interface SharePublishedLink {
  * the web origin plus ids, it exists only in the serving case, and mixing it
  * into the receipt would make `binding_pending` carry a field it must not.
  */
+/** Presentation availability is independent of upload/binding success. A missing
+ * deployment Web origin must neither abort publication nor guess a hostname in
+ * another environment. This is NOT a transport/auth/publish failure: consumers
+ * retain the receipt, say "published; link temporarily unavailable", and must
+ * not retry the upload merely to obtain a link. Real failures remain non-2xx.
+ * Binding can also be pending at the same time; neither condition erases the
+ * other. A link is copyable only when a confirmed publication carries `url`.
+ */
+export interface SharePublishLinkUnavailable {
+  status: 'unavailable';
+  code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE';
+}
+
 export type SharePublishResponse =
-  | ({ status: 'published'; receipt: SharePublishReceipt } & SharePublishedLink)
-  | { status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending };
+  | ({ status: 'published'; receipt: SharePublishReceipt; link?: never } & SharePublishedLink)
+  | { status: 'published'; receipt: SharePublishReceipt; url?: never; link: SharePublishLinkUnavailable }
+  | { status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending; link?: SharePublishLinkUnavailable };
 
 /**
  * Has this project ever been shared — as opposed to being shared right now?
