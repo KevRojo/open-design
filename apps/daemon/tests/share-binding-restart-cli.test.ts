@@ -93,7 +93,7 @@ it.skipIf(!process.env.OD_TEST_VELA_BIN).each(['success', 'wrong-member', 'missi
         if (request.method === 'GET') expect(request.url).toBe('/api/v1/workspaces');
         else expect(request).toEqual({ method: 'POST', url: '/api/v1/collab/shares/complete',
           authorization: 'Bearer synthetic-restart-key', workspace: 'w',
-          body: { projectId: 'p', slug: 'stable', expectedResourceId: 'r', expectedVersion: 2, expectedVersionId: 'immutable' } });
+          body: { projectId: 'p', slug: 'stable', sourceFilePath: 'pages/local.html', expectedResourceId: 'r', expectedVersion: 2, expectedVersionId: 'immutable' } });
       }
     } finally {
       server.closeAllConnections();

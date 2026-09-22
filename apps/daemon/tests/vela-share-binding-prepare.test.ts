@@ -14,7 +14,7 @@ it.each([true, false])('runs stored binding with only the original verified memb
   const db = new Database(':memory:');
   try {
     const publications = createInMemoryPublicFilePublicationStore(); const outbox = createShareBindingOutbox(db);
-    const scope = { resourceTeamId: 'w', ownerMemberId: 'o', projectId: 'p', filePath: 'local.html' };
+    const scope = { resourceTeamId: 'w', ownerMemberId: 'o', projectId: 'p', filePath: 'pages/local.html' };
     publications.set(scope, { slug: 'stable', fileName: scope.filePath, url: 'https://example.test/stable' });
     outbox.enqueue({ ...scope, resourceId: 'r', publicationRevision: publications.getRevision(scope)!.token,
       receipt: { filePath: scope.filePath, slug: 'stable', publishedAt: 1, version: 2, versionId: 'v2', entryPath: 'index.html' } });
@@ -29,7 +29,7 @@ it.each([true, false])('runs stored binding with only the original verified memb
     const result = await createShareBindingStartup(outbox, { publications, prepare, mutations: createPublicFileMutations() })();
     expect(result.bound).toBe(matches ? 1 : 0); expect(result.deferred).toBe(matches ? 0 : 1);
     expect(runCommand).toHaveBeenCalledTimes(matches ? 1 : 0);
-    if (matches) expect(runCommand).toHaveBeenCalledWith(expect.objectContaining({ session: expect.objectContaining({ controlKey: 'synthetic' }), workspaceId: 'w', args: ['share','bind','stable','--project-id','p','--resource-id','r','--version','2','--version-id','v2','--json'] }));
+    if (matches) expect(runCommand).toHaveBeenCalledWith(expect.objectContaining({ session: expect.objectContaining({ controlKey: 'synthetic' }), workspaceId: 'w', args: ['share','bind','stable','--project-id','p','--source-file-path','pages/local.html','--resource-id','r','--version','2','--version-id','v2','--json'] }));
     expect(outbox.list()).toHaveLength(matches ? 0 : 1);
     if (!matches) expect(outbox.list()[0]?.failureCount).toBe(1);
   } finally { db.close(); }
