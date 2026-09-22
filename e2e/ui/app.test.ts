@@ -345,7 +345,13 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   const projectId = await createEmptyProject(page, 'Comment preview follow-up');
   await expectWorkspaceReady(page);
 
-  await seedHtmlArtifact(page, projectId, entry.mockArtifact.fileName, entry.mockArtifact.html);
+  // Real custom-element markup exercises the bridge's tag-name label without
+  // injecting a synthetic comment target or changing the live product DOM.
+  const longCommentTag = 'project-overview-section-with-an-intentionally-long-component-name';
+  const initialHtml = entry.mockArtifact.html
+    .replace('<h1 ', `<${longCommentTag} style="display:block;font-size:32px;font-weight:700" `)
+    .replace('</h1>', `</${longCommentTag}>`);
+  await seedHtmlArtifact(page, projectId, entry.mockArtifact.fileName, initialHtml);
   await page.reload();
   await expectWorkspaceReady(page);
   await page.goto(`/projects/${projectId}/files/${entry.mockArtifact.fileName}`, { waitUntil: 'domcontentloaded' });
@@ -396,6 +402,11 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(titleLabel).toHaveCSS('font-weight', '600');
   await expect(titleLabel).toHaveCSS('text-overflow', 'ellipsis');
   await expect(titleLabel).toHaveCSS('white-space', 'nowrap');
+  await expect(titleLabel).toHaveText(longCommentTag);
+  await expect(titleLabel).toHaveAttribute('title', longCommentTag);
+  await expect.poll(() => titleLabel.evaluate(element => element.clientWidth > 0 && element.scrollWidth > element.clientWidth)).toBe(true);
+  await expect(composerTitle.getByRole('button', { name: 'Move comment box', exact: true })).toBeVisible();
+  await expect(composerTitle.getByTestId('comment-popover-view-all')).toBeVisible();
   await expect(composerActions).toHaveCSS('margin-top', '0px');
   await expect(composerActions).toHaveCSS('gap', '6px');
   await expect(composerActions).toHaveCSS('flex-wrap', 'wrap');
