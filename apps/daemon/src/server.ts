@@ -957,6 +957,8 @@ import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js
 import { createCollabRuntime } from './collab/runtime.js';
 import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
 import { sourcePathForCurrentPublication } from './collab/comment-relay-publication-mapping.js';
+import { createPublicFilePublicationRecorder } from './collab/public-file-publication-recording.js';
+import { enqueuePublishedFileComments } from './collab/published-file-comment-backfill.js';
 import { createVelaPublicFileStop } from './collab/vela-public-file-stop.js';
 import { createShareContentFingerprints } from './collab/share-content-fingerprint.js';
 import { createShareBindingOutbox } from './collab/share-binding-outbox.js';
@@ -5226,6 +5228,20 @@ export async function startServer({
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     publicFilePublicationStore,
+    // Recording a publication and queueing its existing comments for backfill
+    // is ONE transaction. Without this the route falls back to a bare
+    // `publicationStore.set`, which records the share and silently drops the
+    // backfill intent — the publish succeeds, and the comments the person
+    // already wrote never reach the share page.
+    //
+    // The recorder also refuses to proceed without a publication witness
+    // (slug + revision token read back after the write), so a half-written
+    // publication cannot enqueue work that later resolves against nothing.
+    recordPublicFilePublication: createPublicFilePublicationRecorder(
+      db,
+      publicFilePublicationStore,
+      enqueuePublishedFileComments,
+    ),
     shareContentFingerprints: createShareContentFingerprints(db, publicFilePublicationStore),
     publicFileMutations,
     verifyWorkspaceRequest: verifiedWorkspaceContextForRequest,
