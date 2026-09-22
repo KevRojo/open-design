@@ -1,0 +1,20 @@
+import { expect, it, vi } from 'vitest';
+import { publishVelaShareVersion } from '../src/collab/vela-share-publish.js';
+import { velaWorkspaceCommandOptions, type runVelaCommand } from '../src/integrations/vela-command.js';
+const input = { workspaceId: 'workspace', projectId: 'project', resourceId: 'resource', slug: 'stable', sourceKey: 'index.html', entryPath: 'index.html', name: 'Design', versionId: 'immutable-upload' };
+const receipt = { slug: 'stable', version: 2, publishedAt: 1234, entryPath: 'index.html', snapshot: { slug: 'snapshot-not-alias', versionId: 'immutable-upload' } };
+it('publishes a pinned version and registers its binding through the Go share command', async () => {
+  const run = vi.fn<typeof runVelaCommand>().mockResolvedValue(JSON.stringify(receipt));
+  expect(await publishVelaShareVersion(input, run)).toEqual({ slug: 'stable', version: 2, publishedAt: 1234, entryPath: 'index.html' });
+  expect(run).toHaveBeenCalledExactlyOnceWith(['share', 'publish', 'resource', '--project-id', 'project', '--slug', 'stable', '--source-key', 'index.html', '--entry-path', 'index.html', '--name', 'Design', '--version-id', 'immutable-upload', '--json'], { ...velaWorkspaceCommandOptions('workspace'), timeoutMs: 30_000 });
+});
+it.each(['{', 'null', '[]', JSON.stringify({ ...receipt, slug: 'wrong' }), JSON.stringify({ ...receipt, snapshot: { versionId: 'wrong' } }), JSON.stringify({ ...receipt, entryPath: 'wrong' }), JSON.stringify({ ...receipt, version: 0 }), JSON.stringify({ ...receipt, publishedAt: -1 })])('rejects malformed or mismatched receipts without fallback: %s', async (wire) => {
+  const run = vi.fn<typeof runVelaCommand>().mockResolvedValue(wire);
+  await expect(publishVelaShareVersion(input, run)).rejects.toThrow('PUBLIC_SHARE_PUBLISH_FAILED');
+  expect(run).toHaveBeenCalledTimes(1);
+});
+it('does not expose child stderr or retry after CLI failure', async () => {
+  const run = vi.fn<typeof runVelaCommand>().mockRejectedValue(new Error('sensitive upstream details'));
+  await expect(publishVelaShareVersion(input, run)).rejects.toThrow(/^PUBLIC_SHARE_PUBLISH_FAILED$/);
+  expect(run).toHaveBeenCalledTimes(1);
+});
