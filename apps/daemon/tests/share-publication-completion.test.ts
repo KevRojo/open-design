@@ -10,6 +10,30 @@ const scope = { resourceTeamId: 'w', ownerMemberId: 'o', projectId: 'p', filePat
 const publication = { slug: 'stable', url: 'https://example.test/artifact/p/stable', fileName: scope.filePath };
 const receipt = { filePath: scope.filePath, slug: 'stable', version: 2, versionId: 'immutable', publishedAt: 1234, entryPath: 'index.html' };
 const mapping = createShareFileMapping([{ sourcePath: scope.filePath, file: 'index.html' }]);
+it.each([
+  { ...receipt, version: 0 }, { ...receipt, version: 1.5 },
+  { ...receipt, publishedAt: -1 }, { ...receipt, versionId: '' },
+  { ...receipt, entryPath: 'wrong.html' },
+])('rejects invalid confirmed publication before any local write: %j', badReceipt => {
+  const db = new Database(':memory:');
+  try {
+    migratePublicFilePublications(db);
+    const store = createSqlitePublicFilePublicationStore(db);
+    store.set(scope, { ...publication, slug: 'previous' });
+    const previous = store.getRevision(scope);
+    const outbox = createShareBindingOutbox(db);
+    let enqueues = 0;
+    const record = createPublicFilePublicationRecorder(db, store, () => { enqueues++; return { enqueued: 0, skippedInbound: 0 }; });
+    const complete = createSharePublicationCompletion(db, record, outbox, true);
+    for (const status of ['published', 'binding_pending'] as const) {
+      const result: SharePublishResult = status === 'published' ? { status, receipt: badReceipt }
+        : { status, receipt: badReceipt, binding: { retrying: false } };
+      expect(() => complete({ scope, publication, mapping, resourceId: 'r', result })).toThrow();
+      expect(store.getRevision(scope)).toEqual(previous); expect(outbox.list()).toEqual([]); expect(enqueues).toBe(0);
+    }
+  } finally { db.close(); }
+});
+
 it.each(['published', 'pending', 'no-worker', 'binding-write-fails', 'comment-write-fails', 'mismatch'] as const)('atomically completes local publication state: %s', mode => {
   const db = new Database(':memory:');
   try {

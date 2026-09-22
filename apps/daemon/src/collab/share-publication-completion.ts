@@ -2,8 +2,8 @@ import type Database from 'better-sqlite3';
 import type { SharePublishResult } from '@open-design/contracts';
 import type { PublicFilePublication, PublicFilePublicationScope } from './public-file-publication-store.js';
 import type { RecordPublicFilePublication } from './public-file-publication-recording.js';
-import type { ShareBindingOutbox } from './share-binding-outbox.js';
-import type { ShareFileMapping } from './share-file-mapping.js';
+import { confirmedReceipt, type ShareBindingOutbox } from './share-binding-outbox.js';
+import { publishedPathForSource, type ShareFileMapping } from './share-file-mapping.js';
 
 export interface SharePublicationCompletionInput {
   scope: PublicFilePublicationScope;
@@ -34,8 +34,12 @@ export function createSharePublicationCompletion(
         ...(input.result.binding.code ? { code: input.result.binding.code } : {}) } };
   });
   return (input: SharePublicationCompletionInput): SharePublishResult => {
-    if (input.result.receipt.filePath !== input.scope.filePath
-      || input.result.receipt.slug !== input.publication.slug) throw new Error('SHARE_PUBLICATION_RECEIPT_MISMATCH');
+    const receipt = confirmedReceipt(input.result.receipt);
+    if (receipt.filePath !== input.scope.filePath || receipt.slug !== input.publication.slug
+      || receipt.entryPath !== publishedPathForSource(input.mapping, input.scope.filePath)) {
+      throw new Error('SHARE_PUBLICATION_RECEIPT_MISMATCH');
+    }
+    input = { ...input, result: { ...input.result, receipt } };
     try { return commit(input); }
     catch (error) {
       if (input.result.status === 'published') throw error;
