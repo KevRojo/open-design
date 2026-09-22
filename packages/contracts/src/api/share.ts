@@ -17,6 +17,7 @@
  */
 
 import type { PublicProjectFilePublication } from './collab.js';
+import type { PreviewCommentSelectionKind, PreviewCommentStatus } from './comments.js';
 
 /* ------------------------------------------------------------------ *
  * Share addressing
@@ -1723,3 +1724,138 @@ export const COMMENT_ALIGN_COMPARES_CONTENT_NOT_CURSORS = true;
  * a clean bill of health.
  */
 export const COMMENT_ALIGN_UNKNOWN_AND_ABSENT_ARE_NOT_ALIGNED = true;
+
+/**
+ * The fields align compares, and nothing else.
+ *
+ * Both sides of the comparison project a comment down to this shape before
+ * anything is compared: the client from its merged local rows, the cloud from
+ * replaying its own events. The projection is named here — rather than left
+ * as a field list each side maintains — because a comparison whose two sides
+ * disagree about WHICH fields count reports a difference of opinion as a
+ * difference of content, and does it silently.
+ *
+ * What is deliberately NOT here:
+ *
+ * - **Anchor ladder output** (`anchorState`, `anchoredVersion`,
+ *   `lastGoodPosition`). These are recomputed locally at render/sync time
+ *   against this device's copy of the HTML. The cloud never runs the ladder,
+ *   and two devices that rendered at different moments legitimately hold
+ *   different values for an identical comment. Comparing them turns "the
+ *   anchor was re-resolved here but not there" into `diverged`, which claims
+ *   the comment set disagrees when nothing anyone wrote differs.
+ * - **`authorDisplayName`**. A captured display snapshot, not content. It
+ *   travels on a separate channel from the member directory by design, so an
+ *   event written before the field existed normalizes to empty against a
+ *   local row that has a name — a divergence about rendering.
+ * - **`podMembers`**. Member identity, which align does not compare (see
+ *   below); `memberCount` carries the only part that is content.
+ * - **Cursors, local routing ids, timestamps, `pinSeq`, `sortKey`,
+ *   `conversationId`, member internal ids.** Per
+ *   {@link COMMENT_ALIGN_COMPARES_CONTENT_NOT_CURSORS} and because these are
+ *   assigned per-device.
+ *
+ * `authorKind` IS compared: whether a comment came from a member or from a
+ * share-link visitor is a fact about the comment, not about its presentation.
+ */
+export interface CommentAlignProjection {
+  id: string;
+  filePath: string;
+  elementId: string;
+  selector: string;
+  selectionKind: PreviewCommentSelectionKind;
+  label: string;
+  text: string;
+  htmlHint: string;
+  note: string;
+  status: PreviewCommentStatus;
+  position: CommentAlignBox;
+  style: unknown;
+  memberCount: number;
+  slideIndex: number;
+  attachments: ReadonlyArray<CommentAlignAttachment>;
+  authorKind: 'member' | 'user';
+}
+
+/**
+ * Attachments compare by identity and order, never by bytes.
+ *
+ * The cloud holds the same attachment behind its own storage identity; asking
+ * the two sides to agree on content would make align an upload-integrity
+ * check, which is a different question with a different failure mode. Order
+ * is compared because reordering is an edit the author made.
+ */
+export interface CommentAlignAttachment {
+  id: string;
+  name: string;
+}
+
+/**
+ * Position compares as integers.
+ *
+ * A bbox crosses the wire as JSON floats and comes back through two different
+ * runtimes' parsers. Comparing raw doubles makes align report `diverged` for
+ * a comment nobody touched, on a round-trip artifact. Both sides round to
+ * whole pixels before comparing; sub-pixel drift is not an edit.
+ */
+export interface CommentAlignBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Absent optional fields normalize to the daemon's stored default BEFORE
+ * comparison, on both sides: empty text to `''`, optional structures to
+ * `null`, `selectionKind` to `element`, `authorKind` to `member`,
+ * `memberCount` and `slideIndex` to `0`, `attachments` to `[]`.
+ *
+ * Without a shared normalization rule, "the field was never set" and "the
+ * field was set to its default" compare unequal, and every legacy row
+ * diverges from its own faithful copy.
+ */
+export const COMMENT_ALIGN_NORMALIZES_ABSENT_TO_STORED_DEFAULT = true;
+
+export interface CommentAlignRequest {
+  /**
+   * The complete set of currently-undeleted comments the client has ALREADY
+   * merged, for the whole project — both `member` and `user` authors, and
+   * regardless of `status`.
+   *
+   * "Already merged" is the load-bearing part. Echoing a pull response back
+   * compares the cloud against itself and always reports `aligned`: it proves
+   * the transport round-tripped, not that the merge landed. What align exists
+   * to catch is precisely a merge that dropped, filtered, or mangled a record
+   * the transport delivered correctly.
+   *
+   * Complete is equally load-bearing: a filtered subset can only ever show
+   * comments the client kept, so a record it wrongly discarded is invisible
+   * to the comparison that exists to find it.
+   */
+  comments: ReadonlyArray<CommentAlignProjection>;
+  /**
+   * Guard against the cloud's snapshot moving mid-comparison. A mismatch is
+   * `unknown` / `snapshot_changed` — never `diverged`, because a moving
+   * target was never compared.
+   */
+  expectedLatestSeq: number;
+}
+
+/**
+ * The cloud must prove its event history is continuous before it may answer
+ * `aligned`.
+ *
+ * Replaying a history with a hole and finding the surviving rows equal is not
+ * evidence of agreement — the missing events are exactly the ones that would
+ * have disagreed. A gap is `unknown` / `history_incomplete`.
+ */
+export const COMMENT_ALIGN_REQUIRES_PROVEN_CONTINUOUS_HISTORY = true;
+
+/**
+ * Align is a read. It never resumes a stopped share, re-enqueues an outbox,
+ * advances a cursor, or writes a tombstone — a diagnostic that repairs what
+ * it measures can no longer report what was wrong.
+ */
+export const COMMENT_ALIGN_HAS_NO_SIDE_EFFECTS = true;
+
