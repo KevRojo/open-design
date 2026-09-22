@@ -434,8 +434,22 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await captureLane4CommentState(page, 'r-entry-selected-hover');
   await page.getByTestId('comment-popover-view-all').click();
   await expect(sidePanel).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await expect.poll(() => composerBody.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await expect(composerBody).toHaveCSS('overflow-y', 'auto');
+  const saveComment = page.getByTestId('comment-popover-save');
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
-  await page.getByTestId('comment-popover-save').click();
+  await expect(saveComment).toBeEnabled();
+  await expect.poll(async () => {
+    const bounds = await saveComment.boundingBox();
+    return bounds !== null && bounds.y >= 0 && bounds.y + bounds.height <= 480
+      && bounds.x >= 0 && bounds.x + bounds.width <= 1280;
+  }).toBe(true);
+  // Check bounds before actionability can scroll an offscreen footer into view.
+  await saveComment.click({ trial: true });
+  await test.info().attach('comment-composer-short', { body: await page.screenshot(), contentType: 'image/png' });
+  await saveComment.click();
+  await page.setViewportSize({ width: 1280, height: 720 });
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toBeVisible();
 
   await expect(sidePanel.getByTestId('comment-side-item').filter({ hasText: 'Make the headline more specific.' }).first()).toBeVisible();
