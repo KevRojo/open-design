@@ -5,7 +5,7 @@ import path from 'node:path';
 import { runPinnedVelaCommand } from '../src/collab/vela-pinned-command.js';
 import type { VelaControlApiContext } from '../src/integrations/vela.js';
 import type { runVelaCommand } from '../src/integrations/vela-command.js';
-it.each([0, 1])('propagates the pinned context through a real child, exit=%s', async (exitCode) => {
+it.each([0, 1, 'SIGTERM', 'SIGKILL'] as const)('propagates the pinned context through a real child and cleans up, outcome=%s', async (exitCode) => {
   const root = await mkdtemp(path.join(tmpdir(), 'od-pinned-child-'));
   try {
     const script = `
@@ -21,7 +21,7 @@ it.each([0, 1])('propagates the pinned context through a real child, exit=%s', a
       if (!valid) { process.stdout.write('wrong-context'); process.exit(2); }
       fs.writeFileSync(process.argv[1], 'context-verified');
       process.stdout.write('context-verified');
-      process.exit(${exitCode});
+      ${typeof exitCode === 'number' ? `process.exit(${exitCode});` : `process.kill(process.pid, '${exitCode}');`}
     `;
     const result = runPinnedVelaCommand({
       args: ['-e', script, path.join(root, 'child-marker')], dataRoot: root, workspaceId: 'original-workspace',
@@ -30,7 +30,7 @@ it.each([0, 1])('propagates the pinned context through a real child, exit=%s', a
     });
     if (exitCode === 0) expect(await result).toBe('context-verified');
     else await expect(result).rejects.toThrow(/^VELA_PINNED_COMMAND_FAILED$/);
-    // Distinguish the intended exit1 from a fixture/env failure (exit2).
+    // Distinguish actual post-load exit/signal death from fixture failure (exit2).
     expect(await readFile(path.join(root, 'child-marker'), 'utf8')).toBe('context-verified');
     expect(await readdir(root)).toEqual(['child-marker']);
   } finally { await rm(root, { recursive: true, force: true }); }
