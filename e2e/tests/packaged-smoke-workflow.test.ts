@@ -410,7 +410,7 @@ describe("packaged smoke workflow", () => {
       workspace_unit_tests: "ci-workspace-unit",
       daemon_unit_tests: "ci-daemon",
       windows_tools_pack_payload_tests: "ci-windows-tools-pack",
-      web_workspace_tests: "test-web",
+      web_workspace_tests: "ci-web",
       e2e_vitest: "ci-e2e",
       playwright_critical: "ci-ui",
       ui_p0: "ci-ui",

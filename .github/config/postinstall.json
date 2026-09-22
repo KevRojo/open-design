@@ -63,23 +63,27 @@
     },
     "ci-workspace-unit": {
       "installProfile": "workspace",
-      "requestedTargets": ["packages/contracts", "packages/host", "packages/sidecar-proto", "packages/sidecar", "tools/dev", "tools/pack"]
+      "requestedTargets": "all"
     },
     "ci-windows-tools-pack": {
       "installProfile": "workspace",
-      "requestedTargets": ["tools/pack"]
+      "requestedTargets": "all"
     },
     "ci-daemon": {
       "installProfile": "workspace",
-      "requestedTargets": ["packages/contracts", "apps/daemon"]
+      "requestedTargets": "all"
     },
     "ci-e2e": {
       "installProfile": "workspace",
-      "requestedTargets": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack", "tools/release", "tools/serve"]
+      "requestedTargets": "all"
     },
     "ci-ui": {
       "installProfile": "workspace",
-      "requestedTargets": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack"]
+      "requestedTargets": "all"
+    },
+    "ci-web": {
+      "installProfile": "workspace",
+      "requestedTargets": "all"
     }
   }
 }

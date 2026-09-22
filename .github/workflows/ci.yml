@@ -430,7 +430,7 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
-          postinstall-intent: test-web
+          postinstall-intent: ci-web
           runner-labels: ${{ toJSON(fromJSON(needs.runners.outputs.runs_on).js_hot) }}
 
       - name: Prebuild web sidecar declarations

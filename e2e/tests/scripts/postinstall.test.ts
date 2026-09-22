@@ -275,15 +275,14 @@ describe("postinstall script contract", () => {
       expect(plan.resolvedTargets).toEqual(expect.arrayContaining(["packages/release", "tools/pack"]));
       expect(typeof plan.digest).toBe("string");
 
-      const exactWorkflowTargets: Record<string, string[]> = {
+      const exactWorkflowTargets: Record<string, string[] | "all"> = {
         "release-smoke": ["tools/pack", "tools/serve"],
-        "ci-workspace-unit": [
-          "packages/contracts", "packages/host", "packages/sidecar-proto", "packages/sidecar", "tools/dev", "tools/pack",
-        ],
-        "ci-windows-tools-pack": ["tools/pack"],
-        "ci-daemon": ["packages/contracts", "apps/daemon"],
-        "ci-e2e": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack", "tools/release", "tools/serve"],
-        "ci-ui": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack"],
+        "ci-workspace-unit": "all",
+        "ci-windows-tools-pack": "all",
+        "ci-daemon": "all",
+        "ci-e2e": "all",
+        "ci-ui": "all",
+        "ci-web": "all",
       };
       for (const [intent, requestedTargets] of Object.entries(exactWorkflowTargets)) {
         const result = spawnSync("python3", [
@@ -293,7 +292,9 @@ describe("postinstall script contract", () => {
           "--output", output,
         ], { cwd: workspaceRoot, encoding: "utf8" });
         expect(result.status, result.stderr).toBe(0);
-        expect(JSON.parse(readFileSync(output, "utf8")).requestedTargets).toEqual(requestedTargets);
+        const plannedTargets = JSON.parse(readFileSync(output, "utf8")).requestedTargets;
+        if (requestedTargets === "all") expect(plannedTargets).toEqual(postinstallBuildTargetList());
+        else expect(plannedTargets).toEqual(requestedTargets);
       }
     } finally {
       rmSync(output, { force: true });
