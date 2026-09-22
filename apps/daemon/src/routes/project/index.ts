@@ -41,6 +41,7 @@ import {
   PREVIEW_RUNTIME_STATE_VERSION,
 } from '@open-design/contracts/runtime/preview-runtime-state';
 import {
+  ANNOTATED_SELECTOR_HELPERS,
   automaticStrategyTaskProfileForProjectMetadata,
   defaultScenarioPluginIdForProjectMetadata,
   type ChatSessionMode,
@@ -893,11 +894,7 @@ const URL_PREVIEW_SELECTION_BRIDGE = `<script data-od-url-selection-bridge>
     (document.head || document.documentElement).appendChild(style);
   }
   function active(){ return commentEnabled; }
-  function annotatedSelectorFor(el){
-    var id = el.getAttribute('data-od-id') || el.getAttribute('data-screen-label');
-    if (!id) return null;
-    return el.hasAttribute('data-od-id') ? '[data-od-id="' + esc(id) + '"]' : '[data-screen-label="' + esc(id) + '"]';
-  }
+${ANNOTATED_SELECTOR_HELPERS}
   function domSelectorFor(el){
     if (!el || !el.tagName || el === document.documentElement || el === document.body) return null;
     var parts = [];
@@ -973,9 +970,9 @@ const URL_PREVIEW_SELECTION_BRIDGE = `<script data-od-url-selection-bridge>
     } catch (_) { return null; }
   }
   function targetFrom(el, allowDomFallback, clickedEl, clickPoint){
-    var id = el.getAttribute('data-od-id') || el.getAttribute('data-screen-label');
+    var id = annotatedElementIdFor(el);
     if (allowDomFallback && id && generatedRootAnnotation(el, id)) return null;
-    var selector = annotatedSelectorFor(el);
+    var selector = annotatedSelectorFor(el, esc);
     if (!id && allowDomFallback && meaningfulDomFallbackTarget(el)) {
       selector = domSelectorFor(el);
       if (selector) id = 'dom:' + selector;
