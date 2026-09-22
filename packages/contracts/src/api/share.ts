@@ -1378,3 +1378,48 @@ export interface PublicCommentPublicationIdentity {
  * client, and never inferred by a consumer from what is currently live.
  */
 export const PUBLIC_COMMENT_PUBLICATION_SLUG_IS_SERVER_ASSERTED = true;
+
+/* ------------------------------------------------------------------ *
+ * Sync cadence
+ * ------------------------------------------------------------------ */
+
+/**
+ * Three different intervals, for three different operations.
+ *
+ * They were repeatedly read as one contested number. They are not: two are
+ * downstream pulls on different surfaces, and the third is the upstream relay
+ * going the other way.
+ */
+export const SHARE_SYNC_INTERVALS_MS = {
+  /**
+   * Share page → server, for comments and share version. 30s (D113 Q2,
+   * product-set; the earlier 5s and D80's 10s are both void). Polling STOPS
+   * while the page is hidden.
+   */
+  sharePagePoll: 30_000,
+  /**
+   * OD client fallback poll while SSE is connected. SSE carries the change in
+   * practice; this is the floor when it does not. (D80, unaffected by D113.)
+   */
+  clientFallbackWithSse: 30_000,
+  /** OD client poll when SSE is disconnected — the only path left, so faster. */
+  clientFallbackWithoutSse: 5_000,
+} as const;
+
+/**
+ * Sending a comment UP to the cloud may be faster than any of those.
+ *
+ * Ruled 2026-09-22: the 30s figure is the PAGE REFRESH, and the upward relay
+ * is a separate question that may be quicker.
+ *
+ * No number is frozen here, deliberately. The downstream intervals are
+ * budgets — each poll is a request from every open page, so the cost of
+ * shortening them scales with viewers. The upward relay fires on an action a
+ * person just took: it is bounded by how often people write comments, not by
+ * how many pages are open, so the same reasoning does not apply and the
+ * ceiling that produced 30s is not the ceiling here.
+ *
+ * Pick the value from the relay's own constraints — batching, backoff,
+ * retry pressure on the API — not by copying a poll interval.
+ */
+export const SHARE_COMMENT_UPSTREAM_MAY_BE_FASTER_THAN_POLL = true;
