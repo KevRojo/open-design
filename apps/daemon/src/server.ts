@@ -957,6 +957,7 @@ import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js
 import { createCollabRuntime } from './collab/runtime.js';
 import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
 import { createVelaPublicFileStop } from './collab/vela-public-file-stop.js';
+import { cleanupAbandonedPinnedVelaSessions } from './collab/vela-pinned-command.js';
 import { createProjectPublicFileStop } from './collab/project-public-file-stop.js';
 import { createPublicFileMutations } from './collab/public-file-mutations.js';
 import { resolveLocalProjectCommentWorkspaceContext } from './collab/project-comment-workspace-context.js';
@@ -18076,6 +18077,9 @@ export async function startServer({
           return;
         }
         resolvedPort = boundPort;
+        void cleanupAbandonedPinnedVelaSessions(RUNTIME_DATA_DIR).then(({ failed }) => {
+          if (failed) console.warn('[od] private CLI session cleanup incomplete');
+        }).catch(() => { console.warn('[od] private CLI session cleanup unavailable'); });
         void retryPublicFileStopsAtStartup().then((result) => {
           if (result.deferred || result.failed || result.persistenceFailures) {
             console.warn(
