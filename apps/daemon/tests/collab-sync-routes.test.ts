@@ -1814,7 +1814,7 @@ describe('collab sync routes', () => {
     expect(res.body.error).toBe('WORKSPACE_PROJECT_UNSHARE_DENIED');
   });
 
-  it('publishes a public file from a personal workspace, scoped by its workspace id', async () => {
+  it.each([false, true])('publishes a public file from a personal workspace; fingerprint failure=%s', async (fingerprintFailure) => {
     // The public-file routes require A workspace, not a TEAM workspace.
     //
     // They were briefly team-only, on the premise that a hub snapshot is keyed
@@ -1825,7 +1825,9 @@ describe('collab sync routes', () => {
     // personal workspace must get through, and must be scoped by its OWN id.
     const dir = await mkdtemp(path.join(tmpdir(), 'od-public-file-'));
     tempDirs.push(dir);
-    await writeFile(path.join(dir, 'index.html'), '<h1>Published</h1>');
+    await writeFile(path.join(dir, 'index.html'), '<link rel="stylesheet" href="style.css"><h1>Published</h1>');
+    await writeFile(path.join(dir, 'style.css'), 'body{color:red}');
+    const remember = vi.fn(() => { if (fingerprintFailure) throw new Error('disk unavailable'); return true; });
     vi.mocked(readVelaControlApiContext).mockReturnValue({
       profile: 'test',
       apiUrl: 'https://hub.example.test',
@@ -1848,6 +1850,7 @@ describe('collab sync routes', () => {
     const api = await startSyncServer(personalContextProvider(), {
       resolveProjectDir: () => dir,
       resolveSharedProject: async () => null,
+      shareContentFingerprints: { remember, compare: () => 'unknown' },
     });
 
     const publish = await api.json('/api/projects/p1/files/index.html/publish-public', {
@@ -1860,6 +1863,12 @@ describe('collab sync routes', () => {
       slug: 'personal-slug',
       fileName: 'index.html',
     });
+    expect(remember).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ resourceTeamId: 'ws-personal-1', projectId: 'p1', filePath: 'index.html' }),
+      { slug: 'personal-slug', token: expect.any(String) },
+      expect.arrayContaining([expect.objectContaining({ file: 'index.html' }), expect.objectContaining({ file: 'style.css', data: expect.anything() })]),
+    );
+    expect(vi.mocked(runVelaResourceCommand).mock.calls.map(call => call[0][0])).toEqual(['push', 'snapshot']);
     // Every hub call carries the personal workspace's own id as the scope —
     // there is no teamId on this context, and nothing may invent one.
     expect(runVelaResourceCommand).toHaveBeenCalled();
