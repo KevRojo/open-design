@@ -20,6 +20,11 @@
 
 .surface > :global(.comment-popover-actions) {
   margin-top: 0;
+  gap: 6px;
+}
+
+.surface :global(.comment-popover-actions-end) {
+  gap: 6px;
 }
 
 /* Floating annotation card only; the docked composer keeps its host surface. */

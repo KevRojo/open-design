@@ -13,7 +13,11 @@ describe('floating comment card surface', () => {
     };
     expect(values('.surface:global(.comment-popover)')).toMatchObject({ gap: '8px' });
     expect(values('.surface > :global(.comment-popover-titlebar)')).toMatchObject({ margin: '0' });
-    expect(values('.surface > :global(.comment-popover-actions)')).toMatchObject({ 'margin-top': '0' });
+    expect(values('.surface > :global(.comment-popover-actions)')).toMatchObject({ 'margin-top': '0', gap: '6px' });
+    expect(values('.surface :global(.comment-popover-actions-end)')).toMatchObject({ gap: '6px' });
+    for (const property of ['flex-wrap', 'max-width', 'justify-content']) {
+      expect(values('.surface :global(.comment-popover-actions-end)')).not.toHaveProperty(property);
+    }
   });
   it('distinguishes editable and readonly notes without truncating content or removing focus treatment', () => {
     const css = parse(readFileSync(resolve(__dirname, '../../src/components/BoardComposerPopover.module.css'), 'utf8'));
