@@ -154,9 +154,9 @@ it('persists mapping and intent across database reopen', () => {
   const queue = createCommentRelayOutboxStore(reopened);
   expect(queue.listDue(Date.now())).toEqual(before); expect(queue.isPublicationCurrent!(before[0]!)).toBe(true);
 });
-it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry', 'stop-inflight', 'republish-inflight'] as const)('delivery is mapped, retryable and scoped: %s', async scenario => {
+it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry', 'stop-inflight', 'republish-inflight', 'republish-new-intents'] as const)('delivery is mapped, retryable and scoped: %s', async scenario => {
   const s = setup(); s.add('a');
-  const inFlightChange = scenario === 'stop-inflight' || scenario === 'republish-inflight';
+  const inFlightChange = ['stop-inflight', 'republish-inflight', 'republish-new-intents'].includes(scenario);
   if (inFlightChange) s.add('b', 'b-p');
   s.publish();
   const deferredSignal = () => {
@@ -199,15 +199,24 @@ it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry', 'stop-infli
       await Promise.race([entered.promise, draining]);
       expect(sent).toHaveLength(1);
       if (scenario === 'stop-inflight') s.publications.delete(s.scope);
-      else s.publications.set(s.scope, s.publication);
+      else if (scenario === 'republish-new-intents') {
+        s.db.prepare("UPDATE preview_comments SET note='new publication content' WHERE id='a'").run();
+        createPublicFilePublicationRecorder(s.db, s.publications, enqueuePublishedFileComments)(
+          s.scope, s.publication, createShareFileMapping([{ sourcePath: s.scope.filePath, file: 'index.html' }]),
+        );
+      } else s.publications.set(s.scope, s.publication);
       release.resolve();
     }
     await draining;
     expect(sent).toHaveLength(scenario === 'normal' || inFlightChange ? 1 : 0);
-    expect(s.outbox.count()).toBe(scenario === 'retry' || scenario === 'switch' ? 1 : 0);
+    expect(s.outbox.count()).toBe(scenario === 'republish-new-intents' ? 2 : scenario === 'retry' || scenario === 'switch' ? 1 : 0);
     fails = false; switched = false;
     await service.flushPendingComments();
-    if (['normal', 'retry', 'switch', 'stop-inflight', 'republish-inflight'].includes(scenario)) {
+    if (scenario === 'republish-new-intents') {
+      expect(sent.map(comment => comment.id)).toEqual(['a', 'a', 'b']);
+      expect(sent[1]).toMatchObject({ note: 'new publication content', memberId: 'original', filePath: 'index.html' });
+      expect(s.outbox.count()).toBe(0);
+    } else if (['normal', 'retry', 'switch', 'stop-inflight', 'republish-inflight'].includes(scenario)) {
       expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ id: 'a', memberId: 'original', filePath: 'index.html' });
       expect(s.outbox.count()).toBe(0);
     } else expect(sent).toEqual([]);
