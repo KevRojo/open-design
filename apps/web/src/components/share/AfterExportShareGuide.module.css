@@ -1,7 +1,4 @@
-.anchor {
-  position: relative;
-  display: inline-flex;
-}
+
 /* Temporary behavior fixture: anchor below Share. Replace only from Owner-01 artwork. */
 .placeholder {
   position: absolute;

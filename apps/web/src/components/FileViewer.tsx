@@ -5,7 +5,6 @@ import { useShareScopeKeyboard } from './share/useShareScopeKeyboard';
 import { AfterExportShareGuide } from './share/AfterExportShareGuide';
 import { useAfterExportShareGuide } from './share/useAfterExportShareGuide';
 import { useShareGuideAppUserId } from './share/useShareGuideAppUserId';
-import afterExportGuideStyles from './share/AfterExportShareGuide.module.css';
 import { SharePanelHeader } from './share/SharePanelHeader';
 import { ShareMoreMenu } from './share/ShareMoreMenu';
 import shareEntryStyles from './share/ShareEntry.module.css';
@@ -17216,7 +17215,6 @@ function HtmlViewer({
                     <span>{t('fileViewer.unifiedExportTab')}</span>
                   </button>
                 ) : null}
-                <span className={afterExportGuideStyles.anchor}>
                   <button
                     type="button"
                     className={`chrome-action chrome-action-secondary chrome-action-with-label chrome-action-text-only chrome-action-unified ${shareEntryStyles.toolbar}`}
@@ -17250,7 +17248,6 @@ function HtmlViewer({
                       }}
                     />
                   ) : null}
-                </span>
                 {deployMenuOpen && (rawCanShare || rawCanDownload) ? (
                   /*
                     * **同一块菜单,只是可能换个地方开。**
