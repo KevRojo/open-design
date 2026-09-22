@@ -406,6 +406,22 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   const actionsRect = await composerActions.boundingBox();
   expect(bodyRect!.y - (titleRect!.y + titleRect!.height)).toBeCloseTo(8, 0);
   expect(actionsRect!.y - (bodyRect!.y + bodyRect!.height)).toBeCloseTo(8, 0);
+  const dragHandle = floatingComposer.getByRole('button', { name: 'Move comment box', exact: true });
+  const handleBounds = await dragHandle.boundingBox();
+  const beforeDrag = await floatingComposer.boundingBox();
+  expect(handleBounds).not.toBeNull();
+  expect(beforeDrag).not.toBeNull();
+  await page.mouse.move(handleBounds!.x + handleBounds!.width / 2, handleBounds!.y + handleBounds!.height / 2);
+  await page.mouse.down();
+  await expect(floatingComposer).toHaveClass(/comment-popover-dragging/);
+  await page.mouse.move(handleBounds!.x + handleBounds!.width / 2, handleBounds!.y + handleBounds!.height / 2 + 16, { steps: 4 });
+  await page.mouse.up();
+  await expect(floatingComposer).not.toHaveClass(/comment-popover-dragging/);
+  await expect.poll(async () => {
+    const bounds = await floatingComposer.boundingBox();
+    return bounds === null ? -1 : Math.round(bounds.y - beforeDrag!.y);
+  }).toBe(16);
+  await expect(titleLabel).toHaveText(await titleLabel.getAttribute('title') ?? '');
   await test.info().attach('comment-composer-width-wide', { body: await page.screenshot(), contentType: 'image/png' });
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect.poll(async () => (await floatingComposer.boundingBox())?.width ?? 0).toBeLessThan(300);
