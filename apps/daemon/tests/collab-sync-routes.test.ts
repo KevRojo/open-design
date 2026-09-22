@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import Database from 'better-sqlite3';
+import { createShareContentFingerprints } from '../src/collab/share-content-fingerprint.js';
 import { createShareBindingOutbox } from '../src/collab/share-binding-outbox.js';
 import { publishReservedVelaShareVersion } from '../src/collab/vela-share-publish.js';
 import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
@@ -1822,6 +1823,39 @@ describe('collab sync routes', () => {
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('WORKSPACE_PROJECT_UNSHARE_DENIED');
+  });
+
+  it('25 real HTTP freshness compares the rewritten package including dependency bytes', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-share-freshness-'));
+    tempDirs.push(dir);
+    await mkdir(path.join(dir, 'pages'));
+    await writeFile(path.join(dir, 'pages', 'local.html'), '<link rel="stylesheet" href="../style.css"><h1>Content</h1>');
+    await writeFile(path.join(dir, 'style.css'), 'body{color:red}');
+    const db = new Database(':memory:');
+    try {
+      migratePublicFilePublications(db);
+      const store = createSqlitePublicFilePublicationStore(db);
+      const fingerprints = createShareContentFingerprints(db, store);
+      vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://api.example.test', controlKey: 'synthetic', user: null, configMtimeMs: null });
+      vi.mocked(runVelaResourceCommand).mockImplementation(async args => JSON.stringify(args[0] === 'snapshot'
+        ? { slug: 'legacy-freshness', name: 'local.html', kind: 'project', versionId: 'v1', createdAt: new Date(1).toISOString() }
+        : { id: 'v1', version: 1 }));
+      const api = await startSyncServer(personalContextProvider(), {
+        resolveProjectDir: () => dir, resolveSharedProject: async () => null,
+        publicFilePublicationStore: store, shareContentFingerprints: fingerprints,
+      });
+      const endpoint = '/api/projects/p1/files/pages/local.html/publish-public';
+      expect((await api.json(endpoint, { method: 'POST' })).status).toBe(200);
+      const publication = (await api.json(endpoint)).body.publication;
+      expect.soft((await api.json(endpoint)).body.freshness).toBe('current');
+      await writeFile(path.join(dir, 'style.css'), 'body{color:blue}');
+      expect.soft((await api.json(endpoint)).body.freshness).toBe('outdated');
+      db.exec('DELETE FROM share_content_fingerprints');
+      const unknown = await api.json(endpoint);
+      expect.soft(unknown.body.freshness).toBe('unknown');
+      expect(unknown.body.publication).toEqual(publication);
+      expect(vi.mocked(runVelaResourceCommand).mock.calls.map(call => call[0][0])).toEqual(['push', 'snapshot']);
+    } finally { db.close(); }
   });
 
   it.each(['published', 'binding_pending'] as const)('22/23 real HTTP returns the Viewer entry only when bound; outcome=%s', async status => {

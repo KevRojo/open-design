@@ -1519,11 +1519,21 @@ export function registerCollabSyncRoutes(
     if (sharedProject?.ownerMemberId && sharedProject.ownerMemberId !== principal.memberId) {
       return res.status(403).json({ error: 'WORKSPACE_PROJECT_PUBLISH_DENIED' });
     }
-    return res.json({
-      publication: publicFilePublicationStore.get(
-        publicFilePublicationScope(projectId, filePath, principal),
-      ),
-    });
+    const scope = publicFilePublicationScope(projectId, filePath, principal);
+    // Advisory freshness must use exactly the same planner as upload, including
+    // rewritten entry and dependencies. Unavailable bytes never mean no share.
+    let freshness: import('@open-design/contracts').ShareContentFreshness = 'unknown';
+    if (deps.shareContentFingerprints && resolveProjectDir) {
+      try {
+        const plan = await buildSharePlan(
+          await resolveProjectDir(projectId), filePath, projectStore?.get?.(projectId)?.metadata,
+        );
+        freshness = deps.shareContentFingerprints.compare(scope, plan.files);
+      } catch {
+        // Keep publication visibility independent from failed comparison.
+      }
+    }
+    return res.json({ publication: publicFilePublicationStore.get(scope), freshness });
   });
 
   app.post('/api/projects/:id/collab/sync-intent', async (req, res) => {
