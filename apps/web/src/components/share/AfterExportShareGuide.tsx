@@ -3,13 +3,13 @@ import { Button } from '@open-design/components';
 import { advanceShareGuideClock, startShareGuideClock } from './after-export-share-guide';
 import styles from './AfterExportShareGuide.module.css';
 
-/** Behavior-only placeholder. Visual acceptance is BLOCKED on the Owner-01 source image. */
+/** Anchored guide borrowing the shared canvas prompt/tool visual language. */
 export function AfterExportShareGuide({ onOpenShare, onDismiss, onNeverShow, labels }: {
   onOpenShare: () => void;
   onDismiss: () => void;
   /** Return false when the permanent preference could not be persisted. */
   onNeverShow: () => boolean;
-  labels: { openShare: string; close: string; neverShow: string; awaitingDesign: string; saveFailed: string };
+  labels: { openShare: string; close: string; neverShow: string; saveFailed: string };
 }) {
   const [clock, setClock] = useState(() => startShareGuideClock(performance.now()));
   const [interaction, setInteraction] = useState({ hovered: false, focused: false });
@@ -27,9 +27,8 @@ export function AfterExportShareGuide({ onOpenShare, onDismiss, onNeverShow, lab
   }
   return (
     <section
-      className={styles.placeholder}
+      className={styles.guide}
       aria-label={labels.openShare}
-      data-design-status="awaiting-source-image"
       onMouseEnter={() => updateInteraction({ ...interaction, hovered: true })}
       onMouseLeave={() => updateInteraction({ ...interaction, hovered: false })}
       onFocusCapture={() => updateInteraction({ ...interaction, focused: true })}
@@ -37,14 +36,22 @@ export function AfterExportShareGuide({ onOpenShare, onDismiss, onNeverShow, lab
         if (!event.currentTarget.contains(event.relatedTarget)) updateInteraction({ ...interaction, focused: false });
       }}
     >
-      <small>{labels.awaitingDesign}</small>
-      <Button type="button" onClick={() => { onDismiss(); onOpenShare(); }}>{labels.openShare}</Button>
-      <Button type="button" onClick={onDismiss} aria-label={labels.close}>×</Button>
-      <Button type="button" onClick={() => {
+      <div className={styles.header}>
+        <Button className={styles.openShare} type="button" onClick={() => { onDismiss(); onOpenShare(); }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+          </svg>
+          <span>{labels.openShare}</span>
+        </Button>
+        <Button className={styles.close} type="button" onClick={onDismiss} aria-label={labels.close}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+        </Button>
+      </div>
+      <Button className={styles.neverShow} type="button" onClick={() => {
         if (onNeverShow()) onDismiss();
         else setSaveFailed(true);
       }}>{labels.neverShow}</Button>
-      {saveFailed ? <p role="alert">{labels.saveFailed}</p> : null}
+      {saveFailed ? <p className={styles.error} role="alert">{labels.saveFailed}</p> : null}
     </section>
   );
 }

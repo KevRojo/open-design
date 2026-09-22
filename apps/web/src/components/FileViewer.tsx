@@ -17227,7 +17227,6 @@ function HtmlViewer({
                         openShare: t('fileViewer.shareGuide.tryShare'),
                         close: t('common.close'),
                         neverShow: t('fileViewer.shareGuide.neverShowAgain'),
-                        awaitingDesign: t('fileViewer.shareGuide.awaitingDesign'),
                         saveFailed: t('fileViewer.shareGuide.preferenceSaveFailed'),
                       }}
                       onDismiss={afterExportGuide.dismiss}

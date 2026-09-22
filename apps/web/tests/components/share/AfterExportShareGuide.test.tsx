@@ -10,7 +10,15 @@ function callbacks() { return { onOpenShare: vi.fn(), onDismiss: vi.fn(), onNeve
 beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-describe('after export behavior-only placeholder', () => {
+describe('after export share guide', () => {
+  it('renders a guide instead of exposing internal design-blocker text', () => {
+    const events = callbacks();
+    render(<AfterExportShareGuide labels={labels} {...events} />);
+    const guide = screen.getByRole('region', { name: labels.openShare });
+    expect(guide.getAttribute('data-design-status')).toBeNull();
+    expect(screen.queryByText(labels.awaitingDesign)).toBeNull();
+    expect(screen.getAllByRole('button')).toHaveLength(3);
+  });
   it('opens share without invoking permanent suppression', () => {
     const events = callbacks();
     render(<AfterExportShareGuide labels={labels} {...events} />);

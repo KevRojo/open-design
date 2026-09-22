@@ -1,14 +1,81 @@
-
-/* Temporary behavior fixture: anchor below Share. Replace only from Owner-01 artwork. */
-.placeholder {
+/* Adapted from Chain-6 .s-m1eexportprompt .prompt and .tool, not a replica
+   of the unavailable Owner-01 image. Keep the guide below the Share anchor. */
+.guide {
   position: absolute;
-  inset-block-start: 100%;
+  inset-block-start: calc(100% + 8px);
   inset-inline-end: 0;
   z-index: 20;
-  display: grid;
-  gap: 4px;
-  padding: 8px;
-  min-width: 200px;
-  border: 1px solid currentColor;
-  background: var(--bg, white);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  padding: 14px;
+  border: 1px solid #0000000D;
+  border-radius: 10px;
+  background: #FFFFFF;
+  color: #333333;
+  box-shadow: 0 6px 24px #00000012, 0 2px 6px #00000006;
+  font-size: 12px;
+  line-height: 18px;
 }
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+button.openShare {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #29292B;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.openShare svg { flex-shrink: 0; }
+button.close {
+  display: flex;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-width: 0;
+  height: 20px;
+  padding: 3px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #858585;
+}
+button.neverShow {
+  align-self: flex-start;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #888888;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  white-space: normal;
+  text-align: start;
+}
+.openShare:hover, .neverShow:hover { text-decoration: underline; }
+.close:hover { background: #F2F2F4; }
+.guide button:focus-visible { outline: 2px solid #29292B; outline-offset: 3px; }
+.error { margin: 0; color: #C94E4E; font-size: 12px; line-height: 18px; }
