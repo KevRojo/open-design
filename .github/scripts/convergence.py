@@ -2242,7 +2242,10 @@ def parse_args() -> argparse.Namespace:
     publish.add_argument("--candidate", type=Path, required=True)
     publish.add_argument("--output-dir", type=Path, required=True)
     publish.add_argument("--products-root", type=Path, required=True)
-    publish.add_argument("--timeout", type=float, default=15.0)
+    # Product archives routinely need more than 15 seconds to cross a slow
+    # hosted-runner uplink. Writes are immutable and retried, so use the same
+    # transport window as restore instead of rejecting a healthy slow upload.
+    publish.add_argument("--timeout", type=float, default=60.0)
     publish_mode = publish.add_mutually_exclusive_group()
     publish_mode.add_argument("--isolated", action="store_true")
     publish_mode.add_argument("--release-local", action="store_true")
