@@ -23,7 +23,15 @@ with-env corepack pnpm --dir e2e exec tsx scripts/playwright.ts share-chain-prob
   --execute "$REAL_URL" "$NEW_EVIDENCE_DIRECTORY"
 ```
 
-Use a **new** output directory; existing directories are rejected. Headers, cookies, storageState, credentials and auth responses are never recorded. Relevant HTTP JSON is redacted; screenshots/rendered work/comment text are still sensitive and belong only to authorized test accounts in the private evidence directory. No tracing of the SSO/login page. Startup/stop of the preexisting Owner runtime remains with its owner via tools-dev; retain those lifecycle logs alongside the probe output. The probe closes only contexts it creates and disconnects its CDP client. It does not stop another session's runtime. Exit 0=all criteria PASS,1=FAIL,2=UNKNOWN present. Per-step `report.json`, filtered/redacted `http-evidence.json`, PG text output, screenshots and lifecycle records are retained.
+Use a **new** output directory; existing directories are rejected. Headers, cookies, storageState, credentials and auth response bodies are never recorded. Relevant HTTP JSON is redacted; screenshots/rendered work/comment text are still sensitive and belong only to authorized test accounts in the private evidence directory. No tracing of the SSO/login page. Startup/stop of the preexisting Owner runtime remains with its owner via tools-dev; retain those lifecycle logs alongside the probe output. The probe closes only contexts it creates and disconnects its CDP client. It does not stop another session's runtime. Exit 0=all criteria PASS,1=FAIL,2=UNKNOWN present. Per-step `report.json`, redacted `http-evidence.json` (all response statuses, business-body allowlist only) and `http-requests.json` (request attempts, including those with no response), PG text output, screenshots and lifecycle records are retained.
+
+## HTTP evidence completeness
+
+Request attempts are retained independently of responses, so a blocked/failed directory request cannot disappear from the evidence. Capturing an attempt does not classify it as allowed or forbidden. All responses retain status/method/type/redacted URL, but only canonical comment, publication and metadata endpoints have JSON bodies read. Auth, directory and artifact-resource bodies are not read. URL userinfo/fragments and arbitrary query values are redacted; non-HTTP URL payloads are omitted. Persistence applies the existing identity/secret redactor as well.
+
+`bodyRead` distinguishes `complete` (including a genuine JSON null), `unavailable` (for example a lost CDP response body), and `not-requested` (outside the body allowlist). An unavailable body is missing proof, never evidence of an empty response or a successful contract assertion. Body reads start in the response callback; the observer does not retry requests or promise that CDP will retain every body. Listeners are removed before pending reads are drained on exit.
+
+The local recorder unit tests are not browser/privacy/SSO acceptance. Actual anonymous visibility, nonempty author-snapshot provenance, and absence of directory exposure still require the dispatched real observations.
 
 ## Data lineage / chronology
 

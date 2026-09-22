@@ -1,14 +1,15 @@
-import { chromium, type Page, type Response, type BrowserContext, type Browser } from '@playwright/test';
+import { chromium, type Page, type Request, type Response, type BrowserContext, type Browser } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { captureHttpRequest, captureHttpResponse } from './http-evidence.js';
 
 export type Verdict = 'PASS' | 'FAIL' | 'UNKNOWN';
 type Check = { name: string; verdict: Verdict; evidence: unknown };
 type Step = { step: number; title: string; verdict: Verdict; checks: Check[]; inputs: unknown; outputs: unknown };
 type Json = Record<string, unknown>;
-type Seen = { page: string; at: number; method: string; url: string; status: number; body: unknown };
+type Seen = Awaited<ReturnType<typeof captureHttpResponse>>;
 export interface ProbeOptions {
   /** Expected real published URL, not an alternative source for any downstream step. */
   url: string;
@@ -32,12 +33,6 @@ function safe(value: unknown): unknown {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
     /password|token|cookie|authorization|secret|email|displayName|authorKey|appUserId/i.test(key) ? '<REDACTED>' : safe(item)]));
   return value;
-}
-function reportUrl(value: string): string {
-  const url = new URL(value);
-  url.username = ''; url.password = '';
-  for (const key of [...url.searchParams.keys()]) if (!['projectId', 'filePath'].includes(key)) url.searchParams.set(key, '<REDACTED>');
-  return url.href;
 }
 class Missing extends Error {}
 function requireFact<T>(value: T | undefined, message: string): T {
@@ -64,21 +59,20 @@ export async function runShareChainProbe(options: ProbeOptions): Promise<Step[]>
   const save = async (name: string, value: unknown) => writeFile(join(options.outputDir, name), JSON.stringify(safe(value), null, 2), { mode: 0o600 });
   const persist = () => save('report.json', { executedAt: new Date().toISOString(), steps, ci: 'UNKNOWN', deployment: 'UNKNOWN', production: 'UNKNOWN' });
   const seen: Seen[] = [];
+  const requests: ReturnType<typeof captureHttpRequest>[] = [];
   const pending = new Set<Promise<void>>();
   const listeners: Array<() => void> = [];
   const contexts: BrowserContext[] = [];
   const observe = (page: Page, label: string) => {
+    const requestListener = (request: Request) => requests.push(captureHttpRequest(request, label));
     const listener = (response: Response) => {
-      const url = new URL(response.url());
-      const relevant = /\/comments(?:\/|$)|\/publish-public$|\/public\/(?:shares|snapshots)\//.test(url.pathname);
-      if (!relevant) return;
-      const task = (async () => {
-        const body = await response.json().catch(() => null);
-        seen.push({ page: label, at: Date.now(), method: response.request().method(), url: reportUrl(response.url()), status: response.status(), body });
-      })();
+      // Begin the body read in the response callback, not after later navigation.
+      const task = captureHttpResponse(response, label).then(record => { seen.push(record); });
       pending.add(task); void task.finally(() => pending.delete(task));
     };
-    page.on('response', listener); listeners.push(() => page.off('response', listener));
+    page.on('request', requestListener);
+    page.on('response', listener);
+    listeners.push(() => { page.off('request', requestListener); page.off('response', listener); });
   };
   const settle = () => Promise.all([...pending]);
   let current = 0;
@@ -287,8 +281,9 @@ export async function runShareChainProbe(options: ProbeOptions): Promise<Step[]>
     await finish(null);
     for (const step of steps.slice(current + 1)) step.inputs = { blockedByStep: current + 1, reason: 'No substituted upstream outputs' };
   } finally {
-    await settle(); listeners.forEach(remove => remove());
+    listeners.forEach(remove => remove()); await settle();
     await save('http-evidence.json', seen);
+    await save('http-requests.json', requests);
     for (const context of contexts.reverse()) await context.close().catch(() => {});
     // Connected browser belongs to the operator; close disconnects this CDP client, not the browser server.
     await browser?.close();
