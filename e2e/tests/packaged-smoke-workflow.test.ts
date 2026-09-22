@@ -408,13 +408,13 @@ describe("packaged smoke workflow", () => {
     const ciIntents: Record<string, string> = {
       preflight: "workspace",
       workspace_unit_tests: "ci-workspace-unit",
-      daemon_unit_tests: "test-daemon",
+      daemon_unit_tests: "ci-daemon",
       windows_tools_pack_payload_tests: "ci-windows-tools-pack",
       web_workspace_tests: "test-web",
-      e2e_vitest: "test-e2e",
-      playwright_critical: "test-ui",
-      ui_p0: "test-ui",
-      playwright_visual: "test-ui",
+      e2e_vitest: "ci-e2e",
+      playwright_critical: "ci-ui",
+      ui_p0: "ci-ui",
+      playwright_visual: "ci-ui",
     };
     for (const [jobName, intent] of Object.entries(ciIntents)) {
       expect(workflowJob(ci, jobName)).toContain(`postinstall-intent: ${intent}`);
