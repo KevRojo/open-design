@@ -7047,9 +7047,10 @@ describe('FileViewer SVG artifacts', () => {
             return new Response(JSON.stringify({ context }), { status: 200 });
           }
           if (url.includes('publish-public')) {
-            if ((init?.method ?? 'GET').toUpperCase() !== 'GET') {
-              publishCalls.push(`${init?.method} ${url}`);
+            if ((init?.method ?? 'GET').toUpperCase() === 'GET') {
+              return Response.json({ publication: null });
             }
+            publishCalls.push(`${init?.method} ${url}`);
             return new Response(
               JSON.stringify({ url: 'https://pub.example/x', slug: 'x', fileName: 'index.html' }),
               { status: 200 },

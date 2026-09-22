@@ -16,6 +16,12 @@
   color: #333333;
 }
 
+/* Publish help remains outside the mutating action, at the trailing edge. */
+.helpHeading {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* S1-T/S4-T: scope explanation stays readable without hover or focus. */
 .scopeHeading {
   display: flex;
