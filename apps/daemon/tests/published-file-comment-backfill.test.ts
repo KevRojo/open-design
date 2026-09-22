@@ -154,8 +154,18 @@ it('persists mapping and intent across database reopen', () => {
   const queue = createCommentRelayOutboxStore(reopened);
   expect(queue.listDue(Date.now())).toEqual(before); expect(queue.isPublicationCurrent!(before[0]!)).toBe(true);
 });
-it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry'] as const)('delivery is mapped, retryable and scoped: %s', async scenario => {
-  const s = setup(); s.add('a'); s.publish();
+it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry', 'stop-inflight', 'republish-inflight'] as const)('delivery is mapped, retryable and scoped: %s', async scenario => {
+  const s = setup(); s.add('a');
+  const inFlightChange = scenario === 'stop-inflight' || scenario === 'republish-inflight';
+  if (inFlightChange) s.add('b', 'b-p');
+  s.publish();
+  const deferredSignal = () => {
+    let resolve = () => {};
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const entered = deferredSignal();
+  const release = deferredSignal();
   const context: WorkspaceCollabContext = { workspaceId: 'w', workspaceType: 'personal', workspaceMemberId: 'owner',
     teamId: 'w', role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active', planId: null,
     providerMode: 'platform_credits', permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
@@ -167,7 +177,12 @@ it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry'] as const)('
   const sent: CollabCloudComment[] = [];
   const service = createCollabCloudService({
     client: { ...createVelaCliCollabClient({ run: async () => { throw new Error('unexpected CLI'); } }),
-      pushComment: async (_team, _project, comment) => { if (fails) throw new Error('offline'); sent.push(comment); return { seq: 1 }; } },
+      pushComment: async (_team, _project, comment) => {
+        if (fails) throw new Error('offline');
+        sent.push(comment);
+        if (inFlightChange && sent.length === 1) { entered.resolve(); await release.promise; }
+        return { seq: 1 };
+      } },
     commentOutbox: s.outbox, listProjectIds: () => [], retryDelayMs: () => 0,
     resolveCommentRelayWorkspaceContext: async () => switched ? { ...context, workspaceMemberId: 'other' } : context,
     listRemoteProjectRelayBindings: async () => [{ projectId: 'p', ownerMemberId: 'owner' }],
@@ -177,16 +192,26 @@ it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry'] as const)('
     resolveLocalConversationId: () => 'a-p', mergeComment: () => 'unchanged',
   });
   try {
-    await service.flushPendingComments();
-    expect(sent).toHaveLength(scenario === 'normal' ? 1 : 0);
+    const draining = service.flushPendingComments();
+    if (inFlightChange) {
+      // Race against drain completion too: a regression that skips the first
+      // push must fail here, rather than hang waiting for an unreachable signal.
+      await Promise.race([entered.promise, draining]);
+      expect(sent).toHaveLength(1);
+      if (scenario === 'stop-inflight') s.publications.delete(s.scope);
+      else s.publications.set(s.scope, s.publication);
+      release.resolve();
+    }
+    await draining;
+    expect(sent).toHaveLength(scenario === 'normal' || inFlightChange ? 1 : 0);
     expect(s.outbox.count()).toBe(scenario === 'retry' || scenario === 'switch' ? 1 : 0);
     fails = false; switched = false;
     await service.flushPendingComments();
-    if (['normal', 'retry', 'switch'].includes(scenario)) {
+    if (['normal', 'retry', 'switch', 'stop-inflight', 'republish-inflight'].includes(scenario)) {
       expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ id: 'a', memberId: 'original', filePath: 'index.html' });
       expect(s.outbox.count()).toBe(0);
     } else expect(sent).toEqual([]);
-  } finally { service.dispose(); }
+  } finally { release.resolve(); service.dispose(); }
 });
 
 it.each(['pending-edit', 'after-ack', 'restart', 'stopped', 'republished', 'other-principal', 'other-file'] as const)(
