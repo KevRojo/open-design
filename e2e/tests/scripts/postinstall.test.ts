@@ -18,6 +18,16 @@ type StubEvent = {
   target: string;
 };
 
+type TimingEvent = {
+  durationMs: number;
+  operation: string;
+  phase: string;
+  schemaVersion: number;
+  startedAt: string;
+  status: string;
+  target?: string;
+};
+
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(join(workspaceRoot, path), "utf8")) as unknown;
 }
@@ -178,9 +188,18 @@ function runFixturePostinstall(sandbox: string, env: Record<string, string | und
       ...process.env,
       npm_execpath: join(sandbox, "pnpm-stub.mjs"),
       OPEN_DESIGN_POSTINSTALL_TARGETS: undefined,
+      OPEN_DESIGN_POSTINSTALL_TIMING_PATH: undefined,
       ...env,
     },
   });
+}
+
+function readTimingEvents(path: string): TimingEvent[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as TimingEvent);
 }
 
 function readStubEvents(invocationLog: string): StubEvent[] {
@@ -415,6 +434,60 @@ describe("postinstall script contract", () => {
       expect(eventIndex(events, "done", "packages/release")).toBeLessThan(eventIndex(events, "start", "packages/contracts"));
       expect(eventIndex(events, "done", "packages/contracts")).toBeLessThan(eventIndex(events, "start", "packages/components"));
       expect(events.filter((event) => event.event === "start").map((event) => event.target)).toContain("packages/download");
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("[P2] records optional postinstall timings without changing the build closure", () => {
+    const sandbox = createSandbox();
+    try {
+      writeTarget(sandbox, "packages/release", { name: "@open-design/release" });
+      writeTarget(sandbox, "tools/pack", {
+        dependencies: { "@open-design/release": "workspace:*" },
+        name: "@open-design/tools-pack",
+      });
+      const invocationLog = writePnpmStub(sandbox);
+      const timingPath = join(sandbox, "observations", "postinstall.jsonl");
+
+      const result = runFixturePostinstall(sandbox, {
+        OPEN_DESIGN_POSTINSTALL_PHASE: "build",
+        OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]',
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: timingPath,
+      });
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(readStubEvents(invocationLog).filter((event) => event.event === "start").map((event) => event.target))
+        .toEqual(["packages/release", "tools/pack"]);
+
+      const timings = readTimingEvents(timingPath);
+      expect(timings.map(({ operation, target, status }) => ({ operation, target, status }))).toEqual([
+        { operation: "workspace-build", status: "success", target: "packages/release" },
+        { operation: "workspace-build", status: "success", target: "tools/pack" },
+        { operation: "workspace-build-closure", status: "success", target: undefined },
+        { operation: "postinstall", status: "success", target: undefined },
+      ]);
+      expect(timings.every((event) => event.schemaVersion === 1 && event.phase === "build")).toBe(true);
+      expect(timings.every((event) => event.durationMs >= 0 && Number.isFinite(event.durationMs))).toBe(true);
+      expect(timings.every((event) => !Number.isNaN(Date.parse(event.startedAt)))).toBe(true);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("[P2] does not fail postinstall when optional timing storage is unavailable", () => {
+    const sandbox = createSandbox();
+    try {
+      writeTarget(sandbox, "packages/release", { name: "@open-design/release" });
+      writePnpmStub(sandbox);
+      const timingPath = join(sandbox, "timing-directory");
+      mkdirSync(timingPath);
+
+      const result = runFixturePostinstall(sandbox, {
+        OPEN_DESIGN_POSTINSTALL_PHASE: "build",
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: timingPath,
+      });
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(result.stderr).toContain("could not write optional timing data");
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }

@@ -58,9 +58,19 @@ describe("platform publication barrier", () => {
     expect(maximum).toBe(2);
     expect(completed.at(-1)).toMatch(/\/platforms\/mac_arm64.json$/);
     expect(existsSync(join(root, "outputs.json"))).toBe(true);
-    expect(JSON.parse(readFileSync(join(root, "outputs.json"), "utf8"))).toMatchObject({
+    const outputs = JSON.parse(readFileSync(join(root, "outputs.json"), "utf8")) as Record<string, string>;
+    expect(outputs).toMatchObject({
       platform_manifest_key: "beta/versions/0.22.3-beta.99/platforms/mac_arm64.json",
     });
+    const timings = JSON.parse(outputs.publish_timings_json ?? "[]") as Array<Record<string, unknown>>;
+    expect(timings).toHaveLength(8);
+    expect(timings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        objectKey: "beta/versions/0.22.3-beta.99/platforms/mac_arm64.json",
+        status: "success",
+      }),
+    ]));
+    expect(timings.every((timing) => typeof timing.durationMs === "number" && Number(timing.durationMs) >= 0)).toBe(true);
   });
 
   it("fails without publishing a manifest or success outputs when an upload fails", async () => {

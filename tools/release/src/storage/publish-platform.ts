@@ -25,6 +25,13 @@ type AssetEntry = {
   url: string;
 };
 
+type UploadTiming = {
+  bytes: number;
+  durationMs: number;
+  objectKey: string;
+  status: "failure" | "planned" | "success";
+};
+
 type TargetConfig = {
   arch: "arm64" | "x64";
   assetNames: string[];
@@ -58,6 +65,7 @@ const versionLockKey = optional(
   countedReleaseChannel == null ? "" : versionLockObjectKey(releaseVersion, countedReleaseChannel),
 );
 const storage = publishSideEffectsEnabled || versionLockRequired ? storageConfigFromEnv() : null;
+const uploadTimings: UploadTiming[] = [];
 
 if (versionLockRequired) {
   if (countedReleaseChannel == null) {
@@ -116,21 +124,31 @@ function createReportZip(root: string, zipPath: string): void {
 }
 
 async function upload(path: string, objectKey: string, cacheControl: string): Promise<void> {
+  const startedAt = performance.now();
+  const bytes = statSync(path).size;
   if (!publishSideEffectsEnabled) {
     console.log(`[dry-run:${dryRunMode || "plan"}] would upload ${path} to ${objectKey}`);
+    uploadTimings.push({ bytes, durationMs: Math.round(performance.now() - startedAt), objectKey, status: "planned" });
     return;
   }
   if (storage == null) throw new Error("storage config is required to upload release assets");
-  const startedAt = performance.now();
-  const bytes = statSync(path).size;
-  await putStorageObject({
-    ...storage,
-    bodyPath: path,
-    cacheControl,
-    contentType: contentType(path),
-    objectKey,
-  });
-  console.log(JSON.stringify({ event: "release-upload", objectKey, bytes, durationMs: Math.round(performance.now() - startedAt) }));
+  try {
+    await putStorageObject({
+      ...storage,
+      bodyPath: path,
+      cacheControl,
+      contentType: contentType(path),
+      objectKey,
+    });
+    const timing = { bytes, durationMs: Math.round(performance.now() - startedAt), objectKey, status: "success" as const };
+    uploadTimings.push(timing);
+    console.log(JSON.stringify({ event: "release-upload", ...timing }));
+  } catch (error) {
+    const timing = { bytes, durationMs: Math.round(performance.now() - startedAt), objectKey, status: "failure" as const };
+    uploadTimings.push(timing);
+    console.log(JSON.stringify({ event: "release-upload", ...timing }));
+    throw error;
+  }
 }
 
 async function uploadReport(reportDirectory: string): Promise<Record<string, unknown> | null> {
@@ -302,6 +320,7 @@ const outputs: Record<string, string> = {
   platform_manifest_path: manifestPath,
   platform_manifest_url: versionManifestUrl,
   release_target: target,
+  publish_timings_json: JSON.stringify(uploadTimings.slice().sort((left, right) => left.objectKey.localeCompare(right.objectKey))),
 };
 for (const [artifactName, artifact] of Object.entries(config.artifacts)) {
   outputs[`${artifactName}_url`] = artifact.url;

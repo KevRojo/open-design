@@ -647,6 +647,7 @@ jobs:
   build_mac_arm64:
     outputs:
       manifest_key: ${{ steps.mac_arm64_platform_outputs.outputs.platform_manifest_key }}
+      publish_timings: ${{ steps.mac_arm64_platform_outputs.outputs.publish_timings_json }}
       url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
       smoke_result: ${{ steps.mac_arm64_smoke.outcome }}
     name: "[build] mac_arm64 Electron full"
@@ -966,6 +967,7 @@ jobs:
   build_mac_x64:
     outputs:
       manifest_key: ${{ steps.mac_x64_platform_outputs.outputs.platform_manifest_key }}
+      publish_timings: ${{ steps.mac_x64_platform_outputs.outputs.publish_timings_json }}
       url: ${{ steps.mac_x64_platform_outputs.outputs.dmg_url }}
       smoke_result: ${{ steps.mac_x64_smoke.outcome }}
     name: "[build] mac_x64 Electron full"
@@ -1292,6 +1294,7 @@ jobs:
   build_win_x64:
     outputs:
       manifest_key: ${{ steps.win_x64_platform_outputs.outputs.platform_manifest_key }}
+      publish_timings: ${{ steps.win_x64_platform_outputs.outputs.publish_timings_json }}
       url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
       smoke_result: ${{ steps.win_x64_smoke.outcome }}
     name: "[build] win_x64 Electron full"
@@ -2004,6 +2007,174 @@ jobs:
     if: ${{ always() && !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Collect release timing ledger
+        id: timing_ledger
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          MAC_ARM64_UPLOAD_TIMINGS: ${{ needs.build_mac_arm64.outputs.publish_timings }}
+          MAC_X64_UPLOAD_TIMINGS: ${{ needs.build_mac_x64.outputs.publish_timings }}
+          RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
+          TIMING_LEDGER_PATH: ${{ runner.temp }}/release-timing-ledger.json
+          WIN_X64_UPLOAD_TIMINGS: ${{ needs.build_win_x64.outputs.publish_timings }}
+        with:
+          script: |
+            const fs = require("fs");
+            const thresholdMs = 30_000;
+            const toMs = (start, end) => start && end
+              ? Math.max(0, new Date(end).getTime() - new Date(start).getTime())
+              : null;
+            const seconds = (durationMs) => durationMs == null ? "—" : `${(durationMs / 1000).toFixed(1)}s`;
+            const uploadTimings = (target, raw) => {
+              if (!raw) return [];
+              try {
+                const entries = JSON.parse(raw);
+                return Array.isArray(entries) ? entries.map((entry) => ({ target, ...entry })) : [];
+              } catch (error) {
+                core.warning(`Could not parse ${target} upload timings: ${error.message}`);
+                return [];
+              }
+            };
+            const { data: workflowRun } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+              filter: "latest",
+              per_page: 100,
+            });
+            const normalizedJobs = jobs.map((job) => ({
+              id: job.id,
+              name: job.name,
+              status: job.status,
+              conclusion: job.conclusion,
+              startedAt: job.started_at,
+              completedAt: job.completed_at,
+              durationMs: toMs(job.started_at, job.completed_at),
+              runner: {
+                name: job.runner_name || null,
+                group: job.runner_group_name || null,
+                labels: job.labels || [],
+              },
+              steps: (job.steps || []).map((step) => ({
+                name: step.name,
+                number: step.number,
+                status: step.status,
+                conclusion: step.conclusion,
+                startedAt: step.started_at,
+                completedAt: step.completed_at,
+                durationMs: toMs(step.started_at, step.completed_at),
+              })),
+            }));
+            const completedAt = (job) => job.completedAt == null ? Number.NEGATIVE_INFINITY : new Date(job.completedAt).getTime();
+            const runStartedAt = workflowRun.run_started_at || workflowRun.created_at;
+            const publishJob = normalizedJobs.find((job) => job.name === "[publish] Beta distribution");
+            const validationJobs = normalizedJobs.filter((job) =>
+              /^\[(prepare|build|publish|test|validate)\]/.test(job.name) &&
+              job.conclusion !== "skipped" &&
+              job.completedAt != null,
+            );
+            const validationEndJob = validationJobs.sort((left, right) => completedAt(right) - completedAt(left))[0] || null;
+            const durationFromRunStart = (timestamp) => toMs(runStartedAt, timestamp);
+            const slowSteps = normalizedJobs
+              .flatMap((job) => job.steps.map((step) => ({
+                job: job.name,
+                runner: job.runner,
+                ...step,
+              })))
+              .filter((step) => step.durationMs != null && step.durationMs >= thresholdMs)
+              .sort((left, right) => right.durationMs - left.durationMs);
+            const ledger = {
+              schemaVersion: 1,
+              generatedAt: new Date().toISOString(),
+              thresholdMs,
+              release: {
+                channel: "beta",
+                version: process.env.RELEASE_VERSION,
+                repository: context.repo.owner + "/" + context.repo.repo,
+                workflow: workflowRun.name,
+                runId: context.runId,
+                runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT || "0"),
+                commit: workflowRun.head_sha,
+                event: workflowRun.event,
+                startedAt: runStartedAt,
+              },
+              wallClock: {
+                delivery: {
+                  endpoint: "version metadata published",
+                  completedAt: publishJob?.completedAt || null,
+                  durationMs: durationFromRunStart(publishJob?.completedAt),
+                },
+                validation: {
+                  endpoint: validationEndJob?.name || null,
+                  completedAt: validationEndJob?.completedAt || null,
+                  durationMs: durationFromRunStart(validationEndJob?.completedAt),
+                },
+              },
+              uploads: [
+                ...uploadTimings("mac_arm64", process.env.MAC_ARM64_UPLOAD_TIMINGS),
+                ...uploadTimings("mac_x64", process.env.MAC_X64_UPLOAD_TIMINGS),
+                ...uploadTimings("win_x64", process.env.WIN_X64_UPLOAD_TIMINGS),
+              ].sort((left, right) => right.durationMs - left.durationMs),
+              slowSteps,
+              jobs: normalizedJobs,
+            };
+            fs.writeFileSync(process.env.TIMING_LEDGER_PATH, JSON.stringify(ledger, null, 2) + "\n", "utf8");
+            core.setOutput("available", "true");
+            core.setOutput("path", process.env.TIMING_LEDGER_PATH);
+            const rows = slowSteps.slice(0, 30).map((step) => [
+              step.job,
+              step.name,
+              step.runner.name || step.runner.labels.join(", ") || "—",
+              seconds(step.durationMs),
+            ]);
+            const slowUploads = ledger.uploads.filter((entry) => entry.durationMs >= thresholdMs).slice(0, 20);
+            const summary = core.summary
+              .addHeading("Release timing ledger", 2)
+              .addRaw(`- delivery wall clock: \`${seconds(ledger.wallClock.delivery.durationMs)}\`\n`)
+              .addRaw(`- validation wall clock: \`${seconds(ledger.wallClock.validation.durationMs)}\`\n`)
+              .addRaw(`- observation threshold: \`${seconds(thresholdMs)}\`\n\n`)
+              .addTable([
+                [
+                  { data: "Job", header: true },
+                  { data: "Step", header: true },
+                  { data: "Runner", header: true },
+                  { data: "Duration", header: true },
+                ],
+                ...rows,
+              ]);
+            if (slowUploads.length > 0) {
+              summary
+                .addHeading("Uploads at or above 30 seconds", 3)
+                .addTable([
+                  [
+                    { data: "Target", header: true },
+                    { data: "Object", header: true },
+                    { data: "Size", header: true },
+                    { data: "Duration", header: true },
+                  ],
+                  ...slowUploads.map((entry) => [
+                    entry.target,
+                    entry.objectKey,
+                    `${(entry.bytes / 1024 / 1024).toFixed(1)} MiB`,
+                    seconds(entry.durationMs),
+                  ]),
+                ]);
+            }
+            await summary.write();
+      - name: Preserve release timing ledger
+        if: ${{ always() && steps.timing_ledger.outputs.available == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-beta-timing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.timing_ledger.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Publish direct CDN links and validation results
         uses: actions/github-script@v8
         env:
