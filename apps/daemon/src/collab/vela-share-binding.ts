@@ -1,6 +1,8 @@
 import { runVelaCommand, velaWorkspaceCommandOptions } from '../integrations/vela-command.js';
 
 export interface VelaShareBindingInput {
+  /** Original project-relative path persisted in the publication receipt. */
+  sourceFilePath: string;
   workspaceId: string;
   projectId: string;
   resourceId: string;
@@ -16,11 +18,11 @@ export interface VelaShareBindingInput {
 export async function bindVelaShareVersion(input: VelaShareBindingInput, run: typeof runVelaCommand = runVelaCommand): Promise<void> {
   try {
     const request = Object.freeze({ ...input });
-    if ([request.workspaceId, request.projectId, request.resourceId, request.slug, request.versionId]
+    if ([request.sourceFilePath, request.workspaceId, request.projectId, request.resourceId, request.slug, request.versionId]
       .some(value => typeof value !== 'string' || !value.trim())
       || !Number.isSafeInteger(request.version) || request.version < 1) throw new Error('invalid binding identity');
     const stdout = await run(['share', 'bind', request.slug, '--project-id', request.projectId,
-      '--resource-id', request.resourceId, '--version', String(request.version), '--version-id', request.versionId, '--json'],
+      '--source-file-path', request.sourceFilePath, '--resource-id', request.resourceId, '--version', String(request.version), '--version-id', request.versionId, '--json'],
     { ...velaWorkspaceCommandOptions(request.workspaceId), timeoutMs: 30_000 });
     const value: unknown = JSON.parse(stdout);
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid binding receipt');

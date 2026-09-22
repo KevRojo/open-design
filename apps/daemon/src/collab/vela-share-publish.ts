@@ -56,6 +56,7 @@ export async function publishVelaShareVersion(
     const stdout = await run([
       'share', 'publish', request.resourceId,
       '--project-id', request.projectId,
+      '--source-file-path', request.filePath,
       '--slug', request.slug,
       '--source-key', request.sourceKey,
       '--entry-path', request.entryPath,

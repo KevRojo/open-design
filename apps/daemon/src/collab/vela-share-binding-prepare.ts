@@ -21,7 +21,8 @@ export function createVelaShareBindingPrepare(options: VelaShareBindingPrepareOp
     if (!dataRoot) return null;
     const ownerMemberId = task.ownerMemberId;
     const request = Object.freeze({ workspaceId: task.resourceTeamId, projectId: task.projectId,
-      resourceId: task.resourceId, slug: task.receipt.slug, version: task.receipt.version, versionId: task.receipt.versionId });
+      resourceId: task.resourceId, sourceFilePath: task.receipt.filePath,
+      slug: task.receipt.slug, version: task.receipt.version, versionId: task.receipt.versionId });
     const configuredEnv = { ...(typeof options.configuredEnv === 'function' ? options.configuredEnv() : options.configuredEnv ?? {}) };
     const currentSession = (options.readSession ?? readVelaControlApiContext)(process.env, configuredEnv);
     if (!currentSession?.controlKey || !currentSession.apiUrl) return null;

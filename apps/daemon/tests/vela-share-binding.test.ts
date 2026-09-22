@@ -6,15 +6,15 @@ import path from 'node:path';
 import { bindVelaShareVersion } from '../src/collab/vela-share-binding.js';
 import { runPinnedVelaCommand } from '../src/collab/vela-pinned-command.js';
 import { type runVelaCommand, velaWorkspaceCommandOptions } from '../src/integrations/vela-command.js';
-const input = { workspaceId: 'w', projectId: 'p', resourceId: 'r', slug: 'stable', version: 2, versionId: 'immutable' };
+const input = { sourceFilePath: 'pages/local.html', workspaceId: 'w', projectId: 'p', resourceId: 'r', slug: 'stable', version: 2, versionId: 'immutable' };
 const receipt = { status: 'active', projectId: 'p', slug: 'stable', verifiedVersion: 2, verifiedVersionId: 'immutable' };
 it('binds only the frozen original publication and bounded workspace', async () => {
   const mutable = { ...input };
   const run = vi.fn<typeof runVelaCommand>().mockImplementation(async () => { mutable.slug = 'changed'; return JSON.stringify(receipt); });
   await bindVelaShareVersion(mutable, run);
-  expect(run).toHaveBeenCalledExactlyOnceWith(['share','bind','stable','--project-id','p','--resource-id','r','--version','2','--version-id','immutable','--json'], { ...velaWorkspaceCommandOptions('w'), timeoutMs: 30_000 });
+  expect(run).toHaveBeenCalledExactlyOnceWith(['share','bind','stable','--project-id','p','--source-file-path','pages/local.html','--resource-id','r','--version','2','--version-id','immutable','--json'], { ...velaWorkspaceCommandOptions('w'), timeoutMs: 30_000 });
 });
-it.each(['workspaceId', 'projectId', 'resourceId', 'slug', 'versionId'] as const)('rejects blank %s before spawning', async key => {
+it.each(['sourceFilePath', 'workspaceId', 'projectId', 'resourceId', 'slug', 'versionId'] as const)('rejects blank %s before spawning', async key => {
   const run = vi.fn<typeof runVelaCommand>();
   await expect(bindVelaShareVersion({ ...input, [key]: '' }, run)).rejects.toThrow(/^PUBLIC_SHARE_BINDING_FAILED$/);
   expect(run).not.toHaveBeenCalled();
@@ -39,7 +39,7 @@ it.skipIf(!process.env.OD_TEST_VELA_BIN).each(['success', 'missing-proof', 'conf
     const session = { profile: 'test' as const, apiUrl: `http://127.0.0.1:${address.port}`, controlKey: 'synthetic', user: null, configMtimeMs: null };
     const result = bindVelaShareVersion(input, args => runPinnedVelaCommand({ args, session, dataRoot: root, workspaceId: 'w', configuredEnv: { VELA_BIN: binary } }));
     if (mode === 'success') await expect(result).resolves.toBeUndefined(); else await expect(result).rejects.toThrow(/^PUBLIC_SHARE_BINDING_FAILED$/);
-    expect(calls).toEqual([{ url: '/api/v1/collab/shares/complete', method: 'POST', workspace: 'w', body: { projectId: 'p', slug: 'stable', expectedResourceId: 'r', expectedVersion: 2, expectedVersionId: 'immutable' } }]);
+    expect(calls).toEqual([{ url: '/api/v1/collab/shares/complete', method: 'POST', workspace: 'w', body: { projectId: 'p', slug: 'stable', sourceFilePath: 'pages/local.html', expectedResourceId: 'r', expectedVersion: 2, expectedVersionId: 'immutable' } }]);
     expect(await readdir(root)).toEqual([]);
   } finally {
     server.closeAllConnections(); if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
