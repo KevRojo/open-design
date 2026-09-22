@@ -129,6 +129,14 @@ export function migrateCommentRelayOutbox(db: SqliteDb): void {
       PRIMARY KEY (workspace_id, workspace_member_id, project_id, comment_id)
     );
 
+    CREATE TABLE IF NOT EXISTS comment_relay_sync_failures (
+      workspace_id TEXT NOT NULL,
+      workspace_member_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      failed_at INTEGER NOT NULL,
+      PRIMARY KEY (workspace_id, workspace_member_id, project_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_comment_relay_outbox_due
       ON comment_relay_outbox(next_attempt_at, updated_at);
   `);
@@ -307,16 +315,22 @@ export function createCommentRelayOutboxStore(
       ).changes > 0;
     },
     defer(record, input) {
-      return deferRow.run(
-        input.nextAttemptAt,
-        input.error,
-        now(),
-        record.workspaceId,
-        record.workspaceMemberId,
-        record.projectId,
-        record.commentId,
-        record.revision,
-      ).changes > 0;
+      return db.transaction(() => {
+        const changed = deferRow.run(
+          input.nextAttemptAt,
+          input.error,
+          now(),
+          record.workspaceId,
+          record.workspaceMemberId,
+          record.projectId,
+          record.commentId,
+          record.revision,
+        ).changes > 0;
+        if (changed) db.prepare(`INSERT INTO comment_relay_sync_failures(workspace_id, workspace_member_id, project_id, failed_at)
+          VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, workspace_member_id, project_id)
+          DO UPDATE SET failed_at=excluded.failed_at`).run(record.workspaceId, record.workspaceMemberId, record.projectId, now());
+        return changed;
+      })();
     },
     count() {
       return Number((countRows.get() as { count?: unknown } | undefined)?.count ?? 0);

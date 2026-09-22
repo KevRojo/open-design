@@ -1068,6 +1068,8 @@ import {
   type RememberedTeamResourceScopeLease,
 } from './collab/remembered-team-resource-scopes.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
+import { createCommentSyncStateService } from './collab/comment-sync-state.js';
+import { registerCommentSyncStateRoutes } from './routes/project/comments.js';
 import { createShareAliasReservations } from './collab/share-alias-reservation.js';
 import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
 import { publicShareViewerUrl } from './collab/public-share-viewer-url.js';
@@ -5153,6 +5155,23 @@ export async function startServer({
     req: any,
     projectId: string,
   ) => resolveProjectLocalCommentWorkspaceContext(req, projectId);
+  registerCommentSyncStateRoutes(app, {
+    db,
+    authorize: resolveProjectCommentReadWorkspaceContext,
+    service: createCommentSyncStateService(db, async scope => {
+      const session = readVelaControlApiContext(process.env, configuredAmrEnv());
+      if (!session?.controlKey) return false;
+      if (!session.apiUrl) return null;
+      const directory = await fetchVelaWorkspaceDirectory({ readSession: () => session });
+      const current = readVelaControlApiContext(process.env, configuredAmrEnv());
+      if (current?.controlKey !== session.controlKey || current?.apiUrl !== session.apiUrl) return null;
+      if (!directory.ok) return null;
+      return directory.items.some(item => item.workspaceId === scope.workspaceId
+        && item.workspaceMemberId === scope.workspaceMemberId
+        && item.memberStatus === 'active'
+        && item.lifecycleState !== 'deleted' && item.lifecycleState !== 'deleting');
+    }),
+  });
   const resolveFreshProjectCommentWorkspaceContext = async (
     req: any,
     projectId: string,

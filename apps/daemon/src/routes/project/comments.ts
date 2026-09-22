@@ -1,4 +1,5 @@
 import type { Express, Request } from 'express';
+import type { CommentSyncStateService } from '../../collab/comment-sync-state.js';
 import type {
   PreviewComment,
   ProjectCommentReadRequest,
@@ -158,6 +159,33 @@ export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'proj
 function hasExternalCommentAuthor(comment: PreviewComment): boolean {
   return comment.authorKind === 'user'
     || (typeof comment.authorAppUserId === 'string' && comment.authorAppUserId.trim().length > 0);
+}
+
+/** K8 supply only: null body means not determined, never default false.
+ * POST retries existing scoped intents through the normal background drain.
+ */
+export function registerCommentSyncStateRoutes(app: Express, deps: {
+  db: RegisterProjectCommentRoutesDeps['db'];
+  service: CommentSyncStateService;
+  authorize: (req: Request, projectId: string) => Promise<ProjectCommentWorkspaceContextResolution>;
+}): void {
+  for (const method of ['get', 'post'] as const) {
+    app[method]('/api/projects/:id/comment-sync-state', async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const projectId = req.params.id;
+        if (!getProject(deps.db, projectId)) return res.status(404).json({ error: 'project not found' });
+        const resolution = await deps.authorize(req, projectId);
+        if (!resolution.ok) return res.status(resolution.status).json({ error: resolution.code });
+        const context = resolution.context;
+        if (!context?.workspaceId || !context.workspaceMemberId) return res.json(null);
+        const scope = { projectId, workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+        return res.json(await deps.service[method === 'post' ? 'retry' : 'read'](scope));
+      } catch {
+        return res.status(503).json({ error: 'COMMENT_SYNC_STATE_UNAVAILABLE' });
+      }
+    });
+  }
 }
 
 export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectCommentRoutesDeps): void {
