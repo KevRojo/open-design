@@ -333,7 +333,9 @@ async function publicShareFixture(options: {
     }),
     retry: vi.fn(),
   };
-  return { publicFilePublicationStore: store, sharePublishing };
+  const readProjectShareState = vi.fn(async (scope: { projectId: string }) => ({ projectId: scope.projectId, bindingExists: true, hasEverShared: true,
+    publications: [{ sourceFilePath: 'index.html', slug: fixtureSlug, status: 'active' as const }, { sourceFilePath: 'pages/local.html', slug: fixtureSlug, status: 'active' as const }] }));
+  return { publicFilePublicationStore: store, sharePublishing, readProjectShareState };
 }
 
 
@@ -433,6 +435,7 @@ async function startSyncServer(
   };
   const handle: CollabSyncRoutesHandle = registerCollabSyncRoutes(app, {
     collab: runtime,
+    readProjectShareState: async scope => ({ projectId: scope.projectId, bindingExists: false, hasEverShared: false, publications: [] }),
     verifyWorkspaceRequest,
     verifyWorkspaceScope,
     resolveSharedProject: defaultResolveSharedProject,
@@ -1884,6 +1887,21 @@ describe('collab sync routes', () => {
     expect(res.body.error).toBe('WORKSPACE_PROJECT_UNSHARE_DENIED');
   });
 
+  it.each(['none', 'active', 'stopped', 'unavailable'] as const)('reads authoritative project/file state without any local publication: %s', async state => {
+    const history = { projectId: 'p1', bindingExists: state !== 'none', hasEverShared: state !== 'none',
+      publications: state === 'none' || state === 'unavailable' ? [] : [{ sourceFilePath: 'index.html', slug: fixtureSlug, status: state }] };
+    const read = vi.fn(async () => { if (state === 'unavailable') throw new Error('upstream 404 is not never-shared'); return history; });
+    const api = await startSyncServer(personalContextProvider(), { readProjectShareState: read });
+    const project = await api.json('/api/projects/p1/share-state');
+    const file = await api.json('/api/projects/p1/files/index.html/publish-public');
+    if (state === 'unavailable') { expect(project.status).toBe(503); expect(file.status).toBe(503); }
+    else {
+      expect(project.status).toBe(200); expect(project.body).toEqual(history);
+      expect(file.status).toBe(200); expect(file.body).toEqual({ publication: null, status: state, freshness: 'unknown' });
+    }
+    expect(read).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', resourceTeamId: 'ws-personal-1', ownerMemberId: 'wm-personal-1' }));
+  });
+
   it('25 real HTTP freshness compares the rewritten package including dependency bytes', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-share-freshness-'));
     tempDirs.push(dir);
@@ -2388,6 +2406,7 @@ describe('collab sync routes', () => {
     try {
       await Promise.race([reached.promise, stop.then(() => { throw new Error('stop ended before barrier'); })]);
       // Explicit external witness replacement, not an ordinary update changing the stable alias.
+      fixture.readProjectShareState.mockResolvedValue({ projectId: 'p1', bindingExists: true, hasEverShared: true, publications: [{ sourceFilePath: 'index.html', slug, status: 'active' }] });
       fixture.publicFilePublicationStore.set({ resourceTeamId: 'team-1', ownerMemberId: 'wm-1', projectId: 'p1', filePath: 'index.html' }, newer);
     } finally { release.resolve(); }
     expect((await stop).status).toBe(200);
