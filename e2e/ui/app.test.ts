@@ -464,11 +464,12 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   for (const dismiss of ['escape', 'button'] as const) {
     const imageName = `discard-${dismiss}.png`;
     const removedImageName = `remove-${dismiss}.png`;
-    await floatingComposer.locator('input[type="file"]').setInputFiles([removedImageName, imageName].map(name => ({
+    const imageFiles = [removedImageName, imageName].map(name => ({
       name,
       mimeType: 'image/png',
       buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'),
-    })));
+    }));
+    await floatingComposer.locator('input[type="file"]').setInputFiles(imageFiles);
     await expect(floatingComposer.locator('.comment-popover-image')).toHaveCount(2);
     const removedImage = floatingComposer.getByRole('button', { name: removedImageName, exact: true });
     await floatingComposer.locator('.comment-popover-image').filter({ has: page.getByRole('button', { name: removedImageName, exact: true }) }).locator('.comment-popover-image-remove').click();
@@ -476,6 +477,16 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
     await expect(floatingComposer.locator('.comment-popover-image')).toHaveCount(1);
     const imagePreview = floatingComposer.getByRole('button', { name: imageName, exact: true });
     await expect(imagePreview).toBeVisible();
+    await expect(note).toHaveValue('');
+    await floatingComposer.locator('.comment-popover-image-remove').click();
+    await expect(floatingComposer.locator('.comment-popover-images')).toHaveCount(0);
+    await expect(page.getByTestId('comment-popover-save')).toBeDisabled();
+    await expect(page.getByTestId('comment-add-send')).toBeDisabled();
+    await floatingComposer.locator('input[type="file"]').setInputFiles(imageFiles.slice(1));
+    await expect(floatingComposer.locator('.comment-popover-image')).toHaveCount(1);
+    await expect(imagePreview).toBeVisible();
+    await expect(page.getByTestId('comment-popover-save')).toBeEnabled();
+    await expect(page.getByTestId('comment-add-send')).toBeEnabled();
     await expect.poll(() => imagePreview.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     await imagePreview.click();
     const imageDialog = page.getByRole('dialog', { name: imageName, exact: true });
