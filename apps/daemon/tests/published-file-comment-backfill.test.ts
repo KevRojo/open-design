@@ -7,6 +7,8 @@ import { closeDatabase, openDatabase, insertProject, insertConversation, upsertP
 import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
 import { createCommentRelayOutboxStore, commentRelayLocalBindingMatches } from '../src/collab/comment-relay-outbox.js';
 import { enqueuePublishedFileComments } from '../src/collab/published-file-comment-backfill.js';
+import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
+import { createShareFileMapping } from '../src/collab/share-file-mapping.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
 import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.js';
 import { commentRelayScope } from '../src/collab/comment-relay-scope.js';
@@ -37,6 +39,50 @@ function setup() {
   })();
   return { db, scope, add, publications, publication, outbox, publish };
 }
+it('composes the real publisher recorder, planner mapping and durable queue across stable-alias updates', () => {
+  const s = setup(); s.add('a'); s.add('b', 'b-p'); s.add('private', 'a-p', 'private.html');
+  const mapping = createShareFileMapping([{ sourcePath: s.scope.filePath, file: 'index.html' }]);
+  const record = createPublicFilePublicationRecorder(s.db, s.publications, enqueuePublishedFileComments);
+  const first = record(s.scope, s.publication, mapping);
+  const oldRows = s.outbox.listDue(Date.now());
+  expect(oldRows.map(row => row.comment.id)).toEqual(['a', 'b']);
+  expect(oldRows.every(row => row.publication?.token === first.token && row.publication.publicFilePath === 'index.html')).toBe(true);
+  s.add('a', 'a-p');
+  const second = record(s.scope, s.publication, mapping);
+  expect(second.slug).toBe(first.slug); expect(second.token).not.toBe(first.token);
+  expect(s.outbox.isPublicationCurrent!(oldRows[0]!)).toBe(false);
+  const currentRows = s.outbox.listDue(Date.now());
+  expect(currentRows).toHaveLength(2);
+  expect(currentRows.every(row => row.publication?.token === second.token)).toBe(true);
+  expect(s.publications.get(s.scope)?.url).toBe(s.publication.url);
+  expect(s.db.inTransaction).toBe(false);
+});
+it('real recorder restores previous publication, queue and mapping when a later comment enqueue fails', () => {
+  const s = setup(); s.add('a');
+  const record = createPublicFilePublicationRecorder(s.db, s.publications, enqueuePublishedFileComments);
+  const mapping = createShareFileMapping([{ sourcePath: s.scope.filePath, file: 'index.html' }]);
+  const previous = record(s.scope, s.publication, mapping);
+  const oldRows = s.outbox.listDue(Date.now());
+  const oldMapping = s.db.prepare('SELECT * FROM comment_relay_publication_mappings').all();
+  s.add('b', 'b-p');
+  s.db.exec("CREATE TRIGGER reject_second BEFORE INSERT ON comment_relay_outbox WHEN NEW.comment_id='b' BEGIN SELECT RAISE(ABORT,'queue failed'); END");
+  expect(() => record(s.scope, s.publication, mapping)).toThrow('queue failed');
+  expect(s.publications.getRevision(s.scope)).toEqual(previous);
+  expect(s.outbox.listDue(Date.now())).toEqual(oldRows);
+  expect(s.db.prepare('SELECT * FROM comment_relay_publication_mappings').all()).toEqual(oldMapping);
+  expect(s.db.inTransaction).toBe(false);
+});
+it('real recorder refuses unmapped file without replacing previously durable state', () => {
+  const s = setup(); s.add('a'); s.publish();
+  const revision = s.publications.getRevision(s.scope);
+  const rows = s.outbox.listDue(Date.now());
+  const record = createPublicFilePublicationRecorder(s.db, s.publications, enqueuePublishedFileComments);
+  const other = createShareFileMapping([{ sourcePath: 'other.html', file: 'index.html' }]);
+  expect(() => record(s.scope, s.publication, other)).toThrow('SHARE_ENTRY_MAPPING_UNAVAILABLE');
+  expect(s.publications.getRevision(s.scope)).toEqual(revision);
+  expect(s.outbox.listDue(Date.now())).toEqual(rows);
+});
+
 it('includes all conversations of exactly one file, preserves ids/authors and never reauthors inbound users', () => {
   const s = setup();
   s.add('a'); s.add('b', 'b-p'); s.add('other-file', 'a-p', 'private.html'); s.add('other-project', 'a-other', s.scope.filePath, 'other');
