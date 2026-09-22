@@ -956,6 +956,9 @@ import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
 import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
+import { sourcePathForCurrentPublication } from './collab/comment-relay-publication-mapping.js';
+import { createPublicFilePublicationRecorder } from './collab/public-file-publication-recording.js';
+import { enqueuePublishedFileComments } from './collab/published-file-comment-backfill.js';
 import { createVelaPublicFileStop } from './collab/vela-public-file-stop.js';
 import { createShareContentFingerprints } from './collab/share-content-fingerprint.js';
 import { createShareBindingOutbox } from './collab/share-binding-outbox.js';
@@ -4447,6 +4450,37 @@ export async function startServer({
         // Deliberately unguarded: if the query throws, the batch must fail and
         // keep its cursor. Swallowing the error here would report "no such
         // comment" and acknowledge a deletion we never applied.
+        // The server asserted which publication a comment belongs to; this turns
+        // that into the local file it was written against. Everything here is a
+        // gate, and each one is load-bearing:
+        //
+        // - the binding must be this workspace's, active, and created by the
+        //   member we are resolving for — a publication slug alone says which
+        //   share, not that this daemon's user may read into it;
+        // - a comment with no slug (written before the field existed) resolves
+        //   to null rather than to whatever is published now. That fallback is
+        //   exactly how a stopped share's late comment lands on a live one.
+        //
+        // Ambiguity throws out of `sourcePathForCurrentPublication`, which keeps
+        // the batch cursor so the batch can be retried rather than acknowledged.
+        resolvePublishedCommentSourcePath: ({ projectId, publicationSlug, publishedPath, context }) => {
+          if (!publicationSlug) return null;
+          const binding = getWorkspaceProjectByProjectId(db, projectId);
+          const ownerMemberId = binding?.createdByWorkspaceMemberId?.trim() || '';
+          if (
+            !binding
+            || !ownerMemberId
+            || binding.resourceState === 'deleted'
+            || binding.workspaceId?.trim() !== context.workspaceId?.trim()
+          ) return null;
+          return sourcePathForCurrentPublication(db, {
+            resourceTeamId: context.workspaceId,
+            ownerMemberId,
+            projectId,
+            slug: publicationSlug,
+            publishedPath,
+          });
+        },
         resolveStoredCommentLocation: (projectId, commentId) => {
           const stored = getProjectPreviewComment(db, projectId, commentId);
           if (!stored) return { found: false };
@@ -5194,6 +5228,20 @@ export async function startServer({
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     publicFilePublicationStore,
+    // Recording a publication and queueing its existing comments for backfill
+    // is ONE transaction. Without this the route falls back to a bare
+    // `publicationStore.set`, which records the share and silently drops the
+    // backfill intent — the publish succeeds, and the comments the person
+    // already wrote never reach the share page.
+    //
+    // The recorder also refuses to proceed without a publication witness
+    // (slug + revision token read back after the write), so a half-written
+    // publication cannot enqueue work that later resolves against nothing.
+    recordPublicFilePublication: createPublicFilePublicationRecorder(
+      db,
+      publicFilePublicationStore,
+      enqueuePublishedFileComments,
+    ),
     shareContentFingerprints: createShareContentFingerprints(db, publicFilePublicationStore),
     publicFileMutations,
     verifyWorkspaceRequest: verifiedWorkspaceContextForRequest,
