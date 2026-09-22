@@ -1053,3 +1053,160 @@ export interface ProjectFilePublicShareResponse {
   /** From a content fingerprint comparison; `unknown` until one is available. */
   freshness: ShareContentFreshness;
 }
+
+/* ------------------------------------------------------------------ *
+ * Share page ↔ preview frame bridge
+ * ------------------------------------------------------------------ */
+
+/**
+ * The postMessage envelope between the share page (host) and the previewed
+ * artifact (frame).
+ *
+ * Sent as a JSON STRING, not a structured clone: the frame renders untrusted
+ * authored content, and a string forces both sides through an explicit parse
+ * and schema check instead of receiving whatever object shape arrives.
+ */
+export interface ShareViewerBridgeEnvelope {
+  version: 1;
+  type: ShareViewerBridgeMessageType;
+  /** See {@link SHARE_BRIDGE_NONCE_IS_FRESHNESS_NOT_PERMISSION}. */
+  nonce: string;
+  payload: unknown;
+}
+
+export const SHARE_VIEWER_BRIDGE_HOST_TO_FRAME = [
+  'share:init',
+  'share:mode',
+  'share:locate',
+  'share:pins',
+] as const;
+
+export const SHARE_VIEWER_BRIDGE_FRAME_TO_HOST = [
+  'share:ready',
+  'share:target',
+  'share:pin',
+  'share:located',
+] as const;
+
+export type ShareViewerBridgeMessageType =
+  | (typeof SHARE_VIEWER_BRIDGE_HOST_TO_FRAME)[number]
+  | (typeof SHARE_VIEWER_BRIDGE_FRAME_TO_HOST)[number];
+
+/** host → frame. Turns the comment affordance on or off in the frame. */
+export interface ShareBridgeInitPayload { enabled: boolean }
+/** host → frame. Enters or leaves element-selection mode. */
+export interface ShareBridgeModePayload { enabled: boolean }
+/** host → frame. Asks the frame to find and highlight one anchored comment. */
+export interface ShareBridgeLocatePayload {
+  id: string;
+  elementId: string;
+  selector: string;
+}
+/** host → frame. The full pin set to draw; replaces whatever is drawn. */
+export interface ShareBridgePinsPayload {
+  items: ReadonlyArray<{ id: string; elementId: string; selector: string }>;
+}
+
+/** frame → host. The frame has loaded and will accept the other three types. */
+export interface ShareBridgeReadyPayload { }
+/** frame → host. The viewer picked an element to comment on. */
+export interface ShareBridgeTargetPayload {
+  elementId: string;
+  selector: string;
+  htmlHint: string;
+}
+/** frame → host. A drawn pin was activated. */
+export interface ShareBridgePinPayload { id: string }
+/** frame → host. The answer to one `share:locate`. */
+export interface ShareBridgeLocatedPayload { id: string; found: boolean }
+
+/**
+ * The nonce proves FRESHNESS, not permission.
+ *
+ * It says "this message belongs to the current document load", which is what
+ * makes a message from a previous load — after a navigation, a re-render, or
+ * a restored bfcache page — discardable instead of acted on.
+ *
+ * It is NOT an authorization secret, and it cannot be:
+ *
+ * - Any script running in the SAME document can read it. It defends against
+ *   staleness, never against code already inside the frame.
+ * - The host cannot observe when a cross-origin frame BEGINS navigating, so
+ *   there is a window in which a rotated nonce has not reached the frame yet.
+ *   Treating the nonce as a capability would make that window a hole; treating
+ *   it as freshness makes it merely a dropped message.
+ *
+ * Authorization lives where it always lived: the origin check on the message
+ * source, and the server's own checks on anything that changes state.
+ */
+export const SHARE_BRIDGE_NONCE_IS_FRESHNESS_NOT_PERMISSION = true;
+
+/**
+ * What must never cross this bridge.
+ *
+ * The frame renders content the viewer did not write and the host cannot
+ * vouch for. Everything the frame is handed becomes readable by that content.
+ *
+ * - **No `filePath`** — the bridge speaks in elements and ids; which file is
+ *   being viewed is the host's business, and the frame has no use for it.
+ * - **No credentials, tokens or session material** of any kind.
+ * - **No comment bodies** — the frame needs to know WHERE a comment is
+ *   anchored, never what it says. Pins carry ids; text stays on the host.
+ *
+ * A message that would need any of these is a message that belongs on the
+ * host side of the boundary instead.
+ */
+export const SHARE_BRIDGE_CARRIES_NO_PATHS_BODIES_OR_CREDENTIALS = true;
+
+/**
+ * `selector` and `htmlHint` are data, never code.
+ *
+ * They are matched and displayed. They are never evaluated, never written
+ * into the DOM as markup, and never used to build a selector string that is
+ * then evaluated. An unparseable or unmatched selector clears the highlight
+ * and answers `found: false`; it does not throw the frame into an error path
+ * a page could steer.
+ */
+export const SHARE_BRIDGE_SELECTOR_IS_DATA_NOT_CODE = true;
+
+/**
+ * Size and rate ceilings, so one side cannot wedge the other.
+ *
+ * These bound the transport only. The comment body has no product-level
+ * length limit (that decision is recorded elsewhere) and does not travel
+ * here, so nothing about these numbers constrains what a person may write.
+ */
+export const SHARE_BRIDGE_LIMITS = {
+  /** A UUID string. */
+  nonceLength: 36,
+  idMaxLength: 200,
+  elementIdMaxLength: 1000,
+  selectorMaxLength: 2000,
+  htmlHintMaxLength: 2000,
+  /** Items in one `share:pins`. */
+  pinsMaxItems: 200,
+  /** Bytes of one serialized envelope. */
+  messageMaxBytes: 64 * 1024,
+  /** Messages per second, per direction. */
+  messagesPerSecond: 20,
+} as const;
+
+/**
+ * Ordering and revocation — the rules that make a stale message harmless.
+ *
+ * **Gates.** `share:ready` carrying the current nonce must arrive before the
+ * host sends `mode`, `locate` or `pins`. A `share:target` is accepted only
+ * while the frame is both ready and in selection mode; a `share:located` only
+ * for an id the host actually has in flight; a `share:pin` only for an id in
+ * the set the host last drew. Each gate exists so that a message which is
+ * merely late cannot be mistaken for one that is meaningful.
+ *
+ * **Revocation.** A frame load, leaving the view, or any identity change
+ * immediately drops the pending selection, the drawn pins and every in-flight
+ * locate. Not doing so is how a pin from one viewer's session ends up
+ * answering for another's.
+ *
+ * **Never auto-submit.** Nothing arriving on this bridge may cause a POST on
+ * its own. The frame proposes a target; a person decides to comment.
+ */
+export const SHARE_BRIDGE_ORDERING_AND_REVOCATION_REQUIRED = true;
