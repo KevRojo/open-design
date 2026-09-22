@@ -54,6 +54,10 @@ STORAGE_ENV = {
     "access_key_id": "CLOUDFLARE_R2_WORKLOAD_RESULTS_AK",
     "secret_access_key": "CLOUDFLARE_R2_WORKLOAD_RESULTS_SK",
 }
+BETA_TASK_REFS = {
+    "refs/heads/feat/plan-foundation",
+    "refs/heads/feat/release-timing-ledger",
+}
 
 
 def canonical_json(value: Any) -> str:
@@ -1930,7 +1934,7 @@ def local_execution_evidence(
         require_release_local_environment()
     elif (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
           or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
-          or os.environ.get("GITHUB_REF") != "refs/heads/feat/plan-foundation"
+          or os.environ.get("GITHUB_REF") not in BETA_TASK_REFS
           or os.environ.get("GITHUB_WORKFLOW") != "release-beta"
           or os.environ.get("GITHUB_SHA") != context["provenance"]["headSha"]):
         raise ConfigError("same-job evidence requires the authorized release source checkout")
@@ -1946,14 +1950,14 @@ def require_isolated_candidate(candidate: dict[str, Any]) -> None:
     workflow = candidate.get("workflow")
     default_branch = payload.get("repository", {}).get("default_branch", "")
     authorized_sources = {
-        "ci": ("ci-v2", f"refs/heads/{default_branch}"),
-        "release-beta": ("beta-isolated-v1", "refs/heads/feat/plan-foundation"),
+        "ci": ("ci-v2", {f"refs/heads/{default_branch}"}),
+        "release-beta": ("beta-isolated-v1", BETA_TASK_REFS),
     }
     authorized = authorized_sources.get(workflow)
     if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
             or os.environ.get("GITHUB_REPOSITORY") != "nexu-io/open-design"
             or authorized is None
-            or os.environ.get("GITHUB_REF") != authorized[1]):
+            or os.environ.get("GITHUB_REF") not in authorized[1]):
         raise ConfigError("isolated publication requires an authorized manual source")
     context = producer_context(payload)
     if (candidate.get("policy") != authorized[0]

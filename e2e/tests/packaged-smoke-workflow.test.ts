@@ -2286,7 +2286,7 @@ process.stdin.on("end", () => {
     const action = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
     expect(action).toContain("run: pnpm install --frozen-lockfile");
     expect(action).toContain("uses: actions/cache/restore");
-    expect(workflow).toContain("BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}");
+    expect(workflow).toContain("BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && contains(fromJSON('[\"refs/heads/feat/plan-foundation\",\"refs/heads/feat/release-timing-ledger\"]'), github.ref) }}");
     expect(workflow.match(/uses: \.\/\.github\/actions\/setup-workspace/g)?.length).toBe(
       workflow.match(/save-pnpm-cache: \$\{\{ env.BETA_SAVE_PNPM_CACHE \}\}/g)?.length,
     );
@@ -2949,6 +2949,7 @@ process.stdin.on("end", () => {
     expect(publisherGuard).toContain('[ "$built_sha" != "$main_sha" ]');
     expect(publisherGuard).toContain('GITHUB_EVENT_NAME:-');
     expect(publisherGuard).toContain('refs/heads/feat/plan-foundation');
+    expect(publisherGuard).toContain('refs/heads/feat/release-timing-ledger');
     expect(publisherGuard).toContain('"$built_sha" = "${GITHUB_SHA:-}"');
     expect(publisherGuard).toContain("publish=false");
     expect(betaWorkflow).not.toContain("recover_foreign_beta");
@@ -3009,6 +3010,7 @@ process.stdin.on("end", () => {
     const gitFixture = `git() { if [ "$1" = rev-parse ]; then echo "$TEST_BUILT_SHA"; else echo "main-sha refs/heads/main"; fi; }\n`;
     for (const [event, ref, source, allowed] of [
       ["workflow_dispatch", "refs/heads/feat/plan-foundation", "task-sha", true],
+      ["workflow_dispatch", "refs/heads/feat/release-timing-ledger", "task-sha", true],
       ["workflow_dispatch", "refs/heads/feat/plan-foundation", "foreign-sha", false],
       ["push", "refs/heads/feat/plan-foundation", "task-sha", false],
       ["workflow_dispatch", "refs/heads/another", "task-sha", false],
