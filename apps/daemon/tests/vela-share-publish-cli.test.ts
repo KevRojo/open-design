@@ -57,9 +57,15 @@ it.skipIf(!process.env.OD_TEST_VELA_BIN)('keeps one reserved alias through faile
     expect(publishes.map(body => body.slug)).toEqual([slug, slug, slug]);
     expect(new Set(publishes.map(body => body.sourceKey)).size).toBe(1);
     expect(publishes.map(body => body.versionId)).toEqual(['immutable-1', 'immutable-2', 'immutable-3']);
+    let registeredVersion = 2;
     for (const call of calls) {
       expect(call.method).toBe('POST'); expect(call.workspace).toBe('workspace');
-      if (call.url === '/api/v1/collab/shares') expect(call.body).toEqual({ projectId: 'project', slug });
+      if (call.url === '/api/v1/collab/shares') {
+        expect(call.body).toEqual({ projectId: 'project', slug, sourceFilePath: 'pages/local.html',
+          expectedResourceId: 'resource', expectedVersion: registeredVersion,
+          expectedVersionId: `immutable-${registeredVersion}` });
+        registeredVersion += 1;
+      }
     }
   } finally {
     server.closeAllConnections(); if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
@@ -100,7 +106,7 @@ it.skipIf(!process.env.OD_TEST_VELA_BIN).each([200, 403])('publishes a stable al
     // Confirmed content survives binding failure, without repeating either mutation.
     expect(requests).toEqual([
       { url: '/api/v1/resources/resource/shares', method: 'POST', bearer: 'Bearer synthetic-key', workspace: 'workspace', body: { slug: 'stable', sourceKey: 'index.html', entryPath: 'index.html', name: 'Design', versionId: 'immutable-upload' } },
-      { url: '/api/v1/collab/shares', method: 'POST', bearer: 'Bearer synthetic-key', workspace: 'workspace', body: { projectId: 'project', slug: 'stable' } },
+      { url: '/api/v1/collab/shares', method: 'POST', bearer: 'Bearer synthetic-key', workspace: 'workspace', body: { projectId: 'project', slug: 'stable', sourceFilePath: 'pages/local.html', expectedResourceId: 'resource', expectedVersion: 2, expectedVersionId: 'immutable-upload' } },
     ]);
     expect(await readdir(root)).toEqual([]);
   } finally {
