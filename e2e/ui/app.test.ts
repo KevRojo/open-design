@@ -462,6 +462,15 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await page.getByTestId('comment-popover-view-all').click();
   await expect(sidePanel).toBeVisible();
   for (const dismiss of ['escape', 'button'] as const) {
+    const imageName = `discard-${dismiss}.png`;
+    await floatingComposer.locator('input[type="file"]').setInputFiles({
+      name: imageName,
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'),
+    });
+    const imagePreview = floatingComposer.getByRole('button', { name: imageName, exact: true });
+    await expect(imagePreview).toBeVisible();
+    await expect.poll(() => imagePreview.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     await note.fill(`Discard this ${dismiss} draft.`);
     await expect(page.getByTestId('comment-popover-save')).toBeEnabled();
     if (dismiss === 'escape') await note.press('Escape');
@@ -472,6 +481,7 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
     await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
     await expect(floatingComposer).toBeVisible();
     await expect(note).toHaveValue('');
+    await expect(floatingComposer.locator('.comment-popover-images')).toHaveCount(0);
     await expect(page.getByTestId('comment-popover-save')).toBeDisabled();
     await expect(titleLabel).toHaveText(longCommentTag);
   }
