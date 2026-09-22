@@ -188,7 +188,9 @@ def unpack(store: Path, archive: Path, binary: Path, timing_path: Path | None) -
     started = time.monotonic()
     status = "failed"
     try:
-        _run([str(binary), "t", "-bd", str(archive)], stdout=subprocess.DEVNULL)
+        # Extraction performs the same per-block CRC validation as `7zz t`.
+        # Testing first would read and decompress the complete archive twice on
+        # every warm cache hit.
         _run([str(binary), "x", "-y", "-bd", f"-o{store}", str(archive)])
         _reusable_roots(store)
         status = "restored"
