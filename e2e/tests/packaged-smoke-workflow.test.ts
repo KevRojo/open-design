@@ -2339,8 +2339,12 @@ process.stdin.on("end", () => {
     expect(action).toContain("run: pnpm install --frozen-lockfile");
     expect(action).toContain("uses: actions/cache/restore");
     expect(workflow).toContain("BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}");
+    expect(workflow).toContain("BETA_PNPM_STORE_CACHE_FORMAT: 7z-2603-mx1");
     expect(workflow.match(/uses: \.\/\.github\/actions\/setup-workspace/g)?.length).toBe(
       workflow.match(/save-pnpm-cache: \$\{\{ env.BETA_SAVE_PNPM_CACHE \}\}/g)?.length,
+    );
+    expect(workflow.match(/uses: \.\/\.github\/actions\/setup-workspace/g)?.length).toBe(
+      workflow.match(/pnpm-store-cache-format: \$\{\{ env.BETA_PNPM_STORE_CACHE_FORMAT \}\}/g)?.length,
     );
     for (const target of ["mac_arm64", "mac_x64", "win_x64"]) {
       const job = betaPlatformBuild(workflow, target);

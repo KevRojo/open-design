@@ -50,6 +50,8 @@ describe("GitHub Actions cache workflows", () => {
 
     expect(action).toContain("save-pnpm-cache:");
     expect(action).toContain("default: 'false'");
+    expect(action).toContain("pnpm-store-cache-format:");
+    expect(action).toContain("default: 'native'");
     expect(action).toContain("uses: actions/cache/restore@v5");
     expect(action).toContain("uses: actions/cache/save@v5");
     expect(action).not.toContain("uses: actions/cache@v5");
@@ -100,6 +102,32 @@ describe("GitHub Actions cache workflows", () => {
     expect(saveStep).not.toContain("github.ref");
     expect(saveStep).not.toContain("github.event_name");
     expect(action).not.toContain("feat/plan-foundation");
+  });
+
+  it("[P1] can cache only pnpm content files through the pinned 7-Zip layout", async () => {
+    const action = await readFile(setupWorkspaceAction, "utf8");
+    const archiveRestore = sectionBetween(
+      action,
+      "- name: Restore pnpm store archive",
+      "- name: Expand pnpm store archive",
+    );
+    const archiveSave = sectionBetween(
+      action,
+      "- name: Pack pnpm store archive",
+      "- name: Save pnpm store",
+    );
+
+    expect(action).toContain("native|7z-2603-mx1");
+    expect(action).toContain("pnpm_store_archive.py bootstrap");
+    expect(action).toContain("pnpm_store_archive.py unpack");
+    expect(action).toContain("pnpm_store_archive.py pack");
+    expect(archiveRestore).toContain("pnpm-store-v3-7z${{ steps.pnpm-store-archive.outputs.version }}");
+    expect(archiveRestore).toContain("${{ runner.arch }}");
+    expect(archiveRestore).toContain("${{ steps.node.outputs.node-version }}");
+    expect(archiveRestore).toContain("${{ inputs.pnpm-version }}");
+    expect(action).toContain("steps.pnpm-archive-cache-restore.outputs.cache-matched-key != ''");
+    expect(archiveSave).toContain("steps.pnpm-archive-cache-restore.outputs.cache-hit != 'true'");
+    expect(action).toContain("- name: Save pnpm store archive");
   });
 
   it("[P1] seeds Windows and Linux from main and deletes only closed-PR BuildKit cache families", async () => {

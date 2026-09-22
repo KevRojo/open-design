@@ -311,6 +311,7 @@ concurrency:
 
 env:
   BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}
+  BETA_PNPM_STORE_CACHE_FORMAT: 7z-2603-mx1
   OPEN_DESIGN_TELEMETRY_RELAY_URL: ${{ vars.OPEN_DESIGN_TELEMETRY_RELAY_URL }}
   POSTHOG_KEY: ${{ inputs.publish && secrets.POSTHOG_KEY || '' }}
   POSTHOG_HOST: ${{ inputs.publish && vars.POSTHOG_HOST || '' }}
@@ -442,6 +443,7 @@ jobs:
         with:
           postinstall-intent: release-control
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Validate shared beta publisher
         if: ${{ inputs.publish }}
         run: |
@@ -541,6 +543,7 @@ jobs:
         with:
           postinstall-intent: shared-javascript
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: '[build] Source packages'
         id: source_packages
         env:
@@ -619,6 +622,7 @@ jobs:
         with:
           postinstall-intent: source-web
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -692,6 +696,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
           cache-tools: 'true'
           postinstall-intent: platform-build
       - name: "[restore] Shared JavaScript"
@@ -916,6 +921,7 @@ jobs:
         with:
           postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -1148,6 +1154,7 @@ jobs:
         with:
           postinstall-intent: workspace
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Smoke beta mac_x64 packaged runtime
         id: mac_x64_smoke
         if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
@@ -1260,6 +1267,7 @@ jobs:
         with:
           postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -1442,6 +1450,7 @@ jobs:
         with:
           postinstall-intent: workspace
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Build beta win_x64 update fixture
         if: ${{ (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
         shell: pwsh
@@ -1589,6 +1598,7 @@ jobs:
         with:
           postinstall-intent: release-publish
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Download mac_arm64 platform manifest
         if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
         env:
@@ -1725,6 +1735,7 @@ jobs:
         with:
           postinstall-intent: ${{ format('test-{0}', matrix.kind) }}
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
           runner-labels: ${{ toJSON(matrix.runner) }}
       - name: Setup Playwright
         if: ${{ matrix.kind == 'e2e' || matrix.kind == 'ui' }}
@@ -1836,6 +1847,7 @@ jobs:
         with:
           postinstall-intent: release-validation
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1912,6 +1924,7 @@ jobs:
         with:
           postinstall-intent: release-validation
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1988,6 +2001,7 @@ jobs:
         with:
           postinstall-intent: release-validation
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
+          pnpm-store-cache-format: ${{ env.BETA_PNPM_STORE_CACHE_FORMAT }}
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
