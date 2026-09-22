@@ -1442,3 +1442,41 @@ export const SHARE_SYNC_INTERVALS_MS = {
  * retry pressure on the API — not by copying a poll interval.
  */
 export const SHARE_COMMENT_UPSTREAM_MAY_BE_FASTER_THAN_POLL = true;
+
+/**
+ * The link to hand the person, present only when the share actually serves.
+ *
+ * This is the share PAGE address — `/artifact/{projectId}/{slug}` on the web
+ * origin — not the resource API path that loads the file's bytes. Those are
+ * different addresses for different purposes, and handing out the second one
+ * bypasses the share page entirely: comments, sign-in, error states and the
+ * badge all live on the page, and the raw file renders without any of them.
+ * It looks like it works, which is why the substitution survives review.
+ *
+ * ## Absent on `binding_pending`, and that is the point
+ *
+ * A `binding_pending` publish has content uploaded and the alias advanced,
+ * but the binding that makes the link serve was not registered. Returning a
+ * URL there would hand the person something to copy and send that answers
+ * with nothing. The union carries no `url` in that branch so a caller cannot
+ * offer a copy affordance for a link that does not work yet — the retry fills
+ * the binding in, and the URL becomes available with it.
+ */
+export interface SharePublishedLink {
+  /** Share page address on the web origin, e.g. `/artifact/{projectId}/{slug}`. */
+  url: string;
+}
+
+/**
+ * The publish HTTP response: the outcome, the receipt, and — only when it
+ * serves — the link.
+ *
+ * Composing them here rather than adding `url` to
+ * {@link SharePublishReceipt} keeps the receipt what it is: facts the server
+ * confirmed about the upload. The URL is not one of those. It is derived from
+ * the web origin plus ids, it exists only in the serving case, and mixing it
+ * into the receipt would make `binding_pending` carry a field it must not.
+ */
+export type SharePublishResponse =
+  | ({ status: 'published'; receipt: SharePublishReceipt } & SharePublishedLink)
+  | { status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending };
