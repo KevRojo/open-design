@@ -670,10 +670,19 @@ test('[P1] real daemon run treats an in-place artifact edit as produced work', a
   await expect(runErrorCard(page)).toHaveCount(0);
 
   await clickPreviewToolbarAction(page, 'manual-edit-mode-toggle', /^Edit$/i);
-  const editedHeading = artifactPreviewFrame(page).locator('[data-od-id="smoke-title"]');
+  const previewFrame = artifactPreviewFrame(page);
+  await expect(previewFrame.locator('html[data-od-edit-mode]')).toHaveCount(1);
+  const editedHeading = previewFrame.locator('[data-od-id="smoke-title"]');
   await expect(editedHeading).toBeVisible();
-  await editedHeading.click();
-  await expect(editedHeading).toHaveAttribute('data-od-edit-selected', 'true');
+  // Enabling edit mode re-injects the iframe bridge and re-emits its targets.
+  // Under loaded CI the first click can land during that settle window, so
+  // retry until the bridge confirms the element is actually selected.
+  await expect(async () => {
+    await editedHeading.click({ timeout: 5_000 });
+    await expect(editedHeading).toHaveAttribute('data-od-edit-selected', 'true', {
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 30_000 });
   const fontSizeInput = page
     .locator('.manual-edit-modal .cc-section')
     .filter({ hasText: 'Parameters' })
