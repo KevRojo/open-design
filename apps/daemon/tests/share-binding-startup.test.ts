@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createInMemoryPublicFilePublicationStore } from '../src/collab/public-file-publication-store.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createShareBindingOutbox, type ShareBindingIntent } from '../src/collab/share-binding-outbox.js';
 import { createShareBindingStartup, type PrepareShareBinding } from '../src/collab/share-binding-startup.js';
@@ -8,14 +9,18 @@ afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 function fixture() {
   const db = new Database(':memory:'); databases.push(db);
   const store = createShareBindingOutbox(db);
-  const input: ShareBindingIntent = { resourceTeamId: 'w', ownerMemberId: 'o', resourceId: 'r', projectId: 'p', publicationRevision: 'rev1',
+  const publications = createInMemoryPublicFilePublicationStore();
+  const scope = { resourceTeamId: 'w', ownerMemberId: 'o', projectId: 'p', filePath: 'index.html' };
+  const publication = { slug: 'stable', fileName: 'index.html', url: 'https://example.test/stable' };
+  publications.set(scope, publication);
+  const input: ShareBindingIntent = { resourceTeamId: 'w', ownerMemberId: 'o', resourceId: 'r', projectId: 'p', publicationRevision: publications.getRevision(scope)!.token,
     receipt: { filePath: 'index.html', slug: 'stable', publishedAt: 1, version: 1, versionId: 'immutable1', entryPath: 'index.html' } };
   store.enqueue(input);
   const bind = vi.fn(async () => {});
   const prepare = vi.fn<PrepareShareBinding>(async () => ({ resourceTeamId: 'w', ownerMemberId: 'o', bind }));
   const isCurrent = vi.fn((_task: import('../src/collab/share-binding-outbox.js').ShareBindingTask) => true);
-  const start = () => createShareBindingStartup(store, { prepare, isCurrent, mutations: createPublicFileMutations() });
-  return { store, input, bind, prepare, isCurrent, start };
+  const start = () => createShareBindingStartup(store, { publications, prepare, isCurrent, mutations: createPublicFileMutations() });
+  return { store, publications, scope, publication, input, bind, prepare, isCurrent, start };
 }
 it('runs one binding-only pass and passes frozen original receipt/identity', async () => {
   const f = fixture(); const run = f.start();
@@ -55,7 +60,9 @@ it('caps total failures at five across startup cycles and never automatically re
   expect(f.bind).toHaveBeenCalledTimes(4); expect(f.store.list()[0]?.failureCount).toBe(5);
 });
 it('does not let one local guard failure prevent another project binding', async () => {
-  const f = fixture(); f.store.enqueue({ ...f.input, projectId: 'other-project' });
+  const f = fixture(); const scope = { ...f.scope, projectId: 'other-project' };
+  f.publications.set(scope, f.publication);
+  f.store.enqueue({ ...f.input, projectId: scope.projectId, publicationRevision: f.publications.getRevision(scope)!.token });
   f.isCurrent.mockImplementation(task => { if (task.projectId === 'p') throw new Error('local storage'); return true; });
   expect(await f.start()()).toMatchObject({ bound: 1, persistenceFailures: 1 });
   expect(f.store.list()).toEqual([expect.objectContaining({ projectId: 'p', failureCount: 1 })]);
