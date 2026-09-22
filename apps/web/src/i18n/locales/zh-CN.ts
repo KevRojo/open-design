@@ -3,7 +3,7 @@ import type { Dict } from "../types";
 export const zhCN: Dict = {
   'entry.proPreview.previewLabel': "Pro 套餐 · 本地演示",
   'entry.proPreview.quota': "套餐额度",
-  'entry.proPreview.week': "7 天额度",
+  'entry.proPreview.week': "7天额度免费用",
   'entry.proPreview.month': "30 天额度",
   'entry.proPreview.used': "已用 {percent}",
   'entry.proPreview.balance': "钱包余额",
