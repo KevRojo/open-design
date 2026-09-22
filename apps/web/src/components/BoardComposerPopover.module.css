@@ -16,6 +16,7 @@
 
 /* Floating annotation card only; the docked composer keeps its host surface. */
 .surface:global(.comment-popover) {
+  width: min(300px, calc(100% - 28px));
   padding: 12px;
   border: 1px solid #0000000D;
   border-radius: 10px;

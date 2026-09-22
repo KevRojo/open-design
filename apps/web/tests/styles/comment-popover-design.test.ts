@@ -26,11 +26,12 @@ describe('floating comment card surface', () => {
       rule.walkDecls(decl => { values[decl.prop] = decl.value; });
     });
     expect(values).toMatchObject({
+      width: 'min(300px, calc(100% - 28px))',
       padding: '12px', border: '1px solid #0000000D', 'border-radius': '10px',
       background: '#FFFFFF', 'box-shadow': '0 6px 24px #00000012',
       'backdrop-filter': 'none', '-webkit-backdrop-filter': 'none',
     });
-    for (const property of ['width', 'height', 'max-height', 'overflow', 'position', 'left', 'top']) {
+    for (const property of ['height', 'max-height', 'overflow', 'position', 'left', 'top']) {
       expect(values).not.toHaveProperty(property);
     }
   });

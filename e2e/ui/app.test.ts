@@ -382,6 +382,16 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   })) {
     await expect(floatingComposer).toHaveCSS(property, value);
   }
+  await page.setViewportSize({ width: 1600, height: 720 });
+  await expect(floatingComposer).toHaveCSS('width', '300px');
+  await test.info().attach('comment-composer-width-wide', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect.poll(async () => (await floatingComposer.boundingBox())?.width ?? 0).toBeLessThan(300);
+  const compactCard = await floatingComposer.boundingBox();
+  expect(compactCard).not.toBeNull();
+  expect(compactCard!.width).toBeGreaterThan(200);
+  expect(compactCard!.x).toBeGreaterThanOrEqual(0);
+  expect(compactCard!.x + compactCard!.width).toBeLessThanOrEqual(1280);
   const note = floatingComposer.getByTestId('comment-popover-input');
   for (const [property, value] of Object.entries({
     padding: '8px 10px', 'border-radius': '6px', 'border-top-color': 'rgb(227, 227, 230)',
