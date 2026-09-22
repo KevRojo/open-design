@@ -83,14 +83,15 @@ export function recordPublishedCommentBackfill(db: SqliteDb, input: RecordPublis
   const { scope, publicationRevision } = input;
   if (!publicationRevision.token) throw new Error('Published comment backfill requires a publication revision');
   const commentIds = [...new Set(input.commentIds)];
-  db.prepare(`INSERT INTO published_comment_backfill_batches
+  const inserted = db.prepare(`INSERT INTO published_comment_backfill_batches
     (workspace_id, workspace_member_id, project_id, file_path, publication_revision, state, retryable, code)
     VALUES (?, ?, ?, ?, ?, ?, 0, NULL)
     ON CONFLICT(workspace_id, workspace_member_id, project_id, file_path, publication_revision)
-    DO UPDATE SET state = excluded.state, retryable = 0, code = NULL`).run(
+    DO NOTHING`).run(
     scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath, publicationRevision.token,
     commentIds.length === 0 ? 'succeeded' : 'pending',
   );
+  if (!inserted.changes) return;
   const insertMember = db.prepare(`INSERT OR IGNORE INTO published_comment_backfill_members
     (workspace_id, workspace_member_id, project_id, file_path, publication_revision, comment_id)
     VALUES (?, ?, ?, ?, ?, ?)`);
@@ -112,12 +113,12 @@ export function markPublishedCommentBackfillOutcome(
   if (!values || !currentPublicationMatches(db, record)) return;
   migratePublishedCommentBackfillState(db);
   const [workspaceId, workspaceMemberId, projectId, filePath, revision] = values;
-  const member = db.prepare(`SELECT 1 FROM published_comment_backfill_members
+  const member = db.prepare(`SELECT delivered FROM published_comment_backfill_members
     WHERE workspace_id=? AND workspace_member_id=? AND project_id=? AND file_path=?
       AND publication_revision=? AND comment_id=?`).get(
     workspaceId, workspaceMemberId, projectId, filePath, revision, record.commentId,
-  );
-  if (!member) return;
+  ) as { delivered: number } | undefined;
+  if (!member || member.delivered === 1) return;
   if (outcome === 'delivered') {
     db.prepare(`UPDATE published_comment_backfill_members SET delivered=1
       WHERE workspace_id=? AND workspace_member_id=? AND project_id=? AND file_path=?
@@ -135,8 +136,9 @@ export function markPublishedCommentBackfillOutcome(
   const retryable = outcome === 'deferred' ? 1 : 0;
   const code = outcome === 'deferred' ? 'BACKFILL_DELIVERY_DEFERRED' : 'BACKFILL_DELIVERY_DISCARDED';
   db.prepare(`UPDATE published_comment_backfill_batches SET state='failed', retryable=?, code=?
-    WHERE workspace_id=? AND workspace_member_id=? AND project_id=? AND file_path=? AND publication_revision=?`).run(
-    retryable, code, ...values,
+    WHERE workspace_id=? AND workspace_member_id=? AND project_id=? AND file_path=? AND publication_revision=?
+      AND NOT (state='failed' AND retryable=0 AND ?=1)`).run(
+    retryable, code, ...values, retryable,
   );
 }
 

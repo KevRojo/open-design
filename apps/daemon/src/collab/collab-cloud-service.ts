@@ -523,7 +523,7 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
       );
       // Revision-conditional ACK: if an edit/delete was queued while this
       // payload was in flight, its newer row remains for the next drain.
-      deps.commentOutbox?.acknowledge(record);
+      deps.commentOutbox?.acknowledge(record, 'delivered');
       if (!record.comment.deleted) {
         deps.onCommentPushed?.({
           projectId: record.projectId,

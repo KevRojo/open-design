@@ -1,4 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
+import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
+import type { CollabCloudClient } from '../src/integrations/collab-cloud.js';
+import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +29,30 @@ function setup() {
   return { db, scope, publications, revision, subject };
 }
 
+it('derives success from the actual relay flush receipt, never from dequeuing alone', async () => {
+  const { db, scope, revision, subject } = setup();
+  const outbox = createCommentRelayOutboxStore(db, () => 1);
+  db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: revision, commentIds: ['a'] }))();
+  outbox.enqueue({ workspaceId: scope.resourceTeamId, workspaceMemberId: scope.ownerMemberId, teamId: scope.resourceTeamId, relayScope: 'team', projectId: scope.projectId, expectedOwnerMemberId: scope.ownerMemberId,
+    comment: { id: 'a', filePath: scope.filePath } as never, publication: { ...revision, publicFilePath: 'index.html' } });
+  const context: WorkspaceCollabContext = { workspaceId: scope.resourceTeamId, workspaceMemberId: scope.ownerMemberId, teamId: scope.resourceTeamId, workspaceType: 'team', role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active', providerMode: 'platform_credits', planId: null,
+    seatSummary: buildWorkspaceSeatSummary({ seatLimit: 1, usedSeats: 1 }), permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }) };
+  let offline = true; let pushes = 0;
+  const service = createCollabCloudService({ commentOutbox: outbox,
+    client: { pushComment: async () => { pushes++; if (offline) throw new Error('transport secret omitted'); return { seq: 1 }; } } as unknown as CollabCloudClient,
+    resolveLocalProjectRelayBinding: () => ({ workspaceId: scope.resourceTeamId, ownerMemberId: scope.ownerMemberId }),
+    resolveProjectWorkspaceContext: async () => context, resolveRemoteProjectOwnerMemberId: async () => scope.ownerMemberId,
+    listProjectIds: () => [], resolveLocalConversationId: () => 'local', mergeComment: () => 'unchanged', now: () => 1, retryDelayMs: () => 0 });
+  try {
+    await service.flushPendingComments();
+    expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: 'failed', retryable: true });
+    expect(outbox.count()).toBe(1);
+    offline = false; await service.flushPendingComments();
+    expect(pushes).toBe(2); expect(outbox.count()).toBe(0);
+    expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: 'succeeded', retryable: false });
+  } finally { service.dispose(); }
+});
+
 it('persists the exact initial batch and exposes empty and pending current states only', () => {
   const { db, scope, revision, subject } = setup();
   db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: revision, commentIds: [] }))();
@@ -51,6 +78,12 @@ it('requires delivered receipts for every initial member and keeps failures file
   expect(readPublishedCommentBackfill(db, subject)).toEqual({ state: 'failed', filePath: 'a.html', publicationRevision: revision.token, retryable: true, code: 'BACKFILL_DELIVERY_DEFERRED' });
   markPublishedCommentBackfillOutcome(db, record('b'), 'delivered');
   expect(readPublishedCommentBackfill(db, subject)?.state).toBe('succeeded');
+  // Once this publication's initial value arrived, a later ordinary edit
+  // failing transport is K8, not a retroactive failure of that backfill.
+  markPublishedCommentBackfillOutcome(db, record('a'), 'deferred');
+  expect(readPublishedCommentBackfill(db, subject)?.state).toBe('succeeded');
+  db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: revision, commentIds: ['a', 'b', 'late'] }))();
+  expect(readPublishedCommentBackfill(db, subject)?.state).toBe('succeeded');
 
   publications.set(scope, { slug: 'share-a', url: 'https://example.test/a', fileName: 'a.html' });
   expect(readPublishedCommentBackfill(db, subject)).toBeUndefined();
@@ -74,7 +107,7 @@ it('marks queue removal as a safe discard by default, but succeeds only with exp
 
   enqueue('b');
   expect(outbox.defer(outbox.listDue(1)[0]!, { nextAttemptAt: 1, error: 'credential=secret' })).toBe(true);
-  expect(readPublishedCommentBackfill(db, subject)?.code).toBe('BACKFILL_DELIVERY_DEFERRED');
+  expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ retryable: false, code: 'BACKFILL_DELIVERY_DISCARDED' });
   enqueue('a');
   enqueue('b');
   for (const row of outbox.listDue(1)) expect(outbox.acknowledge(row, 'delivered')).toBe(true);
