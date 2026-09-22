@@ -37,7 +37,7 @@ afterEach(async () => {
   tempRoot = '';
 });
 
-async function startProjectStubServer(deleteResponse: unknown = { ok: true }): Promise<StubServer> {
+async function startProjectStubServer(deleteResponse: unknown = { ok: true }, shareResponse?: unknown): Promise<StubServer> {
   const requests: CapturedRequest[] = [];
   const server = http.createServer((req, res) => {
     let raw = '';
@@ -110,6 +110,7 @@ async function startProjectStubServer(deleteResponse: unknown = { ok: true }): P
       }
       if (['POST', 'GET'].includes(captured.method)
         && captured.url === '/api/projects/project-1/files/nested%2Findex.html/publish-public') {
+        if (shareResponse !== undefined) { res.end(JSON.stringify(shareResponse)); return; }
         const publication = { url: 'https://example.invalid/returned-link', slug: 'returned-slug', fileName: 'nested/index.html' };
         res.end(JSON.stringify(captured.method === 'GET' ? { publication } : publication));
         return;
@@ -267,6 +268,15 @@ describe('od project CLI', () => {
     expect(stub.requests).toHaveLength(1);
   });
 
+  it.each(['publish', 'get'])('%s reports no-link success without printing undefined or declaring failure', async action => {
+    const body = { status: action === 'publish' ? 'published' : 'active', link: { status: 'unavailable', code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' }, ...(action === 'get' ? { publication: null, freshness: 'unknown' } : { receipt: { slug: 'stable', filePath: 'nested/index.html', versionId: 'v1', version: 1, publishedAt: 1, entryPath: 'index.html' } }) };
+    stub = await startProjectStubServer(undefined, body);
+    const args = ['project', 'share', action, 'project-1', '--path', 'nested/index.html', '--daemon-url', stub.baseUrl];
+    const result = await runCli(args);
+    expect(result.code).toBe(0); expect(result.stdout.trim()).toBe('Published; link temporarily unavailable.');
+    const json = await runCli([...args, '--json']);
+    expect(json.code).toBe(0); expect(JSON.parse(json.stdout)).toEqual(body);
+  });
   it('retry-stop targets the persisted file intent, never the deleted project DELETE route', async () => {
     stub = await startProjectStubServer();
     const result = await runCli(['project', 'share', 'retry-stop', 'deleted-project', '--path', 'pages/local.html', '--slug', 'stable', '--workspace', 'ws-1', '--workspace-member', 'member-1', '--daemon-url', stub.baseUrl, '--json']);

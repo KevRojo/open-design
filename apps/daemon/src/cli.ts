@@ -7185,7 +7185,7 @@ function printProjectShareHelp() {
   od project share status <id> [--path <file>] [--json]
                     Project binding history, or file lifecycle with --path.
   od project share stop <id> --path <file> --slug <slug> [--json]
-                    Stop the specified public snapshot (not resumable).
+                    Stop the stable public alias; its identity is retained for resume.
 
   od project share retry-stop <id> --path <file> --slug <slug> [--json]
                     Retry one persisted stop, including after project deletion.
@@ -7249,6 +7249,12 @@ async function runProjectShare(args) {
   if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
   if (projectStatus) return console.log(JSON.stringify(data, null, 2));
   if (['stop', 'retry-stop'].includes(action)) return console.log('Sharing stopped.');
+  if (data.status === 'binding_pending') {
+    return console.log(`Content published; binding pending.${data.link?.status === 'unavailable' ? ' Link temporarily unavailable.' : ''}`);
+  }
+  if (data.link?.status === 'unavailable') {
+    return console.log(`${data.status === 'stopped' ? 'Sharing stopped' : 'Published'}; link temporarily unavailable.`);
+  }
   const publication = action === 'get' ? data.publication : data;
   console.log(publication ? publication.url : 'Not published.');
 }
@@ -7282,7 +7288,7 @@ async function runProject(args) {
   od project share status <id> [--path <file>] [--json]
                     Project binding history, or file lifecycle with --path.
   od project share stop <id> --path <file> --slug <slug> [--json]
-                    Stop the specified public snapshot (not resumable).
+                    Stop the stable public alias; its identity is retained for resume.
   od project revoke-public-link <id> --path <file> --url <public-url>
                     Revoke a public file link whose local publication record
                     was lost during an older daemon restart or upgrade.
