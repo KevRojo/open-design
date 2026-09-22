@@ -85,7 +85,7 @@ it.each(['team', 'personal'] as const)('replays unmodified Vela cb44e7597d HTTP 
   } finally { service.dispose(); }
 });
 
-it.each(['team', 'personal', 'stopped', 'lookup-error'] as const)('replays e9e4564dc server-asserted alias into actual local source rows: %s', async scenario => {
+it.each(['team', 'personal', 'stopped', 'lookup-error', 'lookup-missing', 'ambiguous'] as const)('replays e9e4564dc server-asserted alias into actual local source rows: %s', async scenario => {
   const wire = readFileSync(new URL('./fixtures/vela-share-downstream-e9e4564dc.json', import.meta.url), 'utf8');
   const captured = JSON.parse(wire);
   expect(captured.comments[0].publicationSlug).toBe('share-management-slug');
@@ -104,6 +104,13 @@ it.each(['team', 'personal', 'stopped', 'lookup-error'] as const)('replays e9e45
     recordCommentRelayPublicationMapping(db, scope, { ...publications.getRevision(scope)!, publicFilePath: 'index.html' });
   })();
   if (scenario === 'stopped') publications.delete(scope);
+  if (scenario === 'ambiguous') {
+    const conflictingScope = { ...scope, filePath: 'pages/conflict.html' };
+    db.transaction(() => {
+      publications.set(conflictingScope, { slug: 'share-management-slug', url: 'https://example.test/s/share-management-slug', fileName: conflictingScope.filePath });
+      recordCommentRelayPublicationMapping(db, conflictingScope, { ...publications.getRevision(conflictingScope)!, publicFilePath: 'index.html' });
+    })();
+  }
   const context: WorkspaceCollabContext = {
     workspaceId: 'fixture-space', workspaceType: scenario === 'team' ? 'team' : 'personal', workspaceMemberId: 'member-owner',
     role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active',
@@ -117,10 +124,12 @@ it.each(['team', 'personal', 'stopped', 'lookup-error'] as const)('replays e9e45
     listProjectIds: () => [], resolveLocalConversationId: () => 'local',
     resolveProjectWorkspaceContext: async () => context,
     listPersonalCommentRelayFilePaths: () => new Set([scope.filePath]),
-    resolvePublishedCommentSourcePath: ({ publicationSlug, publishedPath }) => {
-      if (scenario === 'lookup-error') throw new Error('mapping unavailable');
-      return sourcePathForCurrentPublication(db, { ...scope, slug: publicationSlug, publishedPath });
-    },
+    ...(scenario === 'lookup-missing' ? {} : {
+      resolvePublishedCommentSourcePath: ({ publicationSlug, publishedPath }: { publicationSlug: string; publishedPath: string }) => {
+        if (scenario === 'lookup-error') throw new Error('mapping unavailable');
+        return sourcePathForCurrentPublication(db, { ...scope, slug: publicationSlug, publishedPath });
+      },
+    }),
     resolveStoredCommentLocation: (id, commentId) => {
       const stored = getProjectPreviewComment(db, id, commentId);
       return stored ? { found: true, filePath: stored.filePath } : { found: false };
@@ -128,9 +137,10 @@ it.each(['team', 'personal', 'stopped', 'lookup-error'] as const)('replays e9e45
     mergeComment: ({ projectId: id, conversationId, comment }) => mergeSyncedPreviewComment(db, id, conversationId, comment),
   });
   try {
-    expect(await service.pullProject(projectId, context)).toBe(scenario !== 'lookup-error');
+    const fails = ['lookup-error', 'lookup-missing', 'ambiguous'].includes(scenario);
+    expect(await service.pullProject(projectId, context)).toBe(!fails);
     const rows = listPreviewComments(db, projectId, 'local');
-    if (scenario === 'stopped' || scenario === 'lookup-error') expect(rows).toEqual([]);
+    if (scenario === 'stopped' || fails) expect(rows).toEqual([]);
     else {
       expect(rows.find(row => row.id === captured.comments[0].id)).toMatchObject({ filePath: scope.filePath, authorKind: 'user', authorAppUserId: 'share-fixture-viewer-app' });
       expect(rows.some(row => row.id === captured.comments[1].id)).toBe(false);
@@ -138,7 +148,7 @@ it.each(['team', 'personal', 'stopped', 'lookup-error'] as const)('replays e9e45
       expect(rows.find(row => row.id === 'capture-member')?.filePath).toBe(scenario === 'team' ? 'index.html' : undefined);
     }
     await service.pullProject(projectId, context);
-    expect(calls[1]?.slice(3, 5)).toEqual(['--since-seq', scenario === 'lookup-error' ? '0' : '4']);
+    expect(calls[1]?.slice(3, 5)).toEqual(['--since-seq', fails ? '0' : '4']);
   } finally { service.dispose(); }
 });
 
