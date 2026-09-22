@@ -375,19 +375,30 @@ failure; if rollback fails, preserve the reported recovery directory and stop.
 This is a consumer gate and rollback contract, not a filesystem-wide atomic
 rename or a promise to recover automatically after a process kill.
 
-`OPEN_DESIGN_POSTINSTALL_TARGETS` is an optional JSON array of build target
-directories from `scripts/postinstall.mjs`. The installer builds their transitive
-workspace dependency closure in its normal dependency order. Unset or blank
-preserves the full default; an explicit empty array requests no workspace builds.
-Unknown/unavailable targets and malformed selections fail before any build runs.
-Vendor materialization and native-addon validation still run for every scope.
+Local installation reads `scripts/postinstall.config.json`; its built-in
+development recipe remains the full default for `scripts/postinstall.mjs`.
+Workflow callers instead pass a named intent to `setup-workspace`. Before pnpm
+runs, `.github/scripts/postinstall.py` resolves that intent from
+`.github/config/postinstall.json`, expands the transitive workspace dependency
+closure, and writes a digest-bound plan. The postinstall consumer executes that
+exact plan and emits a receipt bound to its identifier and digest. The setup
+action rejects missing, foreign, failed, or closure-mismatched receipts, including
+cache restores that do not satisfy the frozen target set.
 
-The three beta native jobs select pack/release/dev/serve tools rather than
-compiling the daemon during installation and again during source preparation.
-This is a general execution parameter, not a Plan key, hit flag, or local cache
-invalidation mechanism. Tools' bootstrap dependencies still compile; only work
-actually avoided may count toward measured savings. Linux, Docker, and ordinary
-developer installs retain their existing defaults.
+Beta, prerelease, stable, and CI select named intents for control, source,
+platform, test, publication, smoke, and downloaded-artifact validation jobs.
+Test matrices retain execution identity and parameters; postinstall target lists
+come only from the workflow intent configuration. Partial source profiles also
+freeze their smaller install boundary. Full workspace intents keep vendor
+materialization and native-addon validation; partial source profiles omit those
+operations by contract. The CI workflow continues to expose
+`convergence.atom.yml` as its independently callable planning and evidence
+boundary.
+
+These intents are execution parameters rather than Plan hit flags or local cache
+invalidation mechanisms. Tools' bootstrap dependencies still compile, and only
+work actually avoided may count toward measured savings. Ordinary developer
+installs keep the local development recipe.
 
 ### Job graph and convergence
 

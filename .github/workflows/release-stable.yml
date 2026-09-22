@@ -287,8 +287,8 @@ jobs:
 
       - name: Setup release control
         uses: ./.github/actions/setup-workspace
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
+        with:
+          postinstall-intent: release-control
 
       # Capture the previously published prerelease commit BEFORE this run overwrites
       # prerelease/latest/metadata.json, so the notification can diff the changelog
@@ -340,8 +340,6 @@ jobs:
     needs: metadata
     if: ${{ needs.metadata.outputs.contribution == 'true' && needs.metadata.outputs.common_count != '0' }}
     runs-on: ${{ fromJSON(needs.metadata.outputs.common_matrix).include[0].runner || 'ubuntu-latest' }}
-    env:
-      OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]'
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -357,6 +355,7 @@ jobs:
       - name: '[prepare] JavaScript build tools'
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: shared-javascript
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
       - name: '[build] Source packages'
         id: source_packages
@@ -433,7 +432,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
-          install-profile: source-web
+          postinstall-intent: source-web
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.metadata.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -503,7 +502,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
-          install-profile: ${{ fromJSON(needs.metadata.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.metadata.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
+          postinstall-intent: ${{ fromJSON(needs.metadata.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.metadata.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.metadata.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -595,7 +594,7 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
-          install-profile: ${{ fromJSON(needs.metadata.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
+          postinstall-intent: ${{ fromJSON(needs.metadata.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.metadata.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -660,7 +659,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.test_matrix) }}
     env:
-      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
       OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
       TEST_KIND: ${{ matrix.kind }}
       TEST_SHARD: ${{ matrix.shard || '' }}
@@ -685,6 +683,7 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: ${{ format('test-{0}', matrix.kind) }}
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
           runner-labels: ${{ toJSON(matrix.runner) }}
       - name: Setup Playwright
@@ -814,8 +813,7 @@ jobs:
         with:
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
           cache-tools: 'true'
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          postinstall-intent: platform-build
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm exec tools-pack workspace ${{ (needs.metadata.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -1294,9 +1292,8 @@ jobs:
       - name: Prepare stable Windows smoke harness
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: release-smoke
           save-pnpm-cache: ${{ env.STABLE_SAVE_PNPM_CACHE }}
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/serve"]'
       - name: Build stable win_x64 update fixture
         if: ${{ inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '' }}
         shell: pwsh

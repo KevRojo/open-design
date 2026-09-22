@@ -600,22 +600,19 @@
             "workload": "test_e2e_vitest",
             "kind": "e2e",
             "name": "[test] prerelease E2E Vitest",
-            "timeout": 20,
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+            "timeout": 20
           },
           {
             "workload": "test_verify",
             "kind": "verify",
             "name": "[test] Verify build (typecheck + guard)",
-            "timeout": 360,
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+            "timeout": 360
           },
           {
             "workload": "test_daemon_unit_tests",
             "kind": "daemon",
             "name": "[test] prerelease Daemon tests (1/4)",
             "timeout": 15,
-            "postinstall": "[\"tools/pack\"]",
             "shard": 1,
             "debug": "1"
           },
@@ -624,7 +621,6 @@
             "kind": "daemon",
             "name": "[test] prerelease Daemon tests (2/4)",
             "timeout": 15,
-            "postinstall": "[\"tools/pack\"]",
             "shard": 2,
             "debug": "1"
           },
@@ -633,7 +629,6 @@
             "kind": "daemon",
             "name": "[test] prerelease Daemon tests (3/4)",
             "timeout": 15,
-            "postinstall": "[\"tools/pack\"]",
             "shard": 3,
             "debug": "1"
           },
@@ -642,7 +637,6 @@
             "kind": "daemon",
             "name": "[test] prerelease Daemon tests (4/4)",
             "timeout": 15,
-            "postinstall": "[\"tools/pack\"]",
             "shard": 4,
             "debug": "1"
           },
@@ -651,7 +645,6 @@
             "kind": "ui",
             "name": "[test] prerelease UI P0 (entry-settings)",
             "timeout": 45,
-            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "entry-settings"
           },
           {
@@ -659,7 +652,6 @@
             "kind": "ui",
             "name": "[test] prerelease UI P0 (project-workspace)",
             "timeout": 45,
-            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-workspace"
           },
           {
@@ -667,7 +659,6 @@
             "kind": "ui",
             "name": "[test] prerelease UI P0 (project-workspace-editor)",
             "timeout": 45,
-            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-workspace-editor"
           },
           {
@@ -675,7 +666,6 @@
             "kind": "ui",
             "name": "[test] prerelease UI P0 (project-collab)",
             "timeout": 45,
-            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-collab"
           },
           {
@@ -683,7 +673,6 @@
             "kind": "ui",
             "name": "[test] prerelease UI P0 (project-runtime)",
             "timeout": 45,
-            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "project-runtime",
             "extra": true
           },
@@ -692,7 +681,6 @@
             "kind": "ui",
             "name": "[test] prerelease UI P0 (workspace-restoration)",
             "timeout": 45,
-            "postinstall": "[\"tools/dev\",\"tools/pack\"]",
             "group": "workspace-restoration"
           }
         ],

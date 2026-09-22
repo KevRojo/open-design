@@ -395,6 +395,55 @@ describe("packaged smoke workflow", () => {
     expect(atom).toContain("ref: ${{ github.event.repository.default_branch }}");
     expect(atom).toContain("github.event.workflow_run.event == 'pull_request'");
   });
+
+  it("[P2] binds CI and release workspace setup to frozen postinstall intents", async () => {
+    const [ci, prerelease, stable, prereleaseConfig, stableConfig] = await Promise.all([
+      readFile(ciWorkflowPath, "utf8"),
+      readFile(releasePrereleaseWorkflowPath, "utf8"),
+      readFile(releaseStableWorkflowPath, "utf8"),
+      readFile(join(workspaceRoot, ".github/config/convergence/release-prerelease.json"), "utf8"),
+      readFile(join(workspaceRoot, ".github/config/convergence/release-stable.json"), "utf8"),
+    ]);
+
+    const ciIntents: Record<string, string> = {
+      preflight: "workspace",
+      workspace_unit_tests: "ci-workspace-unit",
+      daemon_unit_tests: "test-daemon",
+      windows_tools_pack_payload_tests: "ci-windows-tools-pack",
+      web_workspace_tests: "test-web",
+      e2e_vitest: "test-e2e",
+      playwright_critical: "test-ui",
+      ui_p0: "test-ui",
+      playwright_visual: "test-ui",
+    };
+    for (const [jobName, intent] of Object.entries(ciIntents)) {
+      expect(workflowJob(ci, jobName)).toContain(`postinstall-intent: ${intent}`);
+    }
+    expect(ci.match(/uses: \.\/\.github\/actions\/setup-workspace/g)).toHaveLength(
+      ci.match(/postinstall-intent:/g)?.length ?? 0,
+    );
+    // The externally callable convergence atom remains the CI planning boundary.
+    expect(ci).toContain("uses: ./.github/workflows/convergence.atom.yml");
+
+    for (const workflow of [prerelease, stable]) {
+      expect(workflow).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
+      expect(workflow).not.toContain("install-profile:");
+      expect(workflow.match(/uses: \.\/\.github\/actions\/setup-workspace/g)).toHaveLength(
+        workflow.match(/postinstall-intent:/g)?.length ?? 0,
+      );
+      expect(workflow).toContain("postinstall-intent: release-control");
+      expect(workflow).toContain("postinstall-intent: shared-javascript");
+      expect(workflow).toContain("postinstall-intent: platform-build");
+      expect(workflow).toContain("postinstall-intent: ${{ format('test-{0}', matrix.kind) }}");
+    }
+    expect(prerelease).toContain("postinstall-intent: release-publish");
+    expect(stable).toContain("postinstall-intent: release-smoke");
+    expect(JSON.parse(prereleaseConfig).workflows["release-prerelease"].matrices.test)
+      .toEqual(expect.not.arrayContaining([expect.objectContaining({ postinstall: expect.anything() })]));
+    expect(JSON.parse(stableConfig).workflows["release-stable"].matrices.test)
+      .toEqual(expect.not.arrayContaining([expect.objectContaining({ postinstall: expect.anything() })]));
+  });
+
   it("[P2] keeps packaged smoke outside the main CI gate", async () => {
     const workflow = await readFile(ciWorkflowPath, "utf8");
     expect(workflow).not.toContain("packaged_smoke_");

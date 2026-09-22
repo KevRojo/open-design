@@ -594,8 +594,7 @@
             "workload": "test_verify",
             "kind": "verify",
             "name": "[test] Verify build (typecheck + guard)",
-            "timeout": 360,
-            "postinstall": "[\"tools/dev\",\"tools/pack\",\"tools/serve\",\"tools/release\"]"
+            "timeout": 360
           }
         ],
         "common": [

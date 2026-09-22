@@ -56,6 +56,18 @@
     "release-validation": {
       "installProfile": "workspace",
       "requestedTargets": ["packages/contracts", "tools/dev", "tools/pack", "tools/release", "tools/serve"]
+    },
+    "release-smoke": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/pack", "tools/serve"]
+    },
+    "ci-workspace-unit": {
+      "installProfile": "workspace",
+      "requestedTargets": ["packages/contracts", "packages/host", "packages/sidecar-proto", "packages/sidecar", "tools/dev", "tools/pack"]
+    },
+    "ci-windows-tools-pack": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/pack"]
     }
   }
 }

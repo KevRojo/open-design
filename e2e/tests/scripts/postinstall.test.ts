@@ -274,6 +274,24 @@ describe("postinstall script contract", () => {
       expect(plan.requestedTargets).toEqual(["tools/pack"]);
       expect(plan.resolvedTargets).toEqual(expect.arrayContaining(["packages/release", "tools/pack"]));
       expect(typeof plan.digest).toBe("string");
+
+      const exactWorkflowTargets: Record<string, string[]> = {
+        "release-smoke": ["tools/pack", "tools/serve"],
+        "ci-workspace-unit": [
+          "packages/contracts", "packages/host", "packages/sidecar-proto", "packages/sidecar", "tools/dev", "tools/pack",
+        ],
+        "ci-windows-tools-pack": ["tools/pack"],
+      };
+      for (const [intent, requestedTargets] of Object.entries(exactWorkflowTargets)) {
+        const result = spawnSync("python3", [
+          workflowPostinstallPath,
+          "plan",
+          "--intent", intent,
+          "--output", output,
+        ], { cwd: workspaceRoot, encoding: "utf8" });
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(readFileSync(output, "utf8")).requestedTargets).toEqual(requestedTargets);
+      }
     } finally {
       rmSync(output, { force: true });
     }
