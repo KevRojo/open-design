@@ -499,10 +499,16 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     identity: { teamId: string; memberId: string },
   ): Promise<void> {
     try {
+      // Recheck each publication-bound record immediately before network I/O:
+      // an earlier record may have awaited while stop/re-publish changed the witness.
+      if (record.publication && !deps.commentOutbox?.isPublicationCurrent?.(record)) {
+        deps.commentOutbox?.acknowledge(record);
+        return;
+      }
       const result = await deps.client.pushComment(
         identity.teamId,
         record.projectId,
-        record.comment,
+        record.publication ? { ...record.comment, filePath: record.publication.publicFilePath } : record.comment,
       );
       // Revision-conditional ACK: if an edit/delete was queued while this
       // payload was in flight, its newer row remains for the next drain.

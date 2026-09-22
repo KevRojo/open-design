@@ -1,0 +1,138 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext, type CollabCloudComment } from '@open-design/contracts';
+import { closeDatabase, openDatabase, insertProject, insertConversation, upsertPreviewComment, getWorkspaceProjectByProjectId } from '../src/db.js';
+import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
+import { createCommentRelayOutboxStore, commentRelayLocalBindingMatches } from '../src/collab/comment-relay-outbox.js';
+import { enqueuePublishedFileComments } from '../src/collab/published-file-comment-backfill.js';
+import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
+import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.js';
+import { commentRelayScope } from '../src/collab/comment-relay-scope.js';
+let root: string | undefined;
+afterEach(() => { closeDatabase(); if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
+function setup() {
+  root = mkdtempSync(join(tmpdir(), 'od-backfill-'));
+  const db = openDatabase(root);
+  migratePublicFilePublications(db);
+  const scope = { resourceTeamId: 'w', ownerMemberId: 'owner', projectId: 'p', filePath: 'pages/work.html' };
+  for (const projectId of ['p', 'other']) {
+    insertProject(db, { id: projectId, name: projectId, createdAt: 1, updatedAt: 1 });
+    for (const name of ['a', 'b', 'comment-anchor-inbound']) {
+      insertConversation(db, { id: `${name}-${projectId}`, projectId, title: name, createdAt: 1, updatedAt: 1 });
+    }
+  }
+  db.prepare(`INSERT INTO workspace_projects(project_id, workspace_id, visibility, resource_state,
+    created_by_workspace_member_id, created_at, updated_at) VALUES('p','w','personal','active','owner',1,1)`).run();
+  const add = (id: string, conversationId = 'a-p', filePath = scope.filePath, projectId = 'p', authorMemberId = 'original') =>
+    upsertPreviewComment(db, projectId, conversationId, { id, authorMemberId, note: id,
+      target: { filePath, elementId: 'hero', selector: '#hero', label: 'Hero', position: { x: 0, y: 0, width: 2, height: 2 } } });
+  const publications = createSqlitePublicFilePublicationStore(db);
+  const publication = { slug: 'stable', url: 'https://example.test/s/stable', fileName: scope.filePath };
+  const outbox = createCommentRelayOutboxStore(db);
+  const publish = () => db.transaction(() => {
+    publications.set(scope, publication);
+    return enqueuePublishedFileComments(db, { scope, publicationRevision: publications.getRevision(scope)!, publicFilePath: 'index.html' });
+  })();
+  return { db, scope, add, publications, publication, outbox, publish };
+}
+it('includes all conversations of exactly one file, preserves ids/authors and never reauthors inbound users', () => {
+  const s = setup();
+  s.add('a'); s.add('b', 'b-p'); s.add('other-file', 'a-p', 'private.html'); s.add('other-project', 'a-other', s.scope.filePath, 'other');
+  s.add('remote', 'comment-anchor-inbound-p'); s.add('web', 'a-p'); s.add('legacy', 'a-p', s.scope.filePath, 'p', '');
+  s.db.prepare("UPDATE preview_comments SET author_kind='user',author_app_user_id='app-user' WHERE id='web'").run();
+  expect(s.publish()).toEqual({ enqueued: 3, skippedInbound: 2 });
+  expect(s.outbox.listDue(Date.now()).map(row => [row.comment.id, row.comment.memberId, row.comment.filePath, row.publication?.publicFilePath])).toEqual([
+    ['a', 'original', s.scope.filePath, 'index.html'], ['b', 'original', s.scope.filePath, 'index.html'], ['legacy', '', s.scope.filePath, 'index.html'],
+  ]);
+  s.publish(); expect(s.outbox.count()).toBe(3);
+});
+it('requires publication transaction and exact current witness', () => {
+  const s = setup(); s.add('a'); s.publications.set(s.scope, s.publication);
+  const input = { scope: s.scope, publicationRevision: s.publications.getRevision(s.scope)!, publicFilePath: 'index.html' };
+  expect(() => enqueuePublishedFileComments(s.db, input)).toThrow('transaction');
+  s.publications.set(s.scope, s.publication);
+  expect(() => s.db.transaction(() => enqueuePublishedFileComments(s.db, input))()).toThrow('stale');
+  expect(s.outbox.count()).toBe(0);
+});
+it('rolls back publication and ALL queued rows if any enqueue fails', () => {
+  const s = setup(); s.add('a'); s.add('b', 'b-p');
+  s.db.exec("CREATE TRIGGER fail_backfill BEFORE INSERT ON comment_relay_outbox WHEN NEW.comment_id='b' BEGIN SELECT RAISE(ABORT,'injected'); END");
+  expect(s.publish).toThrow('injected'); expect(s.outbox.count()).toBe(0); expect(s.publications.get(s.scope)).toBeNull();
+});
+it('persists mapping and intent across database reopen', () => {
+  const s = setup(); s.add('a'); s.publish(); const before = s.outbox.listDue(Date.now());
+  closeDatabase(); const reopened = openDatabase(root!);
+  const queue = createCommentRelayOutboxStore(reopened);
+  expect(queue.listDue(Date.now())).toEqual(before); expect(queue.isPublicationCurrent!(before[0]!)).toBe(true);
+});
+it.each(['normal', 'stop', 'republish', 'delete', 'switch', 'retry'] as const)('delivery is mapped, retryable and scoped: %s', async scenario => {
+  const s = setup(); s.add('a'); s.publish();
+  const context: WorkspaceCollabContext = { workspaceId: 'w', workspaceType: 'personal', workspaceMemberId: 'owner',
+    teamId: 'w', role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active', planId: null,
+    providerMode: 'platform_credits', permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
+    seatSummary: buildWorkspaceSeatSummary({ seatLimit: 1, usedSeats: 1 }) };
+  if (scenario === 'stop') s.publications.delete(s.scope);
+  if (scenario === 'republish') s.publications.set(s.scope, s.publication);
+  if (scenario === 'delete') s.db.prepare("UPDATE workspace_projects SET resource_state='deleted' WHERE project_id='p'").run();
+  let switched = scenario === 'switch'; let fails = scenario === 'retry';
+  const sent: CollabCloudComment[] = [];
+  const service = createCollabCloudService({
+    client: { ...createVelaCliCollabClient({ run: async () => { throw new Error('unexpected CLI'); } }),
+      pushComment: async (_team, _project, comment) => { if (fails) throw new Error('offline'); sent.push(comment); return { seq: 1 }; } },
+    commentOutbox: s.outbox, listProjectIds: () => [], retryDelayMs: () => 0,
+    resolveCommentRelayWorkspaceContext: async () => switched ? { ...context, workspaceMemberId: 'other' } : context,
+    listRemoteProjectRelayBindings: async () => [{ projectId: 'p', ownerMemberId: 'owner' }],
+    validateCommentRelayProjectBinding: record => commentRelayLocalBindingMatches(record, getWorkspaceProjectByProjectId(s.db, record.projectId)),
+    commentRelayScope: (projectId, filePath, ctx) => commentRelayScope({ projectId, filePath, context: ctx,
+      binding: getWorkspaceProjectByProjectId(s.db, projectId), publications: s.publications }),
+    resolveLocalConversationId: () => 'a-p', mergeComment: () => 'unchanged',
+  });
+  try {
+    await service.flushPendingComments();
+    expect(sent).toHaveLength(scenario === 'normal' ? 1 : 0);
+    expect(s.outbox.count()).toBe(scenario === 'retry' || scenario === 'switch' ? 1 : 0);
+    fails = false; switched = false;
+    await service.flushPendingComments();
+    if (['normal', 'retry', 'switch'].includes(scenario)) {
+      expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ id: 'a', memberId: 'original', filePath: 'index.html' });
+      expect(s.outbox.count()).toBe(0);
+    } else expect(sent).toEqual([]);
+  } finally { service.dispose(); }
+});
+
+it.each(['pending-edit', 'after-ack', 'restart', 'stopped', 'republished', 'other-principal', 'other-file'] as const)(
+  'ordinary enqueue consumes only a current exact publication mapping: %s', scenario => {
+    const s = setup(); s.add('a'); s.publish();
+    const original = s.outbox.listDue(Date.now())[0]!;
+    if (scenario !== 'pending-edit') s.outbox.acknowledge(original);
+    if (scenario === 'stopped') s.publications.delete(s.scope);
+    if (scenario === 'republished') s.publications.set(s.scope, s.publication);
+    let queue = s.outbox;
+    if (scenario === 'restart') { closeDatabase(); queue = createCommentRelayOutboxStore(openDatabase(root!)); }
+    queue.enqueue({
+      workspaceId: original.workspaceId,
+      workspaceMemberId: scenario === 'other-principal' ? 'other' : original.workspaceMemberId,
+      teamId: original.teamId, relayScope: original.relayScope, projectId: original.projectId,
+      expectedOwnerMemberId: original.expectedOwnerMemberId,
+      comment: { ...original.comment, note: 'new edit', filePath: scenario === 'other-file' ? 'unpublished.html' : original.comment.filePath },
+    });
+    const rows = queue.listDue(Date.now());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.comment.note).toBe('new edit');
+    expect(rows[0]!.publication).toEqual(['pending-edit', 'after-ack', 'restart'].includes(scenario) ? original.publication : undefined);
+  },
+);
+it('rolls back mapping as well as publication/queue on failed transaction', () => {
+  const s = setup(); s.add('a');
+  s.db.exec("CREATE TRIGGER fail_mapping_backfill BEFORE INSERT ON comment_relay_outbox BEGIN SELECT RAISE(ABORT,'injected'); END");
+  expect(s.publish).toThrow('injected');
+  expect(s.db.prepare('SELECT COUNT(*) AS n FROM comment_relay_publication_mappings').get()).toEqual({ n: 0 });
+});
+it('records an empty published file mapping so later new comments need no republish', () => {
+  const s = setup(); expect(s.publish()).toEqual({ enqueued: 0, skippedInbound: 0 });
+  expect(s.outbox.count()).toBe(0);
+  expect(s.db.prepare('SELECT file_path, public_file_path FROM comment_relay_publication_mappings').all())
+    .toEqual([{ file_path: s.scope.filePath, public_file_path: 'index.html' }]);
+});
