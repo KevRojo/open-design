@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { SharePublishResult } from '@open-design/contracts';
 import type { PublicFilePublication, PublicFilePublicationScope } from './public-file-publication-store.js';
 import type { RecordPublicFilePublication } from './public-file-publication-recording.js';
-import { confirmedReceipt, type ShareBindingOutbox } from './share-binding-outbox.js';
+import { confirmedReceipt, recordPendingShareBinding, type ShareBindingOutbox } from './share-binding-outbox.js';
 import { publishedPathForSource, type ShareFileMapping } from './share-file-mapping.js';
 
 export interface SharePublicationCompletionInput {
@@ -27,10 +27,11 @@ export function createSharePublicationCompletion(
   const commit = db.transaction((input: SharePublicationCompletionInput): SharePublishResult => {
     const revision = recordPublication(input.scope, input.publication, input.mapping);
     if (input.result.status === 'published') return input.result;
-    const task = outbox.enqueue({ ...input.scope, resourceId: input.resourceId,
-      publicationRevision: revision.token, receipt: input.result.receipt });
+    const pending = recordPendingShareBinding(outbox, { ...input.scope, resourceId: input.resourceId,
+      publicationRevision: revision.token, receipt: input.result.receipt }, retryAvailable, true);
+    if (pending.status !== 'binding_pending') throw new Error('SHARE_BINDING_OUTCOME_INVALID');
     return { status: 'binding_pending', receipt: input.result.receipt,
-      binding: { retrying: retryAvailable && task.failureCount < 5,
+      binding: { retrying: pending.binding.retrying,
         ...(input.result.binding.code ? { code: input.result.binding.code } : {}) } };
   });
   return (input: SharePublicationCompletionInput): SharePublishResult => {

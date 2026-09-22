@@ -1068,6 +1068,10 @@ import {
   type RememberedTeamResourceScopeLease,
 } from './collab/remembered-team-resource-scopes.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
+import { createShareAliasReservations } from './collab/share-alias-reservation.js';
+import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
+import { publicShareViewerUrl } from './collab/public-share-viewer-url.js';
+import { runPinnedVelaCommand } from './collab/vela-pinned-command.js';
 import {
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
@@ -5225,6 +5229,9 @@ export async function startServer({
     createVelaPublicFileStop({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
     publicFileMutations,
   );
+  const recordPublicFilePublication = createPublicFilePublicationRecorder(
+    db, publicFilePublicationStore, enqueuePublishedFileComments,
+  );
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     publicFilePublicationStore,
@@ -5237,11 +5244,39 @@ export async function startServer({
     // The recorder also refuses to proceed without a publication witness
     // (slug + revision token read back after the write), so a half-written
     // publication cannot enqueue work that later resolves against nothing.
-    recordPublicFilePublication: createPublicFilePublicationRecorder(
-      db,
-      publicFilePublicationStore,
-      enqueuePublishedFileComments,
-    ),
+    recordPublicFilePublication,
+    sharePublishing: {
+      reservations: createShareAliasReservations(db),
+      outbox: shareBindingOutbox,
+      complete: createSharePublicationCompletion(db, recordPublicFilePublication, shareBindingOutbox, true),
+      prepare: async (scope, slug) => {
+        const identity = Object.freeze({ ...scope });
+        const configuredEnv = { ...configuredAmrEnv() };
+        const currentSession = readVelaControlApiContext(process.env, configuredEnv);
+        if (!currentSession?.controlKey || !currentSession.apiUrl) throw new Error('PUBLIC_SHARE_SESSION_UNAVAILABLE');
+        const session = Object.freeze({ ...currentSession });
+        const url = publicShareViewerUrl(identity.projectId, slug, process.env, configuredEnv);
+        const directory = await fetchVelaWorkspaceDirectory({ readSession: () => session });
+        if (!directory.ok || !directory.items.some(item => item.workspaceId === identity.resourceTeamId
+          && item.workspaceMemberId === identity.ownerMemberId && item.memberStatus === 'active'
+          && item.lifecycleState !== 'deleted' && item.lifecycleState !== 'deleting')) {
+          throw new Error('PUBLIC_SHARE_IDENTITY_UNAVAILABLE');
+        }
+        return { url, run: args => runPinnedVelaCommand({ args, session,
+          workspaceId: identity.resourceTeamId, dataRoot: RUNTIME_DATA_DIR, configuredEnv }) };
+      },
+      retry: () => {
+        // A fresh bounded pass can see tasks created after the startup pass.
+        void createShareBindingStartup(shareBindingOutbox, {
+          publications: publicFilePublicationStore, mutations: publicFileMutations,
+          prepare: createVelaShareBindingPrepare({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
+          isCurrent: task => !publicFilePublicationStore.listStops().some(stop =>
+            stop.resourceTeamId === task.resourceTeamId && stop.ownerMemberId === task.ownerMemberId
+            && stop.projectId === task.projectId && stop.filePath === task.receipt.filePath
+            && stop.slug === task.receipt.slug),
+        })().catch(() => { console.warn('[od] share binding retry unavailable'); });
+      },
+    },
     shareContentFingerprints: createShareContentFingerprints(db, publicFilePublicationStore),
     publicFileMutations,
     verifyWorkspaceRequest: verifiedWorkspaceContextForRequest,

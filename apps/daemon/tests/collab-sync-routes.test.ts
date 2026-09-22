@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import Database from 'better-sqlite3';
+import { createShareAliasReservations } from '../src/collab/share-alias-reservation.js';
+import { createSharePublicationCompletion } from '../src/collab/share-publication-completion.js';
+import { publicShareViewerUrl } from '../src/collab/public-share-viewer-url.js';
 import { createShareContentFingerprints } from '../src/collab/share-content-fingerprint.js';
 import { createShareBindingOutbox } from '../src/collab/share-binding-outbox.js';
 import { publishReservedVelaShareVersion } from '../src/collab/vela-share-publish.js';
@@ -282,6 +285,7 @@ const tempDirs: string[] = [];
 
 afterEach(async () => {
   vi.mocked(runVelaResourceCommand).mockReset();
+  vi.mocked(publishReservedVelaShareVersion).mockReset();
   vi.mocked(readVelaControlApiContext).mockReturnValue(null);
   runtime?.dispose(); // cancel any pending debounce timers
   runtime = null;
@@ -1878,6 +1882,15 @@ describe('collab sync routes', () => {
         resolveProjectDir: () => dir, resolveSharedProject: async () => null,
         publicFilePublicationStore: store,
         recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, () => ({ enqueued: 0, skippedInbound: 0 })),
+        sharePublishing: {
+          reservations: createShareAliasReservations(db, () => receipt.slug), outbox,
+          complete: createSharePublicationCompletion(db, createPublicFilePublicationRecorder(db, store, () => ({ enqueued: 0, skippedInbound: 0 })), outbox, true),
+          prepare: async (scope, slug) => ({
+            url: publicShareViewerUrl(scope.projectId, slug, { OD_VELA_WEB_URL: 'https://web.example.test/cloud' }),
+            run: async args => runVelaResourceCommand(args.slice(1), scope.resourceTeamId),
+          }),
+          retry: vi.fn(),
+        },
       });
       const response = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
       expect.soft(response.status).toBe(200);
