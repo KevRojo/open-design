@@ -1712,6 +1712,39 @@ describe("ProductionCampaignModal mount lifetime", () => {
 describe("ProductionCampaignModal device impressions", () => {
 	const marker = (subject = "user-a", activity = "campaign-1") =>
 		`touchpoint-displayed:v1:${encodeURIComponent(subject)}:${encodeURIComponent(activity)}`;
+	/**
+	 * The impression is recorded inside a `requestAnimationFrame`, so a case that
+	 * waits for one has to fake frames too. Leaving `requestAnimationFrame` out
+	 * of `toFake` leaves it on the REAL clock while the case advances only the
+	 * fake one, and then whether the marker is written comes down to how much
+	 * wall time happened to pass inside the awaits — green on an idle machine,
+	 * red under load.
+	 */
+	const IMPRESSION_TIMERS = [
+		"Date",
+		"performance",
+		"setTimeout",
+		"clearTimeout",
+		"setInterval",
+		"clearInterval",
+		"requestAnimationFrame",
+		"cancelAnimationFrame",
+	] as const;
+	/**
+	 * Faking frames on its own is not enough, and on its own makes it worse: the
+	 * frame is requested only once `verifyWebTouchpoint` resolves, and that is
+	 * real asynchronous crypto which no amount of fake time can hurry. A single
+	 * fixed advance can therefore run out before the frame is even asked for.
+	 *
+	 * So advance in small steps until the marker lands. Each step yields to the
+	 * real microtask queue, which is what lets the crypto finish, and the frame
+	 * that follows then fires on fake time rather than on the wall clock.
+	 */
+	const advanceToRecordedImpression = async (subject = "user-a", activity = "campaign-1") => {
+		for (let step = 0; step < 100 && localStorage.getItem(marker(subject, activity)) === null; step += 1)
+			await act(async () => { await vi.advanceTimersByTimeAsync(16); });
+		expect(localStorage.getItem(marker(subject, activity))).toBe("1");
+	};
 	beforeEach(() => {
 		(globalThis as CampaignHostGlobal).__openDesignCampaignTestHost = {
 			client: { osLocale: "en-US", type: "desktop" },
@@ -1852,9 +1885,7 @@ describe("ProductionCampaignModal device impressions", () => {
 	// still leaves the lease the server's to renew, which is the shape a user
 	// actually produces by reading a mail and coming back.
 	it("keeps the same host through a background spell shorter than its authorization", async () => {
-		vi.useFakeTimers({
-			toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
-		});
+		vi.useFakeTimers({ toFake: [...IMPRESSION_TIMERS] });
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		let hidden = false;
 		vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
@@ -1866,8 +1897,7 @@ describe("ProductionCampaignModal device impressions", () => {
 		const dialog = screen.getByRole("dialog");
 		const host = document.querySelector("opend-touchpoint");
 		expect(host).not.toBeNull();
-		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
-		expect(localStorage.getItem(marker())).toBe("1");
+		await advanceToRecordedImpression();
 		const callsBeforeHiding = fetchMock.mock.calls.length;
 
 		// Backgrounded. The thirty-second tick lands inside this and must not fire:
@@ -1901,9 +1931,7 @@ describe("ProductionCampaignModal device impressions", () => {
 	// offer arriving on wake is a new presentation and the device impression
 	// closes it.
 	it("does not re-present a displayed campaign after a sleep outlasts its authorization", async () => {
-		vi.useFakeTimers({
-			toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
-		});
+		vi.useFakeTimers({ toFake: [...IMPRESSION_TIMERS] });
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		let hidden = false;
 		vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
@@ -1914,8 +1942,7 @@ describe("ProductionCampaignModal device impressions", () => {
 		render(<ProductionCampaignModal authenticated sessionSubject="user-a" />);
 		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
 		expect(screen.getByRole("dialog")).toBeTruthy();
-		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
-		expect(localStorage.getItem(marker())).toBe("1");
+		await advanceToRecordedImpression();
 
 		// Asleep past the sixty-second authorization this decision carries. The
 		// lease retires on its own deadline while the page is hidden.
