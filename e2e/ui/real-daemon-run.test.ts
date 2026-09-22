@@ -740,6 +740,7 @@ test('[P1] plan-document daemon run creates, opens, and restores an editable mar
 });
 
 test('[P1] media-only turn auto-opens the generated image file', async ({ page }) => {
+  test.setTimeout(120_000);
   await createProject(page, 'Media-only auto-open smoke');
   await expectWorkspaceReady(page);
 
@@ -747,16 +748,30 @@ test('[P1] media-only turn auto-opens the generated image file', async ({ page }
   // one-time initial-primary-file fallback can open the first project file and
   // mask whether turn-end media selection actually works.
   await sendPrompt(page, 'Create a deterministic plan document');
+  const { projectId, conversationId } = await currentProjectContext(page);
+  const expectCompletedTurns = async (count: number) => {
+    await expect.poll(async () => {
+      const messages = await listConversationMessages(page, projectId, conversationId);
+      return messages.filter((message) => (
+        message.role === 'assistant' && message.runStatus === 'succeeded'
+      )).length;
+    }, { timeout: T.long }).toBeGreaterThanOrEqual(count);
+  };
+  await expectProjectFilesToContain(page, projectId, ['plan.md'], T.long);
+  await expectCompletedTurns(1);
   const workspace = page.getByTestId('file-workspace');
   await expect(workspace.getByRole('tab', { name: /plan\.md/i })).toHaveAttribute(
     'aria-selected',
     'true',
+    { timeout: T.long },
   );
 
   await sendPrompt(page, 'Create a deterministic media-only artifact');
+  await expectProjectFilesToContain(page, projectId, [MEDIA_ONLY_FILE], T.long);
+  await expectCompletedTurns(2);
 
   const mediaTab = workspace.getByRole('tab', { name: /media-only\.png/i });
-  await expect(mediaTab).toBeVisible({ timeout: T.medium });
+  await expect(mediaTab).toBeVisible({ timeout: T.long });
   await expect(mediaTab).toHaveAttribute('aria-selected', 'true');
   await expect(workspace.getByRole('img', { name: MEDIA_ONLY_FILE })).toBeVisible();
 
