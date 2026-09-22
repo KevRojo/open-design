@@ -37,7 +37,7 @@ afterEach(async () => {
   tempRoot = '';
 });
 
-async function startProjectStubServer(): Promise<StubServer> {
+async function startProjectStubServer(deleteResponse: unknown = { ok: true }): Promise<StubServer> {
   const requests: CapturedRequest[] = [];
   const server = http.createServer((req, res) => {
     let raw = '';
@@ -54,6 +54,10 @@ async function startProjectStubServer(): Promise<StubServer> {
       requests.push(captured);
 
       res.setHeader('content-type', 'application/json');
+      if (captured.method === 'DELETE' && captured.url === '/api/projects/project-1') {
+        res.end(JSON.stringify(deleteResponse));
+        return;
+      }
       if (captured.method === 'POST' && captured.url === '/api/projects/source-project/design-system-copy') {
         res.statusCode = 201;
         res.end(JSON.stringify({
@@ -230,6 +234,31 @@ async function runCli(args: string[]): Promise<{ stdout: string; stderr: string;
 }
 
 describe('od project CLI', () => {
+  it.each([false, true])('delete reports per-file residuals without extra requests, json=%s', async json => {
+    const body = { ok: true, shareResiduals: [
+      { filePath: 'a\n.html', slug: 'a', retrying: true },
+      { filePath: 'b.html', slug: 'b', retrying: false, code: 'STOP_EXHAUSTED' },
+    ] };
+    stub = await startProjectStubServer(body);
+    const result = await runCli(['project', 'delete', 'project-1', '--workspace', 'ws-1', '--workspace-member', 'member-1', '--daemon-url', stub.baseUrl, ...(json ? ['--json'] : [])]);
+    expect(result.code).toBe(0);
+    if (json) { expect(JSON.parse(result.stdout)).toEqual(body); expect(result.stderr).toBe(''); }
+    else {
+      expect(result.stdout).toBe('[project] deleted project-1\n');
+      expect(result.stderr).toBe('[project] warning: public links may still be live:\n  "a\\n.html" ("a"): stop queued for retry\n  "b.html" ("b"): action required; no automatic retry\n');
+    }
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0]).toMatchObject({ method: 'DELETE', url: '/api/projects/project-1', headers: { 'x-od-workspace-id': 'ws-1', 'x-od-workspace-member-id': 'member-1' } });
+  });
+  it.each([false, true])('delete reports unchanged no-residual success, json=%s', async json => {
+    stub = await startProjectStubServer();
+    const result = await runCli(['project', 'delete', 'project-1', '--workspace', 'ws-1', '--workspace-member', 'member-1', '--daemon-url', stub.baseUrl, ...(json ? ['--json'] : [])]);
+    expect(result.code).toBe(0); expect(result.stderr).toBe('');
+    if (json) expect(JSON.parse(result.stdout)).toEqual({ ok: true });
+    else expect(result.stdout).toBe('[project] deleted project-1\n');
+    expect(stub.requests).toHaveLength(1);
+  });
+
   it.each(['publish', 'get', 'status', 'stop'])('share %s uses the existing file endpoint and emits raw JSON', async action => {
     stub = await startProjectStubServer();
     const result = await runCli([
