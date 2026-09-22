@@ -30,6 +30,7 @@ export function ProjectDeleteConfirmDialog({
 }) {
   const t = useT();
   const titleId = useId();
+  const hasActiveShares = activeShareCount !== null && Number.isSafeInteger(activeShareCount) && activeShareCount > 0;
   return (
     <Dialog
       className="modal-confirm"
@@ -43,11 +44,12 @@ export function ProjectDeleteConfirmDialog({
       ariaLabelledBy={titleId}
       data-testid="project-delete-confirm-dialog"
     >
-      <DialogTitle id={titleId}>{t('designs.deleteTitle')}</DialogTitle>
-      <DialogDescription>{t('designs.deleteConfirm', { name: projectName })}</DialogDescription>
-      {activeShareCount !== null && Number.isSafeInteger(activeShareCount) && activeShareCount > 0 ? (
-        <DialogDescription>{t('designs.deleteActiveShares', { count: activeShareCount })}</DialogDescription>
-      ) : null}
+      <DialogTitle id={titleId}>{hasActiveShares
+        ? t('designs.deleteConfirm', { name: projectName })
+        : t('designs.deleteTitle')}</DialogTitle>
+      <DialogDescription>{hasActiveShares
+        ? t('designs.deleteActiveShares', { count: activeShareCount })
+        : t('designs.deleteConfirm', { name: projectName })}</DialogDescription>
       {failed ? (
         <p className="recent-projects__card-menu-error" role="alert">
           {t('ds.actionFailed')}

@@ -24,6 +24,9 @@ it('counts active shares only and does not delete while reading the confirmation
   expect(request).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('Request delete'));
   expect(await screen.findByText('This project has 2 pages being shared. Deleting it will disable their share links, and visitors will no longer be able to open them.')).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Delete "Example"?' })).toBeVisible();
+  expect(screen.getByRole('alertdialog')).toHaveAccessibleName('Delete "Example"?');
+  expect(screen.getAllByText('Delete "Example"?')).toHaveLength(1);
   expect(remove).not.toHaveBeenCalled();
   expect(request).toHaveBeenCalledWith('/api/projects/project/share-state', expect.objectContaining({ headers: expect.objectContaining({ 'x-od-workspace-id': 'ws' }) }));
   fireEvent.click(screen.getByTestId('project-delete-confirm-accept'));
