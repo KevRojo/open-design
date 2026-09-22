@@ -205,6 +205,7 @@ def main() -> int:
     bootstrap_parser = subparsers.add_parser("bootstrap")
     bootstrap_parser.add_argument("--tool-dir", required=True)
     bootstrap_parser.add_argument("--github-output")
+    bootstrap_parser.add_argument("--timing-path")
 
     for command in ("pack", "unpack"):
         command_parser = subparsers.add_parser(command)
@@ -215,7 +216,19 @@ def main() -> int:
 
     arguments = parser.parse_args()
     if arguments.command == "bootstrap":
-        binary = bootstrap(Path(arguments.tool_dir).expanduser().resolve())
+        started = time.monotonic()
+        status = "failed"
+        timing_path = _path(arguments.timing_path)
+        try:
+            binary = bootstrap(Path(arguments.tool_dir).expanduser().resolve())
+            status = "ready"
+        finally:
+            _append_timing(
+                timing_path,
+                "bootstrap",
+                round((time.monotonic() - started) * 1000),
+                status,
+            )
         values = {"path": str(binary), "version": VERSION_TOKEN}
         if arguments.github_output:
             with Path(arguments.github_output).open("a", encoding="utf-8") as output:

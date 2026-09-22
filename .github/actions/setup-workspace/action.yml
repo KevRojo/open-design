@@ -193,7 +193,8 @@ runs:
         echo "archive-path=$archive_path" >> "$GITHUB_OUTPUT"
         python3 .github/scripts/pnpm_store_archive.py bootstrap \
           --tool-dir "$RUNNER_TEMP/open-design-tools/7zip-26.03" \
-          --github-output "$GITHUB_OUTPUT"
+          --github-output "$GITHUB_OUTPUT" \
+          --timing-path "${{ steps.postinstall-timing-path.outputs.path }}"
 
     - name: Restore pnpm store
       id: pnpm-cache-restore
