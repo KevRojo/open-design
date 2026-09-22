@@ -658,9 +658,10 @@ with patch.dict(os.environ, {"GITHUB_EVENT_NAME":"workflow_dispatch", "GITHUB_RE
         with patch("convergence.prepare_publication") as validation:
             c.require_isolated_candidate(candidate)
             validation.assert_called_once()
-            with patch.dict(os.environ, {"GITHUB_REF":"refs/heads/feat/release-timing-ledger"}), patch("convergence.prepare_publication") as timing_validation:
-                c.require_isolated_candidate(candidate)
-                timing_validation.assert_called_once()
+            with patch.dict(os.environ, {"GITHUB_REF":"refs/heads/feat/release-timing-ledger"}):
+                try: c.require_isolated_candidate(candidate)
+                except c.ConfigError: pass
+                else: raise AssertionError("accepted unregistered timing branch")
             for mutation in ("policy", "workflow", "headSha", "runAttempt"):
                 forged = copy.deepcopy(candidate)
                 if mutation == "policy": forged[mutation] = "production-v1"

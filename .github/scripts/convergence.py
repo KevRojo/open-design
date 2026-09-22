@@ -56,7 +56,6 @@ STORAGE_ENV = {
 }
 BETA_TASK_REFS = {
     "refs/heads/feat/plan-foundation",
-    "refs/heads/feat/release-timing-ledger",
 }
 
 
