@@ -121,17 +121,21 @@ export function ShareTab({
                       ) : null}
                       {canPublishPublic ? (
                       <>
-                      <div className={styles.helpHeading}>
-                        <Button
-                          type="button"
-                          className="share-menu-help od-tooltip"
-                          aria-label={t('fileViewer.publishSingleFileDescription')}
-                          data-tooltip={t('fileViewer.publishSingleFileDescription')}
-                          data-tooltip-placement="top"
-                          onClick={event => event.stopPropagation()}
-                        >
-                          <RemixIcon name="question-line" size={14} />
-                        </Button>
+                      <div className={styles.linkAccessHeading}>
+                        <div className={styles.linkAccessRow}>
+                          <span className={styles.linkAccessLabel}>{t('fileViewer.linkAccessTitle')}</span>
+                          <Button
+                            type="button"
+                            className="share-menu-help od-tooltip"
+                            aria-label={t('fileViewer.publishSingleFileDescription')}
+                            data-tooltip={t('fileViewer.publishSingleFileDescription')}
+                            data-tooltip-placement="top"
+                            onClick={event => event.stopPropagation()}
+                          >
+                            <RemixIcon name="question-line" size={14} />
+                          </Button>
+                        </div>
+                        <p className={styles.linkAccessDescription}>{t('fileViewer.linkAccessDescription')}</p>
                       </div>
                       {filePublished && publishProgress !== null ? (
                         <progress max={1} value={publishProgress} aria-label={t('fileViewer.publishingFile')} />

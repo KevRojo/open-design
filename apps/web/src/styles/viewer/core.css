@@ -1673,20 +1673,19 @@
   left: 0;
   top: 0;
   box-sizing: border-box;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: 50% 50% 50% 4px;
   background: #282828;
   color: #FFFFFF;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 2px #FFFFFF;
   pointer-events: auto;
   transform: translate(-50%, -50%);
 }
@@ -1704,7 +1703,6 @@
 }
 .comment-saved-pin:hover,
 .comment-active-pin:hover {
-  background: #282828;
   transform: translate(-50%, -50%);
 }
 /* The lost marker keeps the exact same geometry as the resolved pin while

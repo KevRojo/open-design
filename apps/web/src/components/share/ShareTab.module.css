@@ -16,10 +16,35 @@
   color: #333333;
 }
 
-/* Publish help remains outside the mutating action, at the trailing edge. */
-.helpHeading {
+/* S1/S4: the "链接访问" title row + static description line the panel was
+   missing (板 D-00 固定结构第二/三行). The help "?" tooltip keeps its prior
+   position, at the row's trailing edge. */
+.linkAccessHeading {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.linkAccessRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.linkAccessLabel {
+  color: #333333;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.linkAccessDescription {
+  margin: 0;
+  color: #888888;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 /* S1-T/S4-T: scope explanation stays readable without hover or focus. */

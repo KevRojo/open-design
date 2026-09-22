@@ -4367,18 +4367,40 @@ function FileVersionManagerModal({
   );
 }
 
+// O7: 刚刚 / N 分钟前 / N 小时前（同一天）/ 昨天 / 短日期（跨年补年份）. The hour
+// bucket is keyed on calendar day, not elapsed duration, so a same-day
+// comment never reads as "N 天前"; days-ago/weeks-ago buckets are dropped.
 function formatCommentTime(ts: number, t: TranslateFn): string {
-  const diff = Date.now() - ts;
+  const now = Date.now();
+  const diff = now - ts;
   if (diff < 60_000) return t('common.justNow');
   const mins = Math.floor(diff / 60_000);
   if (mins < 60) return t('common.minutesAgo', { n: mins });
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return t('common.hoursAgo', { n: hours });
-  const days = Math.floor(hours / 24);
-  if (days < 7) return t('common.daysAgo', { n: days });
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return t('common.weeksAgo', { n: weeks });
-  return new Date(ts).toLocaleDateString();
+  const date = new Date(ts);
+  const today = new Date(now);
+  const isSameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+  if (isSameDay) {
+    return t('common.hoursAgo', { n: Math.floor(diff / 3_600_000) });
+  }
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate();
+  if (isYesterday) return t('common.yesterday');
+  const crossYear = date.getFullYear() !== today.getFullYear();
+  try {
+    return date.toLocaleDateString(
+      undefined,
+      crossYear ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' },
+    );
+  } catch {
+    return date.toISOString();
+  }
 }
 
 function commentActivityAt(comment: PreviewComment): number {
@@ -4441,6 +4463,16 @@ export function commentAuthorAvatarColor(seed: string) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
   return COMMENT_AUTHOR_AVATAR_COLORS[hash % COMMENT_AUTHOR_AVATAR_COLORS.length] ?? COMMENT_AUTHOR_AVATAR_COLORS[0];
+}
+
+// Same author-key precedence as CommentAuthorIdentityContent's seed, minus the
+// directory-resolved member-id fallback (not available outside that component's
+// hook): canvas pins pick their color from this so a pin and its author's
+// sidebar avatar always match.
+function commentAuthorPinSeed(comment: PreviewComment): string {
+  return comment.authorKind === 'user'
+    ? (comment.authorKey ?? comment.authorAppUserId ?? '')
+    : (comment.authorKey ?? comment.authorMemberId ?? '');
 }
 
 // First glyph of the display name (code-point aware so a CJK name shows its
@@ -4877,7 +4909,9 @@ export function CommentSidePanel({
                   displayNumber={displayCommentNumber(comment, index)}
                   t={t}
                 />
-                <span className="comment-side-time">{formatCommentTime(commentActivityAt(comment), t)}</span>
+                <span className="comment-side-time" title={formatAbsoluteDateTime(commentActivityAt(comment)) ?? undefined}>
+                  {formatCommentTime(commentActivityAt(comment), t)}
+                </span>
                 {sendable ? (
                   <button
                     type="button"
@@ -6001,6 +6035,9 @@ function CommentPreviewOverlays({
         const tooltip = drifted
           ? `${markerNumber}. ${label} · ${anchorStateLabel(anchorState, t)}`
           : `${markerNumber}. ${label}: ${comment.note}`;
+        // 4.2b: the pin carries the same author color as that author's
+        // sidebar avatar (the lost-anchor variant overrides this below).
+        const pinColor = commentAuthorAvatarColor(commentAuthorPinSeed(comment));
         return (
           <div
             key={comment.id}
@@ -6019,6 +6056,7 @@ function CommentPreviewOverlays({
             <button
               type="button"
               className="comment-saved-pin od-tooltip tipd"
+              style={anchorState === 'lost' ? undefined : { background: pinColor.bg, color: pinColor.fg }}
               data-tooltip={tooltip}
               data-tooltip-placement="top"
               onClick={(event) => {
@@ -6064,7 +6102,15 @@ function CommentPreviewOverlays({
       {showActivePin && activeTarget ? (
         <div
           className="comment-active-pin"
-          style={activeCommentPinStyle(activeTarget, scale, overlayOffset)}
+          style={{
+            ...activeCommentPinStyle(activeTarget, scale, overlayOffset),
+            ...(activeSavedComment
+              ? (() => {
+                  const pinColor = commentAuthorAvatarColor(commentAuthorPinSeed(activeSavedComment));
+                  return { background: pinColor.bg, color: pinColor.fg };
+                })()
+              : null),
+          }}
           data-testid="comment-active-pin"
           aria-hidden="true"
         >

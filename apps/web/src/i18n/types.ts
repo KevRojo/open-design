@@ -173,6 +173,7 @@ export interface Dict {
   'common.justNow': string;
   'common.minutesAgo': string;
   'common.hoursAgo': string;
+  'common.yesterday': string;
   'common.daysAgo': string;
   'common.weeksAgo': string;
   'common.now': string;
@@ -4177,6 +4178,8 @@ export interface Dict {
   'fileViewer.workspaceAccessMembers': string;
   'fileViewer.publishSingleFileTitle': string;
   'fileViewer.generateAndCopyLink': string;
+  'fileViewer.linkAccessTitle': string;
+  'fileViewer.linkAccessDescription': string;
   'fileViewer.publishSingleFileDescription': string;
   'fileViewer.openFileRequired': string;
   'fileViewer.publishFile': string;
