@@ -1,4 +1,6 @@
 import type { SharePublishResult } from '@open-design/contracts';
+import type { PublicFilePublicationScope } from './public-file-publication-store.js';
+import type { createShareAliasReservations } from './share-alias-reservation.js';
 import { runVelaCommand, velaWorkspaceCommandOptions } from '../integrations/vela-command.js';
 
 export interface VelaSharePublishInput {
@@ -12,6 +14,26 @@ export interface VelaSharePublishInput {
   entryPath: string;
   name: string;
   versionId: string;
+}
+
+export type ReservedVelaSharePublishInput = Omit<VelaSharePublishInput,
+  'filePath' | 'workspaceId' | 'projectId' | 'slug' | 'sourceKey'> & { scope: PublicFilePublicationScope };
+
+/** Reserve the original file's stable identity before any remote mutation.
+ * A rejected call leaves the reservation intact for the next explicit attempt.
+ * This does not retry, record a successful publication, or enqueue binding.
+ */
+export async function publishReservedVelaShareVersion(
+  input: ReservedVelaSharePublishInput,
+  reservations: ReturnType<typeof createShareAliasReservations>,
+  run: typeof runVelaCommand = runVelaCommand,
+): Promise<SharePublishResult> {
+  const { scope, ...upload } = input;
+  const identity = { ...scope };
+  const target = reservations.reserve(identity);
+  return publishVelaShareVersion({ ...upload, ...target,
+    workspaceId: identity.resourceTeamId, projectId: identity.projectId, filePath: identity.filePath,
+  }, run);
 }
 
 /** Go share publish advances the alias and registers the project binding.
