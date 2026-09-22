@@ -1545,6 +1545,13 @@ export interface CommentSyncState {
   sessionMissing: boolean;
   /** K3. Distinct from never-shared. */
   shareStopped: boolean;
+  /**
+   * Last align result, when one was run.
+   *
+   * ABSENT MEANS NOT CHECKED — not aligned. See
+   * {@link COMMENT_ALIGN_UNKNOWN_AND_ABSENT_ARE_NOT_ALIGNED}.
+   */
+  align?: CommentAlignResult;
 }
 
 /**
@@ -1586,3 +1593,106 @@ export const COMMENT_SYNC_PENDING_AND_LAST_ERROR_ARE_NOT_FAILURE_STATES = true;
  * sharing was stopped when they never started.
  */
 export const COMMENT_SYNC_STOPPED_IS_NOT_NEVER_SHARED = true;
+
+/* ------------------------------------------------------------------ *
+ * Pushing comments in one request
+ * ------------------------------------------------------------------ */
+
+/** `POST /api/v1/collab/projects/:projectId/comments/batch` */
+export interface CommentBatchPushRequest {
+  /** 1..{@link COMMENT_BATCH_MAX_ITEMS}. */
+  comments: ReadonlyArray<{
+    /** Caller's handle for this entry, echoed back so results can be matched. */
+    key: string;
+    comment: unknown;
+    idempotencyKey: string;
+  }>;
+}
+
+export interface CommentBatchPushResponse {
+  results: ReadonlyArray<{
+    key: string;
+    ok: boolean;
+    /** Human-readable; never on its own the thing a caller branches on. */
+    error?: string;
+    errorCode?: string;
+    /** HTTP status this entry failed with, completing the failure envelope. */
+    status?: number;
+  }>;
+}
+
+export const COMMENT_BATCH_MAX_ITEMS = 500;
+
+/**
+ * Idempotency is per ENTRY, and a partial failure keeps its successes.
+ *
+ * A batch is a transport convenience, not a unit of work. Rolling the whole
+ * thing back because entry 400 failed would discard 399 comments that were
+ * accepted, and the retry would re-send all 400 — so the failure rate would
+ * have to reach zero before anything landed at all.
+ *
+ * So each entry carries its own idempotency key and commits on its own. A
+ * retry re-sends the batch; entries that already landed are recognised by
+ * their key and not duplicated; only the ones that failed are attempted
+ * again. The response reports every entry by the caller's `key`, because
+ * position is not a reliable identity once retries reorder anything.
+ *
+ * The call still exits nonzero on partial failure — the caller has work left
+ * to do — but the successful results are in the response and must be read
+ * rather than discarded with the exit code.
+ */
+export const COMMENT_BATCH_IS_PER_ITEM_NOT_ATOMIC = true;
+
+/* ------------------------------------------------------------------ *
+ * Align: is what we merged still what the cloud has?
+ * ------------------------------------------------------------------ */
+
+export const COMMENT_ALIGN_STATES = ['aligned', 'diverged', 'unknown'] as const;
+export type CommentAlignState = (typeof COMMENT_ALIGN_STATES)[number];
+
+export const COMMENT_ALIGN_REASONS = [
+  /** Events the comparison needed are gone — retention, not disagreement. */
+  'history_incomplete',
+  /** The cloud's consistency snapshot moved while comparing. */
+  'snapshot_changed',
+  /** The comparison could not be performed at all. */
+  'unavailable',
+] as const;
+export type CommentAlignReason = (typeof COMMENT_ALIGN_REASONS)[number];
+
+export interface CommentAlignResult {
+  state: CommentAlignState;
+  /** Required when `state` is `unknown`; explains which way it failed. */
+  reason?: CommentAlignReason;
+  latestSeq?: number;
+}
+
+/**
+ * Equal cursors are not equal content.
+ *
+ * A cursor says how far we have read. It says nothing about whether what we
+ * merged matches what is there — a comment can be edited, removed, or have
+ * arrived under a filter that skipped it, all without moving the cursor.
+ * Comparing cursors and calling the result "aligned" is the cheapest possible
+ * check and it answers a different question.
+ *
+ * Align compares the locally merged projection of cloud comments against the
+ * cloud's own consistency snapshot. Anything less is `unknown`.
+ */
+export const COMMENT_ALIGN_COMPARES_CONTENT_NOT_CURSORS = true;
+
+/**
+ * `unknown` is never `aligned`, and an absent align result is never `aligned`
+ * either.
+ *
+ * Retention is the case that makes this concrete: if the events a comparison
+ * needed have aged out, the honest answer is `unknown` with
+ * `history_incomplete` — not `aligned` (we did not check) and not `diverged`
+ * (we found no disagreement). Both substitutions are confident statements
+ * about something nobody looked at.
+ *
+ * On {@link CommentSyncState}, `align` being absent means NOT CHECKED. A
+ * consumer that treats missing as aligned turns every un-run comparison into
+ * a clean bill of health.
+ */
+export const COMMENT_ALIGN_UNKNOWN_AND_ABSENT_ARE_NOT_ALIGNED = true;
