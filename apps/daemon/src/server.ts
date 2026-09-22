@@ -958,6 +958,9 @@ import { createCollabRuntime } from './collab/runtime.js';
 import { createPublicFileStopStartup, createSqlitePublicFilePublicationStore } from './collab/public-file-publication-store.js';
 import { createVelaPublicFileStop } from './collab/vela-public-file-stop.js';
 import { createShareContentFingerprints } from './collab/share-content-fingerprint.js';
+import { createShareBindingOutbox } from './collab/share-binding-outbox.js';
+import { createShareBindingStartup } from './collab/share-binding-startup.js';
+import { createVelaShareBindingPrepare } from './collab/vela-share-binding-prepare.js';
 import { cleanupAbandonedPinnedVelaSessions } from './collab/vela-pinned-command.js';
 import { createProjectPublicFileStop } from './collab/project-public-file-stop.js';
 import { createPublicFileMutations } from './collab/public-file-mutations.js';
@@ -5171,6 +5174,18 @@ export async function startServer({
   // design-system backfill). Re-declaring it here is what a merge produced when
   // two lanes each added their own binding in different hunks: git saw no
   // conflict, and `tsc` did not object — only esbuild did, at transform time.
+  const shareBindingOutbox = createShareBindingOutbox(db);
+  const retryShareBindingsAtStartup = createShareBindingStartup(shareBindingOutbox, {
+    publications: publicFilePublicationStore,
+    mutations: publicFileMutations,
+    prepare: createVelaShareBindingPrepare({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
+    // An outstanding stop intent wins over completion of the same publication.
+    isCurrent: task => !publicFilePublicationStore.listStops().some(stop =>
+      stop.resourceTeamId === task.resourceTeamId && stop.ownerMemberId === task.ownerMemberId
+      && stop.projectId === task.projectId && stop.filePath === task.receipt.filePath
+      && stop.slug === task.receipt.slug
+      && (!stop.publicationRevision || stop.publicationRevision === task.publicationRevision)),
+  });
   const retryPublicFileStopsAtStartup = createPublicFileStopStartup(
     publicFilePublicationStore,
     createVelaPublicFileStop({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
@@ -18082,6 +18097,11 @@ export async function startServer({
         void cleanupAbandonedPinnedVelaSessions(RUNTIME_DATA_DIR).then(({ failed }) => {
           if (failed) console.warn('[od] private CLI session cleanup incomplete');
         }).catch(() => { console.warn('[od] private CLI session cleanup unavailable'); });
+        void retryShareBindingsAtStartup().then(result => {
+          if (result.deferred || result.failed || result.persistenceFailures) {
+            console.warn(`[od] public share binding completion pending: ${JSON.stringify(result)}`);
+          }
+        }).catch(() => { console.warn('[od] public share binding completion unavailable'); });
         void retryPublicFileStopsAtStartup().then((result) => {
           if (result.deferred || result.failed || result.persistenceFailures) {
             console.warn(
