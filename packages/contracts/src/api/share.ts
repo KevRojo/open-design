@@ -1598,6 +1598,17 @@ export interface CommentSyncState {
    */
   shareStopped: boolean | null;
   /**
+   * K2. Backfill of the comments that already existed when a file was
+   * published. Absent means NOT ATTEMPTED — never "succeeded".
+   *
+   * This is deliberately NOT `lastError`. `lastError` is the ordinary
+   * outbox's most recent failure across the whole scope; folding backfill
+   * into it would render an unrelated network blip as "the existing comments
+   * did not go up", and would let a backfill failure be erased by the next
+   * unrelated success.
+   */
+  backfill?: CommentBackfillState;
+  /**
    * Last align result, when one was run.
    *
    * ABSENT MEANS NOT CHECKED — not aligned. See
@@ -1897,4 +1908,72 @@ export const COMMENT_ALIGN_REQUIRES_PROVEN_CONTINUOUS_HISTORY = true;
  * it measures can no longer report what was wrong.
  */
 export const COMMENT_ALIGN_HAS_NO_SIDE_EFFECTS = true;
+
+/* ------------------------------------------------------------------ *
+ * Backfill: did the comments that predate the publish make it up?
+ * ------------------------------------------------------------------ */
+
+export const COMMENT_BACKFILL_STATES = ['pending', 'succeeded', 'failed'] as const;
+export type CommentBackfillStateValue = (typeof COMMENT_BACKFILL_STATES)[number];
+
+/**
+ * Backfill is bound to ONE publish, and says so.
+ *
+ * ## Why `generation` is required rather than convenient
+ *
+ * A backfill failure describes the publish that triggered it and nothing
+ * else. Without the generation, a failure recorded for an earlier publish
+ * outlives the event it described: the owner republishes, the new backfill
+ * succeeds, and the banner from two publishes ago is still on screen asking
+ * them to retry something that no longer exists. The consumer therefore
+ * COMPARES this against the publication's current generation and ignores a
+ * stale one — it does not simply render the newest record it was handed.
+ *
+ * It follows that a success at generation N clears a failure at generation
+ * N-1 by superseding it, not by anyone remembering to delete it.
+ *
+ * ## Publish succeeded AND backfill failed is a normal pair
+ *
+ * These are two facts about one action, not two possible outcomes of it. The
+ * link works, it is safe to copy, and the visitor will see new comments — the
+ * comments that predate the publish are what is missing. Copy that says
+ * sharing failed is wrong, and disabling the share or copy-link control
+ * because of this state is wrong: it takes away a capability that works, over
+ * a different capability that did not.
+ *
+ * ## `retryable` is the difference between a notice and an alarm
+ *
+ * The same rule as {@link ProjectDeleteShareResidual.retrying}: `true` means
+ * something will keep trying and the person needs to know, not to act;
+ * `false` means nothing further happens on its own. Collapsing them produces
+ * a frightening banner for a self-healing case, or a calm one for a case
+ * that needs a person.
+ */
+export interface CommentBackfillState {
+  state: CommentBackfillStateValue;
+  /**
+   * The publication generation this result describes. Compare it against the
+   * publication's current generation before rendering; a lower one is stale.
+   */
+  generation: number;
+  /** Whether anything will retry on its own. Meaningful when `state` is `failed`. */
+  retryable: boolean;
+  /** Machine-readable cause, when the producer recorded one. */
+  code?: string;
+}
+
+/**
+ * An absent `backfill` means nobody ran one, exactly as an absent `align`
+ * means nobody compared. Rendering "existing comments are up to date" from a
+ * field that was never populated is the same mistake as reporting `aligned`
+ * for a comparison that never happened.
+ */
+export const COMMENT_BACKFILL_ABSENT_IS_NOT_SUCCESS = true;
+
+/**
+ * A backfill result older than the current publication generation must not be
+ * rendered at all — not as a warning, and not as a success.
+ */
+export const COMMENT_BACKFILL_STALE_GENERATION_IS_NOT_RENDERED = true;
+
 
