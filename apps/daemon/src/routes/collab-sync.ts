@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import type { RecordPublicFilePublication } from '../collab/public-file-publication-recording.js';
 import type { ShareContentFingerprints } from '../collab/share-content-fingerprint.js';
 import { createShareFileMapping, publishedPathForSource, type ShareFileMapping } from '../collab/share-file-mapping.js';
 import { publicFileMutationHandler } from './public-file-mutation-handler.js';
@@ -229,6 +230,7 @@ export interface RegisterCollabSyncRoutesDeps {
   /** Durable publication metadata used to restore public links after restart. */
   publicFilePublicationStore?: PublicFilePublicationStore;
   shareContentFingerprints?: ShareContentFingerprints;
+  recordPublicFilePublication?: RecordPublicFilePublication;
   publicFileMutations?: PublicFileMutations;
   resolvePullDir?: (projectId: string) => string;
   /** Read the durable local materialization cursor for this exact team mirror. */
@@ -1371,10 +1373,12 @@ export function registerCollabSyncRoutes(
         fileName: filePath,
       };
       try {
-        publicFilePublicationStore.set(
-          publicFilePublicationScope(projectId, filePath, principal),
-          publication,
-        );
+        const scope = publicFilePublicationScope(projectId, filePath, principal);
+        if (deps.recordPublicFilePublication) {
+          deps.recordPublicFilePublication(scope, publication, sharePlan.mapping);
+        } else {
+          publicFilePublicationStore.set(scope, publication);
+        }
       } catch (persistenceError) {
         try {
           await runVelaResourceCommand([

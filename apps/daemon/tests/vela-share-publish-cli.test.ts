@@ -12,7 +12,7 @@ it.skipIf(!process.env.OD_TEST_VELA_BIN).each([200, 403])('publishes a stable al
   if (!binary) throw new Error('explicit test CLI required');
   const root = await mkdtemp(path.join(tmpdir(), 'od-go-publish-'));
   const requests: Array<{ url: string | undefined; method: string | undefined; bearer: string | undefined; workspace: string | string[] | undefined; body: unknown }> = [];
-  const input = { workspaceId: 'workspace', projectId: 'project', resourceId: 'resource', slug: 'stable', sourceKey: 'index.html', entryPath: 'index.html', name: 'Design', versionId: 'immutable-upload' };
+  const input = { filePath: 'pages/local.html', workspaceId: 'workspace', projectId: 'project', resourceId: 'resource', slug: 'stable', sourceKey: 'index.html', entryPath: 'index.html', name: 'Design', versionId: 'immutable-upload' };
   const receipt = { slug: input.slug, version: 2, publishedAt: 1234, entryPath: 'index.html', snapshot: { slug: 'snapshot-not-alias', versionId: input.versionId, name: 'Design', kind: 'project' } };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -31,10 +31,12 @@ it.skipIf(!process.env.OD_TEST_VELA_BIN).each([200, 403])('publishes a stable al
     if (!address || typeof address === 'string') throw new Error('missing listener');
     const session = { profile: 'test' as const, apiUrl: `http://127.0.0.1:${address.port}`, controlKey: 'synthetic-key', user: null, configMtimeMs: null };
     const pending = publishVelaShareVersion(input, args => runPinnedVelaCommand({ args, session, dataRoot: root, workspaceId: input.workspaceId, configuredEnv: { VELA_BIN: binary } }));
-    if (bindingStatus === 200) expect(await pending).toEqual({ slug: 'stable', version: 2, publishedAt: 1234, entryPath: 'index.html' });
-    else await expect(pending).rejects.toThrow(/^PUBLIC_SHARE_PUBLISH_FAILED$/);
-    // The first request succeeded even when the second failed: rejection is not
-    // evidence of rollback. The adapter must not repeat either remote mutation.
+    expect(await pending).toEqual({
+      status: bindingStatus === 200 ? 'published' : 'binding_pending',
+      receipt: { filePath: input.filePath, slug: 'stable', version: 2, versionId: input.versionId, publishedAt: 1234, entryPath: 'index.html' },
+      ...(bindingStatus === 200 ? {} : { binding: { retrying: false, code: 'FORBIDDEN' } }),
+    });
+    // Confirmed content survives binding failure, without repeating either mutation.
     expect(requests).toEqual([
       { url: '/api/v1/resources/resource/shares', method: 'POST', bearer: 'Bearer synthetic-key', workspace: 'workspace', body: { slug: 'stable', sourceKey: 'index.html', entryPath: 'index.html', name: 'Design', versionId: 'immutable-upload' } },
       { url: '/api/v1/collab/shares', method: 'POST', bearer: 'Bearer synthetic-key', workspace: 'workspace', body: { projectId: 'project', slug: 'stable' } },

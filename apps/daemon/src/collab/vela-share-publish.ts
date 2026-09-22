@@ -1,6 +1,9 @@
+import type { SharePublishResult } from '@open-design/contracts';
 import { runVelaCommand, velaWorkspaceCommandOptions } from '../integrations/vela-command.js';
 
 export interface VelaSharePublishInput {
+  /** Original local file, not the rewritten package entry. */
+  filePath: string;
   workspaceId: string;
   projectId: string;
   resourceId: string;
@@ -18,12 +21,12 @@ export interface VelaSharePublishInput {
 export async function publishVelaShareVersion(
   input: VelaSharePublishInput,
   run: typeof runVelaCommand = runVelaCommand,
-): Promise<{ slug: string; version: number; publishedAt: number; entryPath: string }> {
+): Promise<SharePublishResult> {
   try {
     const request = Object.freeze({ ...input });
     // Blank versionId makes the Go command fall back to a mutable ref; blank
     // workspace can similarly select ambient scope. Refuse before spawning.
-    const required = [request.workspaceId, request.projectId, request.resourceId,
+    const required = [request.filePath, request.workspaceId, request.projectId, request.resourceId,
       request.slug, request.sourceKey, request.entryPath, request.name, request.versionId];
     if (required.some(value => typeof value !== 'string' || !value.trim())) {
       throw new Error('missing publish identity');
@@ -47,7 +50,21 @@ export async function publishVelaShareVersion(
       || typeof record.publishedAt !== 'number' || !Number.isSafeInteger(record.publishedAt) || record.publishedAt < 0
       || !snapshot || typeof snapshot !== 'object' || !('versionId' in snapshot)
       || snapshot.versionId !== request.versionId) throw new Error('mismatched receipt');
-    return { slug: request.slug, version: record.version, publishedAt: record.publishedAt, entryPath: request.entryPath };
+    const acknowledged = record.receipt;
+    if (!acknowledged || typeof acknowledged !== 'object' || Array.isArray(acknowledged)) throw new Error('missing receipt');
+    const confirmed = acknowledged as Record<string, unknown>;
+    if (confirmed.slug !== request.slug || confirmed.versionId !== request.versionId
+      || confirmed.entryPath !== request.entryPath || confirmed.version !== record.version
+      || confirmed.publishedAt !== record.publishedAt) throw new Error('inconsistent receipt');
+    const receipt = { filePath: request.filePath, slug: request.slug, version: record.version,
+      versionId: request.versionId, publishedAt: record.publishedAt, entryPath: request.entryPath };
+    if (record.status === 'published') return { status: 'published', receipt };
+    if (record.status !== 'binding_pending') throw new Error('unknown publish outcome');
+    const binding = record.binding;
+    const code = binding && typeof binding === 'object' && 'code' in binding ? binding.code : undefined;
+    const safeCodes = ['UNAUTHENTICATED', 'FORBIDDEN', 'SHARE_NOT_FOUND', 'SHARE_GENERATION_MISMATCH', 'SHARE_BINDING_UNAVAILABLE', 'SHARE_BINDING_STOPPED'];
+    return { status: 'binding_pending', receipt, binding: { retrying: false,
+      code: typeof code === 'string' && safeCodes.includes(code) ? code : 'SHARE_BINDING_UNAVAILABLE' } };
   } catch {
     // Child diagnostics can include upstream bodies. No fallback to snapshots
     // or implicit retry: the remote pointer may already have advanced.
