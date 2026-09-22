@@ -1326,3 +1326,55 @@ export const SHARE_VIEWER_DOCUMENT_IS_UNCACHEABLE = true;
  * it learns because the person acted.
  */
 export const SHARE_VIEWER_409_PROMPTS_RELOAD_WITHOUT_POLLING = true;
+
+/* ------------------------------------------------------------------ *
+ * Which publication a public comment belongs to
+ * ------------------------------------------------------------------ */
+
+/**
+ * The publication a public comment was written against, asserted by the
+ * server that accepted it.
+ *
+ * ## `filePath` cannot answer this
+ *
+ * Publishing rewrites the entry to `index.html`, so the stored path of a
+ * comment on project A's share and one on project B's share are the same
+ * string. With only the path, a comment that arrives late — after A was
+ * stopped — matches B's live publication and is filed there. The comment
+ * lands under someone else's share, and nothing in the record says it is in
+ * the wrong place.
+ *
+ * Carrying the slug removes the ambiguity at the source instead of asking
+ * every consumer to guess from what is currently live.
+ *
+ * ## The server asserts it; the client never reports it
+ *
+ * `publicationSlug` is filled in by the API that accepted the comment, from
+ * the binding it already authorized the write against. A client-supplied
+ * value would let a caller file a comment into a publication it had no part
+ * in, which is the same class of hole as trusting a query parameter for
+ * authorization.
+ *
+ * ## Resolving it back is allowed to fail
+ *
+ * A consumer mapping this to a local file resolves by the full identity —
+ * team, creator, project, slug and published path — against the CURRENT
+ * publication record. Two rules make that safe:
+ *
+ * - **Ambiguity throws.** If the identity matches more than one record,
+ *   something is wrong with the data, and picking one would silently attach
+ *   the comment to an arbitrary share.
+ * - **Unknown or expired answers null.** There is no fallback to "whatever is
+ *   published now" — that fallback is exactly how a stopped share's late
+ *   comment ends up on a live one.
+ */
+export interface PublicCommentPublicationIdentity {
+  /** The stable alias of the publication this comment was written against. */
+  publicationSlug: string;
+}
+
+/**
+ * Set on the downstream comment payload by the accepting server, never by a
+ * client, and never inferred by a consumer from what is currently live.
+ */
+export const PUBLIC_COMMENT_PUBLICATION_SLUG_IS_SERVER_ASSERTED = true;
