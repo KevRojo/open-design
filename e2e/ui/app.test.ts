@@ -559,6 +559,16 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(note).toHaveValue(multilineComment);
   await expect(note).not.toHaveAttribute('readonly');
   await expect(saveComment).toBeDisabled();
+  await note.fill('This unsaved replacement must be discarded.');
+  await expect(saveComment).toBeEnabled();
+  await note.press('Escape');
+  await expect(floatingComposer).toHaveCount(0);
+  await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(1);
+  await expect(sidePanel.getByTestId('comment-side-item')).toContainText('Make the headline more specific.');
+  await expect(sidePanel.getByTestId('comment-side-item')).not.toContainText('This unsaved replacement must be discarded.');
+  await page.getByTestId('comment-saved-marker-hero-title').getByRole('button').click();
+  await expect(note).toHaveValue(multilineComment);
+  await expect(saveComment).toBeDisabled();
   const editedComment = `${multilineComment}\nPreserve the existing layout.`;
   await note.fill(editedComment);
   await expect(saveComment).toBeEnabled();
