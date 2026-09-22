@@ -257,3 +257,22 @@
   .skeleton { animation: none; }
   .quotaContent { transition: none; }
 }
+
+.balance svg,
+.used svg {
+  transition: transform 160ms ease-out;
+}
+
+.balance:hover svg,
+.balance:focus-visible svg,
+.used:hover svg,
+.used:focus-visible svg {
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .balance svg,
+  .used svg {
+    transition: none;
+  }
+}
