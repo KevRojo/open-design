@@ -647,7 +647,7 @@ export function aggregateStrategyTaskObservations(input: {
         knownChildUsage: usageSummary(stageChildren),
       };
     });
-  const taskType = input.taskType ?? input.task.planContract?.taskProfile.taskType ?? null;
+  const taskType = input.taskType ?? input.task.planContract?.taskProfile?.taskType ?? null;
   const limitations = aggregateLimitations({
     missingRunIds,
     children,

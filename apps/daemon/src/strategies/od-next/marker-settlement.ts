@@ -1,13 +1,13 @@
+import type { OdNextReply } from './protocol.js';
 import type Database from 'better-sqlite3';
 import { countRenderableQuestionForms } from '../../question-form-detect.js';
 import { compareAndTransitionStrategyTaskExecution, getStrategyTaskExecution, type StrategyTaskExecutionRecord } from '../task-store.js';
 import type { OdNextCoordinatorResult } from './coordinator.js';
-import type { OdNextMachineProtocolResult } from './protocol.js';
 
 export function settleMarkerTurn(db: Database.Database, input: {
   taskExecutionId: string;
   runId: string;
-  parsed: OdNextMachineProtocolResult;
+  parsed: OdNextReply;
   completionEvidence?: { physicalStatus: 'succeeded' | 'failed' | 'canceled'; deliverableValid: boolean };
   updatedAt?: number;
 }): OdNextCoordinatorResult {
@@ -35,7 +35,7 @@ export function settleMarkerTurn(db: Database.Database, input: {
   return { action: outcome, task: settled, visibleText: input.parsed.visibleText, reasonCodes };
 }
 
-export function markerMayContinue(task: StrategyTaskExecutionRecord, parsed: OdNextMachineProtocolResult): boolean {
+export function markerMayContinue(task: StrategyTaskExecutionRecord, parsed: OdNextReply): boolean {
   return parsed.productionReady === true
     && Boolean(parsed.visibleText.trim())
     && ['request', 'clarification'].includes(task.inputStage)

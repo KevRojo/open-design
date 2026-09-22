@@ -1,3 +1,4 @@
+import type { OdNextReply } from './protocol.js';
 import { composeOdNextMarkerProductionTurn } from '@open-design/contracts';
 import type Database from 'better-sqlite3';
 import type { InternalPhysicalRun, InternalRunCreateInput, InternalRunCreationService } from '../../services/internal-run-service.js';
@@ -5,7 +6,7 @@ import { mintRunDoneKey } from '../../runtimes/run-done-key.js';
 import { compareAndTransitionStrategyTaskExecution, getStrategyTaskExecutionByRunId, type StrategyTaskExecutionRecord } from '../task-store.js';
 import type { PreparedAutomaticStrategyContinuation } from './automatic-simple-production.js';
 import type { OdNextCoordinatorResult } from './coordinator.js';
-import type { OdNextMachineProtocolResult } from './protocol.js';
+
 import { markerMayContinue, settleMarkerTurn } from './marker-settlement.js';
 
 /** The source verdict and successor claim commit together, before either is published. */
@@ -13,7 +14,7 @@ export function prepareMarkerContinuation<TMeta extends InternalRunCreateInput, 
   db: Database.Database;
   service: InternalRunCreationService<TMeta, TRun>;
   task: StrategyTaskExecutionRecord;
-  parsed: OdNextMachineProtocolResult;
+  parsed: OdNextReply;
   createMeta: (stage: 'production', instruction: string, taskRunIndex: number) => TMeta;
   completionEvidence?: { physicalStatus: 'succeeded' | 'failed' | 'canceled'; deliverableValid: boolean };
   updatedAt?: number;

@@ -1,21 +1,12 @@
 import { serializeOdNextRequestTurnV1 } from './od-next-prompt-bundle.js';
-import { parseOdNextPromptBundleV2 } from './od-next-prompt-bundle-v2.js';
 
 export const OD_NEXT_PRODUCTION_MARKER_PROTOCOL = 'OD Next production-marker/v1';
-
-/** Read only the host-authored output slot, never a user's quoted marker. */
-export function usesOdNextProductionMarker(bundle: string): boolean {
-  try {
-    return parseOdNextPromptBundleV2(bundle).coreSystemPrompt.outputContract
-      .startsWith(OD_NEXT_PRODUCTION_MARKER_PROTOCOL);
-  } catch {
-    return false; // Historical V1 bundles keep their original continuation path.
-  }
-}
 
 export const OD_NEXT_PLAN_OUTPUT_INSTRUCTIONS = `${OD_NEXT_PRODUCTION_MARKER_PROTOCOL}
 
 Decide from the user's actual request whether a separate planning turn is needed.
+When continuing an existing task with an actionable plan, follow the latest user
+request and execute that plan directly; do not repeat a completed planning turn.
 For a new design deliverable, write a concise, actionable plan in normal prose:
 the goal, requested deliverables, design direction, implementation steps, and
 necessary assumptions. Do not build the deliverables in this planning turn.

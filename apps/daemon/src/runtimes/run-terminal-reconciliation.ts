@@ -16,7 +16,7 @@ import {
   normalizeAnalyticsCaptureResult,
   type AnalyticsCaptureResult,
 } from '../analytics.js';
-import type { IntentRecoveryRunState } from '../strategies/od-next/intent-resolution-recovery.js';
+
 import { reconcileStrategyTaskRunTerminal } from '../strategies/task-store.js';
 import { classifyRunFailure } from '../run-failure-classification.js';
 import { summarizeRunDiagnosticsForAnalytics } from '../run-diagnostics.js';
@@ -96,7 +96,7 @@ interface AnalyticsRecovery {
   completedAt?: number;
 }
 
-interface DurableRunState extends RestartRecoverableDurableRunState, IntentRecoveryRunState {
+interface DurableRunState extends RestartRecoverableDurableRunState, RestartRecoverableDurableRunState {
   schemaVersion: 1;
   id: string;
   projectId: string | null;

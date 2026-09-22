@@ -16,7 +16,6 @@ describe('plan continuation marker', () => {
       const visible = stream.push(text.slice(0, split)) + stream.push(text.slice(split));
       const result = stream.finish();
       expect(result.parsed.productionReady).toBe(true);
-      expect(result.parsed.issues).toEqual([]);
       expect(visible + result.visibleTail).toBe('Plan: build a landing page and a deck.\n');
       expect(result.parsed.visibleText).toBe(visible + result.visibleTail);
     }
@@ -37,12 +36,19 @@ describe('plan continuation marker', () => {
     for (const char of text) stream.push(char);
     expect(stream.finish().parsed.productionReady).toBe(false);
   });
+  it('cannot authorize production from a marker hidden in a retired block', () => {
+    for (const close of ['', '</open-design-runtime-state>']) {
+      const stream = createOdNextRunProtocol(null, key);
+      stream.push(`Visible plan.\n<open-design-runtime-state>\n<od-production-ready key="${key}" />${close}`);
+      expect(stream.finish().parsed.productionReady).toBe(false);
+    }
+  });
+
   it('does not gate a plain answer on a malformed legacy block', () => {
     const stream = createOdNextRunProtocol(null, key);
     stream.push('Done.\n<open-design-runtime-state>\n{broken}\n</open-design-runtime-state>');
     const { parsed } = stream.finish();
-    expect(parsed.issues).toEqual([]);
-    expect(parsed.visibleText).toBe('Done.\n');
+    expect(parsed.visibleText.trim()).toBe('Done.');
     expect(parsed.productionReady).toBe(false);
   });
   it('bounds a very long line without treating its suffix as a new control line', () => {
@@ -90,6 +96,11 @@ it.skipIf(!existsSync(new URL(`recordings/${replayTrace}.jsonl`, replayRoot)))(
     expect(textEvents).toBeGreaterThan(0);
     expect(parsed.visibleText.trim()).not.toBe('');
     expect(parsed.productionReady).toBe(false);
-    expect(parsed.issues).toEqual([]);
   },
 );
+
+it('does not parse or validate retired model contracts', () => {
+  const protocol = createOdNextRunProtocol(null, key);
+  protocol.push('Hello.');
+  expect(protocol.finish().parsed).toEqual({ visibleText: 'Hello.', productionReady: false });
+});

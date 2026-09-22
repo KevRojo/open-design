@@ -1,14 +1,11 @@
 import { OD_NEXT_PLAN_OUTPUT_INSTRUCTIONS } from './od-next-production-marker.js';
 import {
   OD_NEXT_PROMPT_RECIPE_ID,
-  OD_NEXT_RUNTIME_STATE_BLOCK,
-  OD_NEXT_RUNTIME_STATE_SCHEMA,
   OD_NEXT_STRATEGY_ID,
-  type StrategyExecutionIntentV2,
   type StrategyInputStageV2,
   type StrategyTaskTypeV2,
 } from '../plugins/strategy-v2.js';
-import { renderChatTurnHostProtocolInstructions } from './chat-turn-host-protocol.js';
+
 import type { ChatSessionMode } from '../api/chat.js';
 import {
   renderDeckFrameworkDirective,
@@ -16,7 +13,7 @@ import {
   type DeckFrameworkMode,
 } from './deck-framework.js';
 import type { OdNextDeviceFrameContextV2 } from './od-next-device-frame.js';
-import { serializeOdNextRequestTurnV1 } from './od-next-prompt-bundle.js';
+
 import type {
   OdNextPromptBundleHeadV2,
   OdNextPromptBundleRecipeIdentityV2,
@@ -161,43 +158,6 @@ export interface OdNextStrategyStableRequestContextV2 {
   projectInstructions?: string | undefined;
 }
 
-export type OdNextStrategyContinuationV2 =
-  | {
-      stage: 'clarification';
-      executionIntent?: StrategyExecutionIntentV2;
-      nativeSessionResume: true;
-      taskExecutionId: string;
-      taskRunIndex: number;
-      answer: string;
-    }
-  | {
-      stage: 'contract_repair';
-      nativeSessionResume: true;
-      taskExecutionId: string;
-      taskRunIndex: number;
-      serializationIssue: string;
-    }
-  | {
-      stage: 'production';
-      nativeSessionResume: true;
-      taskExecutionId: string;
-      taskRunIndex: number;
-      planContractHash: string;
-      /** Per-run nonce; omitted for non-completing continuation stages. */
-      hostProtocolKey?: string;
-      /**
-       * Run UI locale, for the host protocols the production stage closes with
-       * (OPEND-2765). Only the follow-up-suggestion rule reads it; the rest of
-       * this payload is machine structure and stays English.
-       */
-      locale?: string;
-      nativeBuildPackageBindings?: readonly {
-        buildPackageId: string;
-        nativeAgentHandle: string;
-        dependsOn: readonly string[];
-      }[];
-    };
-
 function requireSha256(value: string, field: string): string {
   if (!SHA256_HEX.test(value)) {
     throw new TypeError(`${field} must be a lowercase SHA-256 digest.`);
@@ -324,7 +284,7 @@ const FORBIDDEN_POST_BUILD_SEMANTICS: ReadonlyArray<{
 
 /**
  * Reject only post-Build checker semantics. Planning-time phrases such as
- * `contract_repair` and verified native-child evidence remain valid inputs.
+ * native-child coordination remain valid inputs.
  */
 export function assertOdNextPlanningBuildOnlyV2(
   value: string,
@@ -849,66 +809,6 @@ export function composeOdNextStrategyCorePromptV2(
   input: OdNextStrategyRequestRecipeV2,
 ): string {
   return composeOdNextStrategyRequestPromptV2(input, {});
-}
-
-/**
- * Compose only the per-stage delta for a continued native session. There is no
- * request-stage fallback: callers that cannot prove native resume must stop
- * before invoking this function instead of cold-seeding a new session.
- */
-export function composeOdNextStrategyContinuationV2(
-  input: OdNextStrategyContinuationV2,
-): string {
-  if (input.nativeSessionResume !== true) {
-    throw new TypeError('OD Next continuation requires a native session resume.');
-  }
-  let payload: string;
-  if (input.stage === 'clarification') {
-    const intent = input.executionIntent === 'plan_only'
-      ? ' The task is locked to executionIntent plan_only: retain the original no-write constraint, answer in visible prose, and finish with outcome completed without creating or modifying files.'
-      : '';
-    payload = `# OD Next native continuation — clarification\n\nMerge the user's answer below into the existing Full Plan context.${intent} Preserve the locked route, ask no second question round, rerun only affected resolution and Preflight work, and emit the updated V2 machine structures. This turn runs at the clarification stage: the Runtime State reports inputStage clarification (not request), with outcome completed for an executionIntent plan_only answer without file writes, or outcome plan_ready once the Full Plan is frozen for production; otherwise blocked or canceled.\n\n## Clarification answer\n\n${requireText(input.answer, 'answer')}`;
-  } else if (input.stage === 'contract_repair') {
-    payload = `# OD Next native continuation — contract_repair\n\nThe semantic plan in this native session is frozen. Make one serialization-only attempt that addresses the issue below. Use no tools, do not re-plan, and preserve the locked route, execution mode, Design Spec, steps, and Build Packages.\n\n## Serialization issue\n\n${requireText(input.serializationIssue, 'serializationIssue')}`;
-  } else {
-    const bindings = input.nativeBuildPackageBindings ?? [];
-    const packageIds = bindings.map(({ buildPackageId }) => requireText(
-      buildPackageId,
-      'nativeBuildPackageBindings.buildPackageId',
-    ));
-    const handles = bindings.map(({ nativeAgentHandle }) => {
-      const handle = requireText(
-        nativeAgentHandle,
-        'nativeBuildPackageBindings.nativeAgentHandle',
-      );
-      if (!/^od-build-[1-9][0-9]*-[a-f0-9]{16}$/.test(handle)) {
-        throw new TypeError('nativeAgentHandle must use the daemon-issued OD Next format.');
-      }
-      return handle;
-    });
-    if (new Set(packageIds).size !== packageIds.length || new Set(handles).size !== handles.length) {
-      throw new TypeError('Native Build Package bindings must be one-to-one.');
-    }
-    const bindingBlock = bindings.length === 0
-      ? ''
-      : `\n\n## Native Build Package bindings\n\nFor every Build Package below, invoke exactly one native \`Agent\` Child with the exact structured \`subagent_type\` handle. Observe dependency order: a dependent Child may start only after every declared dependency Child completed. Do not substitute a package id written in Prompt, description, prose, or output; Open Design verifies only the native handle.\n\n\`\`\`json\n${JSON.stringify(bindings.map((binding) => ({
-          buildPackageId: requireText(binding.buildPackageId, 'buildPackageId'),
-          nativeAgentHandle: requireText(binding.nativeAgentHandle, 'nativeAgentHandle'),
-          dependsOn: binding.dependsOn.map((dependency) => requireText(dependency, 'dependsOn')),
-        })))}\n\`\`\``;
-    const hostProtocol = renderChatTurnHostProtocolInstructions(
-      input.hostProtocolKey ?? '',
-      'od_next_production',
-      input.locale,
-    ).text;
-    payload = `# OD Next native continuation — production\n\nContinue this native session and execute the frozen Full Plan bound to \`planContractHash=${requireSha256(input.planContractHash, 'planContractHash')}\`. Use the existing in-session Task Profile, Design Spec, Todo plan, and Build Packages. Do not re-seed or restate their full text, do not choose a new route or execution mode, and do not ask another question. Open Design must be able to identify one runnable entry in the delivered files, otherwise the completed task is rejected: it looks for a root \`index.html\`, then a single root-level html file, then a single file matching the project kind. Lay the deliverable out so exactly one of those resolves.${bindingBlock}\n\n## Closing Runtime State\n\nFinish the delivery response with exactly one ${OD_NEXT_RUNTIME_STATE_BLOCK} block written as plain text between its tags, and no Plan Contract block: schema ${OD_NEXT_RUNTIME_STATE_SCHEMA}, route full_plan, inputStage production, executionMode equal to the mode locked by the accepted Plan Contract, outcome completed once every required deliverable is written (otherwise blocked or canceled), reasonCodes [], and no other fields.${hostProtocol ? `\n\nPlace the Closing Runtime State before any final follow-up markers required by the host protocols below.\n\n${hostProtocol}` : ''}`;
-  }
-  return serializeOdNextRequestTurnV1({
-    taskExecutionId: input.taskExecutionId,
-    stage: input.stage,
-    taskRunIndex: input.taskRunIndex,
-    payload,
-  });
 }
 
 export function isOdNextIncrementalStageV2(

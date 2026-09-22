@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { AppliedPluginSnapshot, ChatMessage, OpenDesignPlanContractV2 } from '@open-design/contracts';
+import type { ChatMessage } from '@open-design/contracts';
 import { strategyPackageHashFromDigests } from '@open-design/plugin-runtime';
 import express, { type Response } from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -133,60 +133,6 @@ function seedTaskAndMessage(
     endedAt: 200,
   });
   return { snapshot, task };
-}
-
-function planContract(snapshot: AppliedPluginSnapshot): OpenDesignPlanContractV2 {
-  const strategy = snapshot.strategy!;
-  return {
-    schema: 'open-design.plan-contract/v2',
-    strategy: {
-      id: 'od-next-strategy',
-      version: strategy.version,
-      packageHash: strategy.packageHash,
-      snapshotId: snapshot.snapshotId,
-    },
-    taskProfile: {
-      schemaVersion: '2',
-      taskType: 'prototype',
-      taskProfileVersion: strategy.selectedTaskProfile.version,
-      goal: 'Build a prototype',
-      contextAndAudience: 'Product team',
-      inputsAndReferences: [],
-      constraints: [],
-      canonicalDeliverable: { id: 'prototype', kind: 'prototype', format: 'html' },
-      requiredDeliverables: [{ id: 'prototype', kind: 'prototype' }],
-      designSpec: {
-        source: 'resolved-baseline',
-        version: '1',
-        decisions: { palette: 'neutral' },
-      },
-      buildRequirements: [{ id: 'build-1', text: 'Build the required prototype.' }],
-      assumptions: [],
-      risks: [],
-      taskSpecific: {},
-    },
-    fullPlan: {
-      executionMode: 'simple',
-      steps: [{ id: 'step-1', objective: 'Build', outputs: ['prototype'] }],
-      readinessArtifacts: [],
-      buildPackages: [],
-    },
-    runManifest: {
-      selectedAgentId: 'codex',
-      capabilitySnapshotHash: 'c'.repeat(64),
-      inputRefs: [],
-      productionRoutes: ['html'],
-      preflight: { intake: 'passed', execution: 'passed' },
-    },
-    decisionSummary: {
-      goal: 'Build a prototype',
-      deliverables: ['prototype'],
-      keyConstraints: [],
-      assumptions: [],
-      risks: [],
-      openDecisions: [],
-    },
-  };
 }
 
 // Mount only the production conversation registrar; no agent or full daemon
@@ -401,7 +347,7 @@ describe('persisted strategy verdict in conversation history', () => {
           taskExecutionId: TASK_ID, inputStage: 'production', taskRunIndex: 1,
         }),
       },
-      planContract: planContract(snapshot),
+
       updatedAt: 300,
     });
     compareAndTransitionStrategyTaskExecution(db, {
