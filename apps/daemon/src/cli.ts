@@ -7150,7 +7150,10 @@ function printProjectShareHelp() {
   od project share stop <id> --path <file> --slug <slug> [--json]
                     Stop the specified public snapshot (not resumable).
 
-Only publish, get, status (an alias for get), and stop are supported by this command.
+  od project share retry-stop <id> --path <file> --slug <slug> [--json]
+                    Retry one persisted stop, including after project deletion.
+
+Only publish, get, status (an alias for get), stop, and retry-stop are supported by this command.
 
 Common options:
   --daemon-url <url>   OpenDesign daemon HTTP base.
@@ -7168,12 +7171,12 @@ async function runProjectShare(args) {
   const [requestedAction, ...rest] = args;
   const action = requestedAction === 'status' ? 'get' : requestedAction;
   const stringFlags = new Set(['path', 'daemon-url', 'workspace', 'workspace-member',
-    ...(action === 'stop' ? ['slug'] : [])]);
+    ...(['stop', 'retry-stop'].includes(action) ? ['slug'] : [])]);
   let flags;
   try {
     flags = parseFlags(rest, { string: stringFlags, boolean: new Set(['json']) });
   } catch {
-    console.error('Usage: od project share <publish|get|status|stop> <id> --path <file> [--json] (stop requires --slug <slug>). See --help for accepted flags.');
+    console.error('Usage: od project share <publish|get|status|stop|retry-stop> <id> --path <file> [--json] (stop requires --slug <slug>). See --help for accepted flags.');
     process.exit(2);
   }
   const positional = positionalArgs(rest, stringFlags);
@@ -7182,8 +7185,8 @@ async function runProjectShare(args) {
   const missingFlagValue = [...stringFlags].some((key) =>
     typeof flags[key] === 'string' && (!flags[key].trim() || flags[key].startsWith('--')));
   const slug = typeof flags.slug === 'string' ? flags.slug.trim() : '';
-  if (!['publish', 'get', 'stop'].includes(action) || positional.length !== 1 || !id?.trim() || !filePath || missingFlagValue || (action === 'stop' && !slug)) {
-    console.error('Usage: od project share <publish|get|status|stop> <id> --path <file> [--json] (stop requires --slug <slug>)');
+  if (!['publish', 'get', 'stop', 'retry-stop'].includes(action) || positional.length !== 1 || !id?.trim() || !filePath || missingFlagValue || (['stop', 'retry-stop'].includes(action) && !slug)) {
+    console.error('Usage: od project share <publish|get|status|stop|retry-stop> <id> --path <file> [--json] (stop requires --slug <slug>)');
     process.exit(2);
   }
   // Validate before discovery; malformed invocations must not contact a daemon.
@@ -7192,8 +7195,10 @@ async function runProjectShare(args) {
   let resp;
   try {
     resp = await fetch(
-      `${base}/api/projects/${encodeURIComponent(id)}/files/${encodeURIComponent(filePath)}/publish-public`,
-      action === 'stop'
+      action === 'retry-stop' ? `${base}/api/public-file-stops/retry` : `${base}/api/projects/${encodeURIComponent(id)}/files/${encodeURIComponent(filePath)}/publish-public`,
+      action === 'retry-stop'
+        ? { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: id, filePath, slug }) }
+        : action === 'stop'
         ? { method: 'DELETE', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ slug }) }
         : { method: action === 'publish' ? 'POST' : 'GET', headers },
     );
@@ -7204,7 +7209,7 @@ async function runProjectShare(args) {
   if (!resp.ok) return structuredHttpFailure(resp);
   const data = await resp.json();
   if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
-  if (action === 'stop') return console.log('Sharing stopped.');
+  if (['stop', 'retry-stop'].includes(action)) return console.log('Sharing stopped.');
   const publication = action === 'get' ? data.publication : data;
   console.log(publication ? publication.url : 'Not published.');
 }
