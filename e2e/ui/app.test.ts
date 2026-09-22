@@ -501,6 +501,19 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
     await expect(page.getByTestId('comment-popover-save')).toBeDisabled();
     await expect(titleLabel).toHaveText(longCommentTag);
   }
+  // 22,000 CJK characters are 66,000 UTF-8 bytes: the byte limit belongs
+  // to the server, not a client character cap or preflight validation.
+  const oversizedDraft = '界'.repeat(22_000);
+  expect(Buffer.byteLength(oversizedDraft, 'utf8')).toBeGreaterThan(64 * 1024);
+  await note.fill(oversizedDraft);
+  await expect(note).toHaveValue(oversizedDraft);
+  await expect(note).not.toHaveAttribute('maxlength');
+  await expect(floatingComposer.locator('.comment-popover-images')).toHaveCount(0);
+  await expect(page.getByTestId('comment-popover-save')).toBeEnabled();
+  await expect(page.getByTestId('comment-add-send')).toBeEnabled();
+  // Do not submit an over-limit payload in this client-only acceptance check.
+  await note.fill('');
+  await expect(page.getByTestId('comment-popover-save')).toBeDisabled();
   await page.setViewportSize({ width: 1280, height: 480 });
   await expect.poll(() => composerBody.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
   await expect(composerBody).toHaveCSS('overflow-y', 'auto');
