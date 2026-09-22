@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
+import Database from 'better-sqlite3';
+import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
+import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
 import http from 'node:http';
 import {
   lstat,
@@ -1812,6 +1815,57 @@ describe('collab sync routes', () => {
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('WORKSPACE_PROJECT_UNSHARE_DENIED');
+  });
+
+  it.each([false, true])('records planner mapping and publication in the HTTP transaction; enqueue failure=%s', async fail => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-publish-transaction-'));
+    tempDirs.push(dir);
+    await mkdir(path.join(dir, 'pages'));
+    await writeFile(path.join(dir, 'pages', 'local.html'), '<h1>Nested entry</h1>');
+    const db = new Database(':memory:');
+    try {
+      migratePublicFilePublications(db);
+      db.exec('CREATE TABLE test_publish_intents (local_path TEXT, public_path TEXT, revision TEXT)');
+      const store = createSqlitePublicFilePublicationStore(db);
+      const scope = { resourceTeamId: 'ws-personal-1', ownerMemberId: 'wm-personal-1', projectId: 'p1', filePath: 'pages/local.html' };
+      const enqueue = vi.fn((connection: Database.Database, input: {
+        scope: typeof scope; publicationRevision: { slug: string; token: string }; publicFilePath: string;
+      }) => {
+        expect(connection).toBe(db); expect(db.inTransaction).toBe(true);
+        expect(input.scope).toEqual(scope); expect(input.publicFilePath).toBe('index.html');
+        expect(input.publicationRevision).toEqual(store.getRevision(scope));
+        db.prepare('INSERT INTO test_publish_intents VALUES (?, ?, ?)').run(input.scope.filePath, input.publicFilePath, input.publicationRevision.token);
+        if (fail) throw new Error('intent storage unavailable');
+        return { enqueued: 1, skippedInbound: 0 };
+      });
+      vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'synthetic', user: null, configMtimeMs: null });
+      vi.mocked(runVelaResourceCommand).mockImplementation(async args => JSON.stringify(args[0] === 'snapshot'
+        ? { slug: 'confirmed', name: 'local.html', kind: 'project', versionId: 'v1', createdAt: new Date(1).toISOString() }
+        : { id: 'v1', version: 1 }));
+      const api = await startSyncServer(personalContextProvider(), {
+        resolveProjectDir: () => dir, resolveSharedProject: async () => null,
+        publicFilePublicationStore: store,
+        recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, enqueue),
+      });
+      const response = await api.json('/api/projects/p1/files/pages/local.html/publish-public', { method: 'POST' });
+      expect(enqueue).toHaveBeenCalledTimes(1); expect(db.inTransaction).toBe(false);
+      expect(response.status).toBe(fail ? 502 : 200);
+      const commands = vi.mocked(runVelaResourceCommand).mock.calls;
+      expect(commands.map(call => call[0][0])).toEqual(fail ? ['push', 'snapshot', 'snapshot-redact'] : ['push', 'snapshot']);
+      for (const command of commands) expect(command[1]).toBe(scope.resourceTeamId);
+      const current = await api.json('/api/projects/p1/files/pages/local.html/publish-public');
+      if (fail) {
+        expect(response.body.error).toBe('PUBLIC_FILE_PUBLISH_UNAVAILABLE');
+        expect(store.get(scope)).toBeNull(); expect(current.body.publication).toBeNull();
+        expect(db.prepare('SELECT * FROM test_publish_intents').all()).toEqual([]);
+        expect(commands[2]?.[0]).toContain('confirmed');
+      } else {
+        expect(response.body.slug).toBe('confirmed'); expect(current.body.publication.slug).toBe('confirmed');
+        expect(db.prepare('SELECT * FROM test_publish_intents').all()).toEqual([
+          { local_path: scope.filePath, public_path: 'index.html', revision: store.getRevision(scope)!.token },
+        ]);
+      }
+    } finally { db.close(); }
   });
 
   it.each([false, true])('publishes a public file from a personal workspace; fingerprint failure=%s', async (fingerprintFailure) => {
