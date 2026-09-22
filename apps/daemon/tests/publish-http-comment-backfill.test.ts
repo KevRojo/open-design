@@ -8,8 +8,9 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { closeDatabase, openDatabase, insertProject, insertConversation, upsertPreviewComment, getWorkspaceProjectByProjectId } from '../src/db.js';
 import { createCollabRuntime } from '../src/collab/runtime.js';
 import { registerCollabSyncRoutes } from '../src/routes/collab-sync.js';
-import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
+import { createPublicSharePublishingFixture, fixtureShareSlug } from './public-share-publishing-fixture.js';
 import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
+import { readPublishedCommentBackfill } from '../src/collab/published-comment-backfill-state.js';
 import { enqueuePublishedFileComments } from '../src/collab/published-file-comment-backfill.js';
 import { createCommentRelayOutboxStore, commentRelayLocalBindingMatches } from '../src/collab/comment-relay-outbox.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
@@ -55,9 +56,10 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
     vi.mocked(runVelaResourceCommand).mockImplementation(async args => JSON.stringify(args[0] === 'snapshot'
       ? { slug: 'stable-alias', name: 'local.html', kind: 'project', versionId: 'v1', createdAt: new Date(1).toISOString() }
       : { id: 'v1', version: 1 }));
+    const transportCommands: string[][] = [];
     registerCollabSyncRoutes(app, {
       collab: runtime, publicFilePublicationStore: store,
-      recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, enqueuePublishedFileComments),
+      ...createPublicSharePublishingFixture(db, store, runVelaResourceCommand, enqueuePublishedFileComments, { commands: transportCommands }),
       verifyWorkspaceRequest: async req => req.get('x-od-workspace-id') === 'w' && req.get('x-od-workspace-member-id') === 'owner' ? context : null,
       resolveSharedProject: async () => null, resolveSharedProjectOwner: async () => null,
       resolveProjectDir: () => root,
@@ -72,15 +74,19 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
     expect(response.status).toBe(fail ? 502 : 200);
     expect(db.inTransaction).toBe(false);
     const commands = vi.mocked(runVelaResourceCommand).mock.calls;
-    expect(commands.map(call => call[0][0])).toEqual(fail ? ['push', 'snapshot', 'snapshot-redact'] : ['push', 'snapshot']);
+    expect(commands.map(call => call[0][0])).toEqual(['push']);
+    expect(transportCommands.map(args => args.slice(0, 2).join(' '))).toEqual(['resource push', 'share publish']);
     expect(commands.every(call => call[1] === 'w')).toBe(true);
     const scope = { resourceTeamId: 'w', ownerMemberId: 'owner', projectId: 'p', filePath: 'pages/local.html' };
+    const subject = { projectId: 'p', workspaceId: 'w', workspaceMemberId: 'owner', filePath: scope.filePath };
     if (fail) {
+      expect(readPublishedCommentBackfill(db, subject)).toBeUndefined();
       expect(body).toMatchObject({ error: 'PUBLIC_FILE_PUBLISH_UNAVAILABLE' });
       expect(store.get(scope)).toBeNull(); expect(queue.count()).toBe(0);
       expect(db.prepare('SELECT * FROM comment_relay_publication_mappings').all()).toEqual([]);
     } else {
-      expect(body).toMatchObject({ slug: 'stable-alias' });
+      expect(body).toMatchObject({ status: 'published', receipt: { slug: fixtureShareSlug } });
+      expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: 'pending' });
       const rows = queue.listDue(Date.now());
       expect(rows.map(row => row.comment.id)).toEqual(['first', 'second']);
       for (const row of rows) {
@@ -118,6 +124,7 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
       try {
         await relay.flushPendingComments();
         expect(delivered).toEqual([]); expect(recoveredQueue.count()).toBe(2);
+        expect(readPublishedCommentBackfill(reopened, subject)).toMatchObject({ state: 'failed', retryable: true });
         expect(recoveredStore.getRevision(scope)).toEqual(revision);
         offline = false;
         await relay.flushPendingComments();
@@ -125,6 +132,7 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
           id, note: id, memberId: 'original-author', filePath: 'index.html',
         })));
         expect(recoveredQueue.count()).toBe(0);
+        expect(readPublishedCommentBackfill(reopened, subject)).toMatchObject({ state: 'succeeded', retryable: false });
         await relay.flushPendingComments(); expect(delivered).toHaveLength(2);
       } finally { relay.dispose(); }
     }
