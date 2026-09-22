@@ -1933,6 +1933,7 @@ export const tr: Dict = {
   'designs.emptyNoMatch': 'Hiçbir proje aramanızla örtüşmedi.',
   'designs.deleteTitle': 'Projeyi sil',
   'designs.deleteConfirm': '"{name}"’i sil?',
+  'designs.deleteActiveShares': "Bu projede {count} sayfa paylaşılıyor. Silindiğinde paylaşım bağlantıları devre dışı kalır ve ziyaretçiler bunları artık açamaz.",
   'designs.cardFreeform': 'serbest stil',
   'designs.badgeLive': 'Canlı',
   'designs.liveArtifactBadgesAria': 'Canlı artifact rozetleri',

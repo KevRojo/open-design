@@ -1933,6 +1933,7 @@ export const ja: Dict = {
   'designs.emptyNoMatch': '検索に一致するプロジェクトがありません。',
   'designs.deleteTitle': 'プロジェクトを削除',
   'designs.deleteConfirm': '"{name}" を削除しますか？',
+  'designs.deleteActiveShares': "このプロジェクトでは {count} ページを共有しています。削除すると共有リンクが無効になり、訪問者は開けなくなります。",
   'designs.cardFreeform': 'フリーフォーム',
   'designs.badgeLive': 'ライブ',
   'designs.liveArtifactBadgesAria': 'ライブアーティファクトのバッジ',

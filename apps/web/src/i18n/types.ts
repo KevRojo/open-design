@@ -2483,6 +2483,7 @@ export interface Dict {
   'designs.emptyNoMatch': string;
   'designs.deleteTitle': string;
   'designs.deleteConfirm': string;
+  'designs.deleteActiveShares': string;
   'designs.cardFreeform': string;
   'designs.badgeLive': string;
   'designs.liveArtifactBadgesAria': string;

@@ -1933,6 +1933,7 @@ export const th: Dict = {
   'designs.emptyNoMatch': 'ไม่พบโปรเจกต์',
   'designs.deleteTitle': 'ลบโปรเจกต์',
   'designs.deleteConfirm': 'ลบ "{name}"?',
+  'designs.deleteActiveShares': "โปรเจกต์นี้มี {count} หน้าที่กำลังแชร์ การลบจะทำให้ลิงก์แชร์ใช้ไม่ได้ และผู้เข้าชมจะเปิดไม่ได้อีก",
   'designs.cardFreeform': 'ฟรีฟอร์ม',
   'designs.badgeLive': 'สด',
   'designs.liveArtifactBadgesAria': 'ป้ายกำกับ',

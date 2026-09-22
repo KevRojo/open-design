@@ -1940,6 +1940,7 @@ export const ar: Dict = {
   'designs.emptyNoMatch': 'لا توجد مشاريع تطابق بحثك.',
   'designs.deleteTitle': 'حذف المشروع',
   'designs.deleteConfirm': 'هل تريد حذف "{name}"؟',
+  'designs.deleteActiveShares': "تتم مشاركة {count} صفحات من هذا المشروع. سيؤدي حذفه إلى تعطيل روابط المشاركة، ولن يتمكن الزوار من فتحها.",
   'designs.cardFreeform': 'شكل حر',
   'designs.badgeLive': 'مباشر',
   'designs.liveArtifactBadgesAria': 'شارات العناصر المباشرة',

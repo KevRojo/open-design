@@ -15,12 +15,14 @@ import { useT } from '../../i18n';
  */
 export function ProjectDeleteConfirmDialog({
   projectName,
+  activeShareCount = null,
   pending,
   failed,
   onCancel,
   onConfirm,
 }: {
   projectName: string;
+  activeShareCount?: number | null;
   pending: boolean;
   failed: boolean;
   onCancel: () => void;
@@ -43,6 +45,9 @@ export function ProjectDeleteConfirmDialog({
     >
       <DialogTitle id={titleId}>{t('designs.deleteTitle')}</DialogTitle>
       <DialogDescription>{t('designs.deleteConfirm', { name: projectName })}</DialogDescription>
+      {activeShareCount !== null && Number.isSafeInteger(activeShareCount) && activeShareCount > 0 ? (
+        <DialogDescription>{t('designs.deleteActiveShares', { count: activeShareCount })}</DialogDescription>
+      ) : null}
       {failed ? (
         <p className="recent-projects__card-menu-error" role="alert">
           {t('ds.actionFailed')}

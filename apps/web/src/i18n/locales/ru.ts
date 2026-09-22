@@ -1933,6 +1933,7 @@ export const ru: Dict = {
   'designs.emptyNoMatch': 'Нет проектов, соответствующих вашему поиску.',
   'designs.deleteTitle': 'Удалить проект',
   'designs.deleteConfirm': 'Удалить «{name}»?',
+  'designs.deleteActiveShares': "В этом проекте открыто для общего доступа страниц: {count}. После удаления ссылки перестанут действовать, и посетители не смогут их открыть.",
   'designs.cardFreeform': 'произвольная форма',
   'designs.badgeLive': 'Активно',
   'designs.liveArtifactBadgesAria': 'Бейджи live-артефактов',

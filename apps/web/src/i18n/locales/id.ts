@@ -1933,6 +1933,7 @@ export const id: Dict = {
   'designs.emptyNoMatch': 'Tidak ada proyek yang cocok dengan pencarianmu.',
   'designs.deleteTitle': 'Hapus proyek',
   'designs.deleteConfirm': 'Hapus "{name}"?',
+  'designs.deleteActiveShares': "Proyek ini memiliki {count} halaman yang dibagikan. Menghapusnya akan menonaktifkan tautan berbagi, sehingga pengunjung tidak dapat membukanya lagi.",
   'designs.cardFreeform': 'Bebas',
   'designs.badgeLive': 'Live',
   'designs.liveArtifactBadgesAria': 'Badge live artifact',

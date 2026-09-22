@@ -1933,6 +1933,7 @@ export const ko: Dict = {
   'designs.emptyNoMatch': '검색어와 일치하는 프로젝트가 없습니다.',
   'designs.deleteTitle': '프로젝트 삭제',
   'designs.deleteConfirm': '"{name}" 프로젝트를 삭제하시겠습니까?',
+  'designs.deleteActiveShares': "이 프로젝트에서 {count}개 페이지를 공유 중입니다. 삭제하면 공유 링크가 무효화되어 방문자가 더 이상 열 수 없습니다.",
   'designs.cardFreeform': '자유 양식',
   'designs.badgeLive': '라이브',
   'designs.liveArtifactBadgesAria': '라이브 아티팩트 배지',

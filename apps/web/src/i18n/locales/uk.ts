@@ -1933,6 +1933,7 @@ export const uk: Dict = {
   'designs.emptyNoMatch': 'Проектів, що відповідають пошуку, не знайдено.',
   'designs.deleteTitle': 'Видалити проект',
   'designs.deleteConfirm': 'Видалити "{name}"?',
+  'designs.deleteActiveShares': "У цьому проєкті відкрито для спільного доступу сторінок: {count}. Після видалення посилання перестануть діяти, і відвідувачі не зможуть їх відкрити.",
   'designs.cardFreeform': 'власний варіант',
   'designs.badgeLive': 'Наживо',
   'designs.liveArtifactBadgesAria': 'Мітки live-артефакту',

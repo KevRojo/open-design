@@ -1940,6 +1940,7 @@ export const fa: Dict = {
   'designs.emptyNoMatch': 'هیچ پروژه‌ای با جستجوی شما مطابقت ندارد.',
   'designs.deleteTitle': 'حذف پروژه',
   'designs.deleteConfirm': 'آیا «{name}» حذف شود؟',
+  'designs.deleteActiveShares': "در این پروژه {count} صفحه به اشتراک گذاشته شده است. با حذف آن، پیوندهای اشتراک غیرفعال می‌شوند و بازدیدکنندگان دیگر نمی‌توانند آن‌ها را باز کنند.",
   'designs.cardFreeform': 'آزاد',
   'designs.badgeLive': 'زنده',
   'designs.liveArtifactBadgesAria': 'نشان‌های مصنوعات زنده',

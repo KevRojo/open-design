@@ -2025,6 +2025,7 @@ export const zhCN: Dict = {
   "designs.emptyNoMatch": "没有匹配的项目。",
   "designs.deleteTitle": "删除项目",
   "designs.deleteConfirm": "确定删除「{name}」？",
+  'designs.deleteActiveShares': "项目里有 {count} 个页面正在分享，删除后分享链接将失效，访问者无法再打开。",
   "designs.cardFreeform": "自由设计",
   "designs.badgeLive": "实时",
   "designs.liveArtifactBadgesAria": "实时看板标记",

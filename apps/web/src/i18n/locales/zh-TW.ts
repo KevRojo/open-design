@@ -2033,6 +2033,7 @@ export const zhTW: Dict = {
   "designs.emptyNoMatch": "沒有符合的專案。",
   "designs.deleteTitle": "刪除專案",
   "designs.deleteConfirm": "確定刪除「{name}」？",
+  'designs.deleteActiveShares': "專案裡有 {count} 個頁面正在分享，刪除後分享連結將失效，訪客無法再開啟。",
   "designs.cardFreeform": "自由設計",
   "designs.badgeLive": "即時",
   "designs.liveArtifactBadgesAria": "即時看板標記",

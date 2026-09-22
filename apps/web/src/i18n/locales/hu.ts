@@ -1933,6 +1933,7 @@ export const hu: Dict = {
   'designs.emptyNoMatch': 'Egy projekt sem felel meg a keresésnek.',
   'designs.deleteTitle': 'Projekt törlése',
   'designs.deleteConfirm': 'Törlöd a(z) „{name}" projektet?',
+  'designs.deleteActiveShares': "A projektben {count} oldal van megosztva. Törléskor a megosztási hivatkozások érvénytelenné válnak, és a látogatók nem tudják megnyitni őket.",
   'designs.cardFreeform': 'szabad formátum',
   'designs.badgeLive': 'Élő',
   'designs.liveArtifactBadgesAria': 'Élő artifact jelvények',

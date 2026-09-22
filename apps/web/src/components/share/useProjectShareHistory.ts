@@ -16,7 +16,7 @@ function isHistory(value: unknown, projectId: string): value is ProjectShareHist
 }
 
 /** Includes stopped bindings. Failed reads are unknown, never "never shared". */
-export function useProjectShareHistory(projectId: string, context: WorkspaceCollabContext | null | undefined, publicationKey: string) {
+export function useProjectShareHistory(projectId: string | undefined, context: WorkspaceCollabContext | null | undefined, publicationKey: string) {
   const generation = currentWorkspaceAccountGeneration();
   const scope = JSON.stringify([projectId, workspaceAccountScopedCacheKey(context), publicationKey]);
   const [result, setResult] = useState<{ scope: string; history: ProjectShareHistoryResponse } | null>(null);
@@ -29,6 +29,7 @@ export function useProjectShareHistory(projectId: string, context: WorkspaceColl
       const account = currentWorkspaceAccountGeneration();
       controller?.abort();
       setResult(null);
+      if (!projectId) return;
       controller = new AbortController();
       void (async () => {
         let value: unknown;

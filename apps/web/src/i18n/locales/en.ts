@@ -1940,6 +1940,7 @@ export const en: Dict = {
   'designs.emptyNoMatch': 'No projects match your search.',
   'designs.deleteTitle': 'Delete project',
   'designs.deleteConfirm': 'Delete "{name}"?',
+  'designs.deleteActiveShares': "This project has {count} pages being shared. Deleting it will disable their share links, and visitors will no longer be able to open them.",
   'designs.cardFreeform': 'freeform',
   'designs.badgeLive': 'Live',
   'designs.liveArtifactBadgesAria': 'Live artifact badges',

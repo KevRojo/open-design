@@ -1933,6 +1933,7 @@ export const ptBR: Dict = {
   'designs.emptyNoMatch': 'Nenhum projeto corresponde à sua busca.',
   'designs.deleteTitle': 'Excluir projeto',
   'designs.deleteConfirm': 'Excluir "{name}"?',
+  'designs.deleteActiveShares': "Este projeto tem {count} páginas compartilhadas. Excluí-lo desativará os links de compartilhamento, e os visitantes não poderão mais abri-los.",
   'designs.cardFreeform': 'livre',
   'designs.badgeLive': 'Ao vivo',
   'designs.liveArtifactBadgesAria': 'Marcadores de artefato live',

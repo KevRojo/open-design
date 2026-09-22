@@ -1933,6 +1933,7 @@ export const it: Dict = {
   'designs.emptyNoMatch': 'Nessun progetto corrisponde alla tua ricerca.',
   'designs.deleteTitle': 'Elimina progetto',
   'designs.deleteConfirm': 'Eliminare « {name} » ?',
+  'designs.deleteActiveShares': "Questo progetto contiene {count} pagine condivise. Eliminandolo, i link di condivisione verranno disattivati e i visitatori non potranno più aprirli.",
   'designs.cardFreeform': 'libero',
   'designs.badgeLive': 'Attivo',
   'designs.liveArtifactBadgesAria': 'Badge artifact live',
