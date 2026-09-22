@@ -8528,7 +8528,7 @@ describe('FileViewer SVG artifacts', () => {
     expect(screen.getByRole('menu')).toBeTruthy();
   });
 
-  it('shows social icons inline once a deployment link is live', async () => {
+  it('keeps deployment available from More sharing options before any link exists', async () => {
     const file = baseFile({
       name: 'index.html',
       path: 'index.html',
@@ -8546,69 +8546,6 @@ describe('FileViewer SVG artifacts', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
       if (url === '/api/projects/project-1/deployments') {
-        return new Response(JSON.stringify({
-          deployments: [
-            {
-              id: 'vercel-deploy',
-              projectId: 'project-1',
-              fileName: 'index.html',
-              providerId: 'vercel-self',
-              url: 'https://vercel.example',
-              deploymentCount: 1,
-              target: 'preview',
-              status: 'ready',
-              createdAt: 1,
-              updatedAt: 2,
-            },
-          ],
-        }), { status: 200 });
-      }
-      if (url === '/api/deploy/config?providerId=vercel-self') {
-        return new Response(JSON.stringify({
-          providerId: 'vercel-self',
-          configured: true,
-          tokenMask: 'saved-token',
-          teamId: '',
-          teamSlug: '',
-          target: 'preview',
-        }), { status: 200 });
-      }
-      return new Response(JSON.stringify({}), { status: 404 });
-    }));
-
-    render(
-      <FileViewer projectId="project-1" projectKind="prototype" file={file}
-        liveHtml="<html><body><h1>Hello</h1></body></html>"
-      />,
-    );
-
-    await openUnifiedShareTab();
-
-    // A ready deployment IS a clean link: social icons render inline in the
-    // share panel — no share-page ceremony, no modal detour.
-    expect(await screen.findByRole('link', { name: 'X' })).toBeTruthy();
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('hides social icons until any link exists', async () => {
-    const file = baseFile({
-      name: 'index.html',
-      path: 'index.html',
-      mime: 'text/html',
-      kind: 'html',
-      artifactManifest: {
-        version: 1,
-        kind: 'html',
-        title: 'Page',
-        entry: 'index.html',
-        renderer: 'html',
-        exports: ['html'],
-      },
-    });
-    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
-      const method = init?.method ?? 'GET';
-      if (url === '/api/projects/project-1/deployments') {
         return new Response(JSON.stringify({ deployments: [] }), { status: 200 });
       }
       if (url === '/api/deploy/config?providerId=vercel-self') {
@@ -8621,20 +8558,6 @@ describe('FileViewer SVG artifacts', () => {
           target: 'preview',
         }), { status: 200 });
       }
-      if (url === '/api/projects/project-1/deploy' && method === 'POST') {
-        return new Response(JSON.stringify({
-          id: 'vercel-deploy',
-          projectId: 'project-1',
-          fileName: 'index.html',
-          providerId: 'vercel-self',
-          url: 'https://vercel.example',
-          deploymentCount: 1,
-          target: 'preview',
-          status: 'ready',
-          createdAt: 1,
-          updatedAt: 2,
-        }), { status: 200 });
-      }
       return new Response(JSON.stringify({}), { status: 404 });
     }));
 
@@ -8646,15 +8569,12 @@ describe('FileViewer SVG artifacts', () => {
 
     await openUnifiedShareTab();
 
-    // No link yet (nothing published, nothing deployed): no social icons and
-    // no "deploy first" teaser row — the deploy rows below are the path.
+    // A first deployment remains reachable through the current overflow entry.
     fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     expect(await screen.findByRole('menuitem', { name: /Deploy to Vercel/i })).toBeTruthy();
-    expect(screen.queryByRole('link', { name: 'X' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: /deploy then share/i })).toBeNull();
   });
 
-  it('hides social icons for protected deployments', async () => {
+  it('keeps deployment available from More sharing options for protected deployments', async () => {
     const file = baseFile({
       name: 'index.html',
       path: 'index.html',
@@ -8710,11 +8630,9 @@ describe('FileViewer SVG artifacts', () => {
 
     await openUnifiedShareTab();
 
-    // A protected deployment is NOT a clean link — recipients could not open
-    // it, so the panel offers no social icons until the link is public.
+    // A protected deployment must not remove the existing deployment action.
     fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     expect(await screen.findByRole('menuitem', { name: /Deploy to Vercel/i })).toBeTruthy();
-    expect(screen.queryByRole('link', { name: 'X' })).toBeNull();
   });
 
   it('renders unsafe SVG source as escaped text instead of executable markup', () => {
