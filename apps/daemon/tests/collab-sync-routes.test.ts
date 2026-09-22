@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
+import { migrateCommentRelayOutbox } from '../src/collab/comment-relay-outbox.js';
 import { createShareAliasReservations } from '../src/collab/share-alias-reservation.js';
 import { createSharePublicationCompletion } from '../src/collab/share-publication-completion.js';
 import { publicShareViewerUrl } from '../src/collab/public-share-viewer-url.js';
@@ -282,6 +284,58 @@ async function invokeThroughProactivePull(
 let server: http.Server | null = null;
 let runtime: CollabRuntime | null = null;
 const tempDirs: string[] = [];
+const publicationDatabases: Database.Database[] = [];
+const fixtureSlug = '93a3c7e6-198d-4b72-9f70-0bbfdf9f9c55';
+
+function publicationBarrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function confirmedShareOutput(args: string[], fault?: 'wrong-version' | 'missing-version') {
+  const versionId = fault === 'missing-version' ? undefined : fault === 'wrong-version' ? 'wrong-upload' : args[args.indexOf('--version-id') + 1];
+  const receipt = { slug: args[args.indexOf('--slug') + 1], versionId, version: 1, publishedAt: 1234,
+    entryPath: args[args.indexOf('--entry-path') + 1] };
+  return JSON.stringify({ status: 'published', ...receipt, receipt, snapshot: { versionId } });
+}
+
+/** Real reservation/receipt validation/completion, with only the CLI transport synthetic. */
+async function publicShareFixture(options: {
+  db?: Database.Database;
+  enqueue?: Parameters<typeof createPublicFilePublicationRecorder>[2];
+  run?: (args: string[]) => Promise<string>;
+} = {}) {
+  const actual = await vi.importActual<typeof import('../src/collab/vela-share-publish.js')>('../src/collab/vela-share-publish.js');
+  vi.mocked(publishReservedVelaShareVersion).mockImplementation(actual.publishReservedVelaShareVersion);
+  const db = options.db ?? new Database(':memory:');
+  if (!options.db) publicationDatabases.push(db);
+  migratePublicFilePublications(db);
+  migrateCommentRelayOutbox(db);
+  const store = createSqlitePublicFilePublicationStore(db);
+  const outbox = createShareBindingOutbox(db);
+  const record = createPublicFilePublicationRecorder(db, store, options.enqueue ?? (() => ({ enqueued: 0, skippedInbound: 0 })));
+  let ids = 0;
+  const sharePublishing: NonNullable<RegisterCollabSyncRoutesDeps['sharePublishing']> = {
+    reservations: createShareAliasReservations(db, () => ids++ === 0 ? fixtureSlug : randomUUID()),
+    outbox,
+    complete: createSharePublicationCompletion(db, record, outbox, true),
+    prepare: async (scope, slug) => ({
+      url: publicShareViewerUrl(scope.projectId, slug, { OD_VELA_WEB_URL: 'https://web.example.test' }),
+      run: async args => {
+        if (options.run) return options.run(args);
+        if (args[0] === 'resource') return runVelaResourceCommand(args.slice(1), scope.resourceTeamId);
+        if (args[0] !== 'share') throw new Error('unexpected command');
+        if (args[1] === 'stop') return JSON.stringify({ status: 'stopped', slug, projectId: scope.projectId });
+        if (args[1] !== 'publish') throw new Error('unexpected share command');
+        return confirmedShareOutput(args);
+      },
+    }),
+    retry: vi.fn(),
+  };
+  return { publicFilePublicationStore: store, sharePublishing };
+}
+
 
 afterEach(async () => {
   vi.mocked(runVelaResourceCommand).mockReset();
@@ -294,6 +348,7 @@ afterEach(async () => {
     server = null;
     await new Promise<void>((resolve) => toClose.close(() => resolve()));
   }
+  while (publicationDatabases.length) publicationDatabases.pop()!.close();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!;
     await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -1846,6 +1901,7 @@ describe('collab sync routes', () => {
         : { id: 'v1', version: 1 }));
       const api = await startSyncServer(personalContextProvider(), {
         resolveProjectDir: () => dir, resolveSharedProject: async () => null,
+        ...await publicShareFixture({ db }),
         publicFilePublicationStore: store, shareContentFingerprints: fingerprints,
       });
       const endpoint = '/api/projects/p1/files/pages/local.html/publish-public';
@@ -1858,7 +1914,7 @@ describe('collab sync routes', () => {
       const unknown = await api.json(endpoint);
       expect.soft(unknown.body.freshness).toBe('unknown');
       expect(unknown.body.publication).toEqual(publication);
-      expect(vi.mocked(runVelaResourceCommand).mock.calls.map(call => call[0][0])).toEqual(['push', 'snapshot']);
+      expect(vi.mocked(runVelaResourceCommand).mock.calls.map(call => call[0][0])).toEqual(['push']);
     } finally { db.close(); }
   });
 
@@ -1936,23 +1992,22 @@ describe('collab sync routes', () => {
         : { id: 'v1', version: 1 }));
       const api = await startSyncServer(personalContextProvider(), {
         resolveProjectDir: () => dir, resolveSharedProject: async () => null,
-        publicFilePublicationStore: store,
-        recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, enqueue),
+        ...await publicShareFixture({ db, enqueue }),
       });
       const response = await api.json('/api/projects/p1/files/pages/local.html/publish-public', { method: 'POST' });
       expect(enqueue).toHaveBeenCalledTimes(1); expect(db.inTransaction).toBe(false);
       expect(response.status).toBe(fail ? 502 : 200);
       const commands = vi.mocked(runVelaResourceCommand).mock.calls;
-      expect(commands.map(call => call[0][0])).toEqual(fail ? ['push', 'snapshot', 'snapshot-redact'] : ['push', 'snapshot']);
+      expect(commands.map(call => call[0][0])).toEqual(['push']);
       for (const command of commands) expect(command[1]).toBe(scope.resourceTeamId);
       const current = await api.json('/api/projects/p1/files/pages/local.html/publish-public');
       if (fail) {
         expect(response.body.error).toBe('PUBLIC_FILE_PUBLISH_UNAVAILABLE');
         expect(store.get(scope)).toBeNull(); expect(current.body.publication).toBeNull();
         expect(db.prepare('SELECT * FROM test_publish_intents').all()).toEqual([]);
-        expect(commands[2]?.[0]).toContain('confirmed');
+        // Local storage failure must not revoke the already confirmed remote alias.
       } else {
-        expect(response.body.slug).toBe('confirmed'); expect(current.body.publication.slug).toBe('confirmed');
+        expect(response.body.receipt.slug).toBe(fixtureSlug); expect(current.body.publication.slug).toBe(fixtureSlug);
         expect(db.prepare('SELECT * FROM test_publish_intents').all()).toEqual([
           { local_path: scope.filePath, public_path: 'index.html', revision: store.getRevision(scope)!.token },
         ]);
@@ -1981,19 +2036,9 @@ describe('collab sync routes', () => {
       user: null,
       configMtimeMs: null,
     });
-    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
-      if (args[0] === 'snapshot') {
-        return JSON.stringify({
-          slug: 'personal-slug',
-          name: 'index.html',
-          kind: 'project',
-          versionId: 'v1',
-          createdAt: new Date(1).toISOString(),
-        });
-      }
-      return JSON.stringify({ id: 'v1', version: 1 });
-    });
+    vi.mocked(runVelaResourceCommand).mockResolvedValue(JSON.stringify({ id: 'v1', version: 1 }));
     const api = await startSyncServer(personalContextProvider(), {
+      ...await publicShareFixture(),
       resolveProjectDir: () => dir,
       resolveSharedProject: async () => null,
       shareContentFingerprints: { remember, compare: () => 'unknown' },
@@ -2005,16 +2050,15 @@ describe('collab sync routes', () => {
 
     expect(publish.status).toBe(200);
     expect(publish.body).toEqual({
-      url: 'https://hub.example.test/api/v1/public/snapshots/personal-slug/files/index.html',
-      slug: 'personal-slug',
-      fileName: 'index.html',
+      status: 'published', url: `https://web.example.test/artifact/p1/${fixtureSlug}`,
+      receipt: { filePath: 'index.html', slug: fixtureSlug, version: 1, versionId: 'v1', publishedAt: 1234, entryPath: 'index.html' },
     });
     expect(remember).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ resourceTeamId: 'ws-personal-1', projectId: 'p1', filePath: 'index.html' }),
-      { slug: 'personal-slug', token: expect.any(String) },
+      { slug: fixtureSlug, token: expect.any(String) },
       expect.arrayContaining([expect.objectContaining({ file: 'index.html' }), expect.objectContaining({ file: 'style.css', data: expect.anything() })]),
     );
-    expect(vi.mocked(runVelaResourceCommand).mock.calls.map(call => call[0][0])).toEqual(['push', 'snapshot']);
+    expect(vi.mocked(runVelaResourceCommand).mock.calls.map(call => call[0][0])).toEqual(['push']);
     // Every hub call carries the personal workspace's own id as the scope —
     // there is no teamId on this context, and nothing may invent one.
     expect(runVelaResourceCommand).toHaveBeenCalled();
@@ -2024,10 +2068,10 @@ describe('collab sync routes', () => {
 
     // The published link then reads back and clears like any other.
     const current = await api.json('/api/projects/p1/files/index.html/publish-public');
-    expect(current.body.publication?.slug).toBe('personal-slug');
+    expect(current.body.publication?.slug).toBe(fixtureSlug);
     const unpublish = await api.json('/api/projects/p1/files/index.html/publish-public', {
       method: 'DELETE',
-      body: { slug: 'personal-slug' },
+      body: { slug: fixtureSlug },
     });
     expect(unpublish.status).toBe(200);
   });
@@ -2047,7 +2091,7 @@ describe('collab sync routes', () => {
     vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
       if (args[0] === 'snapshot') {
         return JSON.stringify({
-          slug: 'workspace-a-slug',
+          slug: fixtureSlug,
           name: 'index.html',
           kind: 'project',
           versionId: 'v1',
@@ -2074,6 +2118,7 @@ describe('collab sync routes', () => {
     const api = await startSyncServer(
       { current: async () => workspaceA },
       {
+        ...await publicShareFixture(),
         resolveProjectDir: () => dir,
         resolveSharedProject,
       },
@@ -2085,12 +2130,12 @@ describe('collab sync routes', () => {
     const current = await api.json('/api/projects/p1/files/index.html/publish-public');
     const unpublish = await api.json('/api/projects/p1/files/index.html/publish-public', {
       method: 'DELETE',
-      body: { slug: 'workspace-a-slug' },
+      body: { slug: fixtureSlug },
     });
 
     expect(publish.status).toBe(200);
     expect(current.status).toBe(200);
-    expect(current.body.publication?.slug).toBe('workspace-a-slug');
+    expect(current.body.publication?.slug).toBe(fixtureSlug);
     expect(unpublish.status).toBe(200);
     expect(resolveSharedProject).toHaveBeenCalledTimes(3);
     expect(ownershipScopes).toHaveLength(3);
@@ -2215,101 +2260,81 @@ describe('collab sync routes', () => {
     expect(runVelaResourceCommand).not.toHaveBeenCalled();
   });
 
-  it('does not create a public snapshot when no public base URL is configured', async () => {
-    const resolveProjectDir = vi.fn(() => {
-      throw new Error('project dir should not be read');
-    });
-    const api = await startSyncServer(fixedShareContextProvider(true), {
-      resolveProjectDir,
-      resolveSharedProject: async () => null,
-    });
-
-    const res = await api.json('/api/projects/p1/files/index.html/publish-public', {
-      method: 'POST',
-    });
-
-    expect(res.status).toBe(502);
-    expect(res.body.error).toBe('PUBLIC_FILE_URL_UNAVAILABLE');
+  it('does not upload when Viewer preparation fails', async () => {
+    const resolveProjectDir = vi.fn(() => { throw new Error('must not read project'); });
+    const fixture = await publicShareFixture();
+    fixture.sharePublishing.prepare = async () => { throw new Error('Viewer origin unavailable'); };
+    const api = await startSyncServer(fixedShareContextProvider(true), { ...fixture, resolveProjectDir, resolveSharedProject: async () => null });
+    const response = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    expect(response.status).toBe(502);
+    expect(response.body.error).toBe('PUBLIC_SHARE_PREPARATION_UNAVAILABLE');
     expect(resolveProjectDir).not.toHaveBeenCalled();
     expect(runVelaResourceCommand).not.toHaveBeenCalled();
+    expect(publishReservedVelaShareVersion).not.toHaveBeenCalled();
   });
 
-  it('pins each publication to its own push even when another push advances the ref', async () => {
+  it('pins each publication to its own push while retaining one stable alias', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-version-pin-'));
     tempDirs.push(dir);
     await writeFile(path.join(dir, 'index.html'), '<h1>A</h1>');
-    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
-    function barrier() {
-      let resolve!: () => void;
-      const promise = new Promise<void>((done) => { resolve = done; });
-      return { promise, resolve };
-    }
-    const pushedA = barrier();
-    const releaseA = barrier();
+    const pushed = publicationBarrier();
+    const release = publicationBarrier();
     const versions = new Map<string, string>();
-    const snapshots = new Map<string, string>();
-    let head = '';
+    const published: string[][] = [];
     let sequence = 0;
-    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
-      if (args[0] === 'push') {
-        const id = `v${++sequence}`;
-        versions.set(id, await readFile(path.join(args[3]!, 'index.html'), 'utf8'));
-        head = id;
-        if (id === 'v1') { pushedA.resolve(); await releaseA.promise; }
-        return JSON.stringify({ id, version: sequence });
+    const fixture = await publicShareFixture({ run: async args => {
+      if (args[0] === 'resource' && args[1] === 'push') {
+        const version = ++sequence;
+        const id = `v${version}`;
+        versions.set(id, await readFile(path.join(args[4]!, 'index.html'), 'utf8'));
+        if (version === 1) { pushed.resolve(); await release.promise; }
+        return JSON.stringify({ id, version });
       }
-      if (args[0] === 'snapshot') {
-        const position = args.indexOf('--version-id');
-        const id = position >= 0 ? args[position + 1]! : head;
-        const slug = `snapshot-${id}`;
-        snapshots.set(slug, versions.get(id)!);
-        return JSON.stringify({ slug, versionId: id });
-      }
+      if (args[0] === 'share' && args[1] === 'publish') { published.push(args); return confirmedShareOutput(args); }
       throw new Error('unexpected command');
-    });
-    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
-    const a = api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    } });
+    const api = await startSyncServer(fixedShareContextProvider(true), { ...fixture, resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    const endpoint = '/api/projects/p1/files/index.html/publish-public';
+    const a = api.json(endpoint, { method: 'POST' });
     let b: Awaited<typeof a>;
     try {
-      await pushedA.promise;
+      await Promise.race([pushed.promise, a.then(() => { throw new Error('first request ended before upload barrier'); })]);
       await writeFile(path.join(dir, 'index.html'), '<h1>B</h1>');
-      b = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
-    } finally { releaseA.resolve(); }
+      b = await api.json(endpoint, { method: 'POST' });
+    } finally { release.resolve(); }
     const first = await a;
-    expect(first.status).toBe(200);
-    expect(b!.status).toBe(200);
-    expect(snapshots.get(first.body.slug)).toContain('<h1>A</h1>');
-    expect(snapshots.get(b!.body.slug)).toContain('<h1>B</h1>');
-    for (const [args, workspace] of vi.mocked(runVelaResourceCommand).mock.calls.filter(([args]) => args[0] === 'snapshot')) {
-      expect(args).not.toContain('--ref');
-      expect(args).toContain('--version-id');
-      expect(workspace).toBe('team-1');
-    }
+    expect(first.status).toBe(200); expect(b!.status).toBe(200);
+    expect(first.body.url).toBe(b!.body.url);
+    expect(first.body.receipt.slug).toBe(b!.body.receipt.slug);
+    expect(versions.get(first.body.receipt.versionId)).toContain('<h1>A</h1>');
+    expect(versions.get(b!.body.receipt.versionId)).toContain('<h1>B</h1>');
+    expect(published).toHaveLength(2);
+    for (const args of published) { expect(args).not.toContain('--ref'); expect(args).toContain('--version-id'); }
   });
 
-  it.each(['missing-push-id', 'wrong-snapshot-version', 'missing-snapshot-version'])('rejects %s without replacing a successful publication', async (fault) => {
+  it.each(['missing-push-id', 'wrong-version', 'missing-version'] as const)('rejects %s without replacing a successful publication', async fault => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-version-pin-failure-'));
     tempDirs.push(dir);
     await writeFile(path.join(dir, 'index.html'), '<h1>Keep old publication</h1>');
-    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
     let broken = false;
-    let snapshots = 0;
-    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
-      if (args[0] === 'push') return JSON.stringify(broken && fault === 'missing-push-id' ? { version: 2 } : { id: 'v1', version: 1 });
-      if (args[0] === 'snapshot') {
-        snapshots++;
-        return JSON.stringify({ slug: broken ? 'bad' : 'original', versionId: !broken ? 'v1' : fault === 'wrong-snapshot-version' ? 'v2' : undefined });
+    let publishes = 0;
+    const fixture = await publicShareFixture({ run: async args => {
+      if (args[0] === 'resource' && args[1] === 'push') return JSON.stringify(broken && fault === 'missing-push-id' ? { version: 2 } : { id: 'v1', version: 1 });
+      if (args[0] === 'share' && args[1] === 'publish') {
+        publishes++;
+        return confirmedShareOutput(args, broken && fault !== 'missing-push-id' ? fault : undefined);
       }
       throw new Error('unexpected command');
-    });
-    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
-    const original = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
-    expect(original.status).toBe(200);
+    } });
+    const api = await startSyncServer(fixedShareContextProvider(true), { ...fixture, resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    const endpoint = '/api/projects/p1/files/index.html/publish-public';
+    expect((await api.json(endpoint, { method: 'POST' })).status).toBe(200);
+    const original = await api.json(endpoint);
     broken = true;
-    const failed = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+    const failed = await api.json(endpoint, { method: 'POST' });
     expect(failed.status).toBe(502);
-    expect((await api.json('/api/projects/p1/files/index.html/publish-public')).body.publication).toEqual(original.body);
-    expect(snapshots).toBe(fault === 'missing-push-id' ? 1 : 2);
+    expect((await api.json(endpoint)).body.publication).toEqual(original.body.publication);
+    expect(publishes).toBe(fault === 'missing-push-id' ? 1 : 2);
   });
 
   it('stages root assets relative to the share package rather than the hub root', async () => {
@@ -2333,7 +2358,8 @@ describe('collab sync routes', () => {
       }
       return JSON.stringify({ slug: 'root-assets', versionId: 'v1' });
     });
-    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    const api = await startSyncServer(fixedShareContextProvider(true), { ...await publicShareFixture(),
+        resolveProjectDir: () => dir, resolveSharedProject: async () => null });
     expect((await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' })).status).toBe(200);
     expect(staged?.html).toContain('href="assets/site.css"');
     expect(staged?.html).toContain('src="images/bg.png?q#h"');
@@ -2341,34 +2367,32 @@ describe('collab sync routes', () => {
     expect(staged?.image).toBe('image-bytes');
   });
 
-  it.each([false, true])('preserves a newer publication when old stop returns (same slug: %s)', async (sameSlug) => {
+  it.each([false, true])('preserves a replaced local publication witness when old stop returns (same slug: %s)', async sameSlug => {
     const dir = await mkdtemp(path.join(tmpdir(), 'od-stale-stop-'));
     tempDirs.push(dir);
     await writeFile(path.join(dir, 'index.html'), '<h1>Original</h1>');
-    vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://hub.example.test', controlKey: 'ctrl-test', user: null, configMtimeMs: null });
-    let reached!: () => void;
-    let release!: () => void;
-    const stopping = new Promise<void>(resolve => { reached = resolve; });
-    const stopped = new Promise<void>(resolve => { release = resolve; });
-    let count = 0;
-    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
-      if (args[0] === 'push') return JSON.stringify({ id: `v${++count}`, version: count });
-      if (args[0] === 'snapshot') return JSON.stringify({ slug: sameSlug ? 'A' : count === 1 ? 'A' : 'B', versionId: `v${count}` });
-      if (args[0] === 'snapshot-redact') { reached(); await stopped; return '{}'; }
+    const reached = publicationBarrier();
+    const release = publicationBarrier();
+    const fixture = await publicShareFixture({ run: async args => {
+      if (args[0] === 'resource') return JSON.stringify({ id: 'v1', version: 1 });
+      if (args[1] === 'publish') return confirmedShareOutput(args);
+      if (args[1] === 'stop') { reached.resolve(); await release.promise; return JSON.stringify({ status: 'stopped', projectId: 'p1', slug: fixtureSlug }); }
       throw new Error('unexpected command');
-    });
-    const api = await startSyncServer(fixedShareContextProvider(true), { resolveProjectDir: () => dir, resolveSharedProject: async () => null });
-    expect((await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' })).status).toBe(200);
-    const stop = api.json('/api/projects/p1/files/index.html/publish-public', { method: 'DELETE', body: { slug: 'A' } });
-    let newer: Awaited<typeof stop>;
+    } });
+    const api = await startSyncServer(fixedShareContextProvider(true), { ...fixture, resolveProjectDir: () => dir, resolveSharedProject: async () => null });
+    const endpoint = '/api/projects/p1/files/index.html/publish-public';
+    expect((await api.json(endpoint, { method: 'POST' })).status).toBe(200);
+    const stop = api.json(endpoint, { method: 'DELETE', body: { slug: fixtureSlug } });
+    const slug = sameSlug ? fixtureSlug : randomUUID();
+    const newer = { slug, fileName: 'index.html', url: publicShareViewerUrl('p1', slug, { OD_VELA_WEB_URL: 'https://web.example.test' }) };
     try {
-      await stopping;
-      newer = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
-    } finally { release(); }
+      await Promise.race([reached.promise, stop.then(() => { throw new Error('stop ended before barrier'); })]);
+      // Explicit external witness replacement, not an ordinary update changing the stable alias.
+      fixture.publicFilePublicationStore.set({ resourceTeamId: 'team-1', ownerMemberId: 'wm-1', projectId: 'p1', filePath: 'index.html' }, newer);
+    } finally { release.resolve(); }
     expect((await stop).status).toBe(200);
-    expect(newer!.status).toBe(200);
-    expect((await api.json('/api/projects/p1/files/index.html/publish-public')).body.publication).toEqual(newer!.body);
-    // This test protects local management state only, not cloud operation order.
+    expect((await api.json(endpoint)).body.publication).toEqual(newer);
+    // Local revision CAS only; this does not prove remote operation ordering.
   });
 
   it('hydrates and clears public file publication state', async () => {
@@ -2382,19 +2406,9 @@ describe('collab sync routes', () => {
       user: null,
       configMtimeMs: null,
     });
-    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
-      if (args[0] === 'snapshot') {
-        return JSON.stringify({
-          slug: 'public-slug',
-          name: 'index.html',
-          kind: 'project',
-          versionId: 'v1',
-          createdAt: new Date(1).toISOString(),
-        });
-      }
-      return JSON.stringify({ id: 'v1', version: 1 });
-    });
+    vi.mocked(runVelaResourceCommand).mockResolvedValue(JSON.stringify({ id: 'v1', version: 1 }));
     const api = await startSyncServer(fixedShareContextProvider(true), {
+      ...await publicShareFixture(),
       resolveProjectDir: () => dir,
       resolveSharedProject: async () => null,
     });
@@ -2403,17 +2417,20 @@ describe('collab sync routes', () => {
     const current = await api.json('/api/projects/p1/files/index.html/publish-public');
     const unpublish = await api.json('/api/projects/p1/files/index.html/publish-public', {
       method: 'DELETE',
-      body: { slug: 'public-slug' },
+      body: { slug: fixtureSlug },
     });
     const afterUnpublish = await api.json('/api/projects/p1/files/index.html/publish-public');
 
     const publication = {
-      url: 'https://hub.example.test/api/v1/public/snapshots/public-slug/files/index.html',
-      slug: 'public-slug',
+      url: `https://web.example.test/artifact/p1/${fixtureSlug}`,
+      slug: fixtureSlug,
       fileName: 'index.html',
     };
     expect(publish.status).toBe(200);
-    expect(publish.body).toEqual(publication);
+    expect(publish.body).toEqual({
+      status: 'published', url: `https://web.example.test/artifact/p1/${fixtureSlug}`,
+      receipt: { filePath: 'index.html', slug: fixtureSlug, version: 1, versionId: 'v1', publishedAt: 1234, entryPath: 'index.html' },
+    });
     expect(current.body.publication).toEqual(publication);
     expect(unpublish.status).toBe(200);
     expect(afterUnpublish.body.publication).toBeNull();
@@ -2430,23 +2447,13 @@ describe('collab sync routes', () => {
       user: null,
       configMtimeMs: null,
     });
-    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
-      if (args[0] === 'snapshot') {
-        return JSON.stringify({
-          slug: 'public-slug',
-          name: 'index.html',
-          kind: 'project',
-          versionId: 'v1',
-          createdAt: new Date(1).toISOString(),
-        });
-      }
-      return JSON.stringify({ id: 'v1', version: 1 });
-    });
+    vi.mocked(runVelaResourceCommand).mockResolvedValue(JSON.stringify({ id: 'v1', version: 1 }));
     // Production injects resolveProjectDir as an async resolver (it awaits
     // ensureProject before returning the share dir). The handler must await it;
     // otherwise the raw Promise reaches realpath and the owner gets a spurious
     // FILE_UNAVAILABLE even though the file is present and readable.
     const api = await startSyncServer(fixedShareContextProvider(true), {
+      ...await publicShareFixture(),
       resolveProjectDir: async () => dir,
       resolveSharedProject: async () => null,
     });
@@ -2455,9 +2462,8 @@ describe('collab sync routes', () => {
 
     expect(publish.status).toBe(200);
     expect(publish.body).toEqual({
-      url: 'https://hub.example.test/api/v1/public/snapshots/public-slug/files/index.html',
-      slug: 'public-slug',
-      fileName: 'index.html',
+      status: 'published', url: `https://web.example.test/artifact/p1/${fixtureSlug}`,
+      receipt: { filePath: 'index.html', slug: fixtureSlug, version: 1, versionId: 'v1', publishedAt: 1234, entryPath: 'index.html' },
     });
   });
 
@@ -2475,7 +2481,8 @@ describe('collab sync routes', () => {
       configMtimeMs: null,
     });
     const api = await startSyncServer(fixedShareContextProvider(true), {
-      resolveProjectDir: () => dir,
+      ...await publicShareFixture(),
+        resolveProjectDir: () => dir,
       resolveSharedProject: async () => null,
     });
 
