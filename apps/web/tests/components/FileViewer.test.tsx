@@ -7056,7 +7056,11 @@ describe('FileViewer SVG artifacts', () => {
       // Located by the explanation it carries, not by a testid the fix added —
       // so this spec still finds the pre-fix help (nested in the publish row)
       // and goes red on the behavior rather than on a missing hook.
-      const help = await screen.findByLabelText(/Only a single file can be shared for now/i);
+      // chain1-publish G4: the stale "only a single file / local assets not
+      // supported" sentence was deleted from this copy (contradicted the
+      // current multi-resource share); the help now reads its remaining,
+      // still-accurate sentence.
+      const help = await screen.findByLabelText(/Anyone with the link can view it online/i);
       // It is NOT inside the actionable publish row.
       expect(help.closest('[role="menuitem"]')).toBeNull();
 
@@ -13569,9 +13573,12 @@ describe('FileViewer tweaks toolbar', () => {
         />,
       );
       const times = Array.from(document.querySelectorAll('.comment-side-time')).map((node) => node.textContent);
+      // O7: the hour bucket is keyed on calendar day, not <24h elapsed — the
+      // 23h-ago 'hours' comment crosses this fake clock's midnight, so it now
+      // reads "昨天" (common.yesterday) instead of "N 小时前".
       expect(times).toEqual([
         'common.justNow', 'common.minutesAgo', 'common.minutesAgo', 'common.hoursAgo',
-        'common.hoursAgo', 'common.minutesAgo', 'common.minutesAgo',
+        'common.yesterday', 'common.minutesAgo', 'common.minutesAgo',
       ]);
     } finally {
       vi.useRealTimers();
@@ -15157,7 +15164,11 @@ describe('LiveArtifactRefreshHistoryPanel', () => {
 
   it('keeps D1–D4 marker and deck-page presentation on the rendered selectors', () => {
     const css = readFileSync(join(process.cwd(), 'src/styles/viewer/core.css'), 'utf8');
-    expect(css).toMatch(/\.comment-saved-pin,\s*\.comment-active-pin[\s\S]*?width: 20px;[\s\S]*?height: 20px;[\s\S]*?border: 0;[\s\S]*?border-radius: 50% 50% 50% 4px;[\s\S]*?background: #282828;[\s\S]*?font-size: 10px;[\s\S]*?font-weight: 600;[\s\S]*?box-shadow: 0 0 0 2px #FFFFFF;/);
+    // chain4-owner 4.2b: 20px/weight 600/white ring -> 28px/weight 500/no
+    // ring; background is now set per-author inline (commentAuthorAvatarColor),
+    // so the base rule only keeps the #282828 fallback for anchor-lost pins
+    // that opt out of the inline color.
+    expect(css).toMatch(/\.comment-saved-pin,\s*\.comment-active-pin[\s\S]*?width: 28px;[\s\S]*?height: 28px;[\s\S]*?border: 0;[\s\S]*?border-radius: 50% 50% 50% 4px;[\s\S]*?background: #282828;[\s\S]*?font-size: 12px;[\s\S]*?font-weight: 500;/);
     expect(css).toMatch(/\.comment-saved-marker--lost \.comment-saved-pin[\s\S]*?border: 1px dashed #888888;[\s\S]*?background: #FFFFFF;[\s\S]*?color: #666666;[\s\S]*?box-shadow: none;/);
     expect(css).toMatch(/\.comment-side-slide[\s\S]*?padding-left: 28px;[\s\S]*?color: #8A5A12;[\s\S]*?font-size: 12px;[\s\S]*?line-height: 18px;/);
   });
