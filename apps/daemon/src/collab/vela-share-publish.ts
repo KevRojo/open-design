@@ -20,26 +20,34 @@ export async function publishVelaShareVersion(
   run: typeof runVelaCommand = runVelaCommand,
 ): Promise<{ slug: string; version: number; publishedAt: number; entryPath: string }> {
   try {
+    const request = Object.freeze({ ...input });
+    // Blank versionId makes the Go command fall back to a mutable ref; blank
+    // workspace can similarly select ambient scope. Refuse before spawning.
+    const required = [request.workspaceId, request.projectId, request.resourceId,
+      request.slug, request.sourceKey, request.entryPath, request.name, request.versionId];
+    if (required.some(value => typeof value !== 'string' || !value.trim())) {
+      throw new Error('missing publish identity');
+    }
     const stdout = await run([
-      'share', 'publish', input.resourceId,
-      '--project-id', input.projectId,
-      '--slug', input.slug,
-      '--source-key', input.sourceKey,
-      '--entry-path', input.entryPath,
-      '--name', input.name,
-      '--version-id', input.versionId,
+      'share', 'publish', request.resourceId,
+      '--project-id', request.projectId,
+      '--slug', request.slug,
+      '--source-key', request.sourceKey,
+      '--entry-path', request.entryPath,
+      '--name', request.name,
+      '--version-id', request.versionId,
       '--json',
-    ], { ...velaWorkspaceCommandOptions(input.workspaceId), timeoutMs: 30_000 });
+    ], { ...velaWorkspaceCommandOptions(request.workspaceId), timeoutMs: 30_000 });
     const value: unknown = JSON.parse(stdout);
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid receipt');
     const record = value as Record<string, unknown>;
     const snapshot = record.snapshot;
-    if (record.slug !== input.slug || record.entryPath !== input.entryPath
+    if (record.slug !== request.slug || record.entryPath !== request.entryPath
       || typeof record.version !== 'number' || !Number.isSafeInteger(record.version) || record.version < 1
       || typeof record.publishedAt !== 'number' || !Number.isSafeInteger(record.publishedAt) || record.publishedAt < 0
       || !snapshot || typeof snapshot !== 'object' || !('versionId' in snapshot)
-      || snapshot.versionId !== input.versionId) throw new Error('mismatched receipt');
-    return { slug: input.slug, version: record.version, publishedAt: record.publishedAt, entryPath: input.entryPath };
+      || snapshot.versionId !== request.versionId) throw new Error('mismatched receipt');
+    return { slug: request.slug, version: record.version, publishedAt: record.publishedAt, entryPath: request.entryPath };
   } catch {
     // Child diagnostics can include upstream bodies. No fallback to snapshots
     // or implicit retry: the remote pointer may already have advanced.
