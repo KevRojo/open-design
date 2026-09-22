@@ -16,6 +16,8 @@
  * Pure TypeScript, dependency-free — safe to import from daemon, web, and CLI.
  */
 
+import type { PublicProjectFilePublication } from './collab.js';
+
 /* ------------------------------------------------------------------ *
  * Share addressing
  * ------------------------------------------------------------------ */
@@ -990,4 +992,64 @@ export function shareEntryPresentation(input: {
   }
   // unknown: the link works, but nothing affirmative may be claimed about it.
   return { appearance: 'plain', canCopyLink: true };
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading one file's share state
+ * ------------------------------------------------------------------ */
+
+/**
+ * `GET /api/projects/:projectId/files/:filePath/publish-public`
+ *
+ * Three fields, deliberately independent. Each answers a different question
+ * and each can be absent or unknown on its own:
+ *
+ * - `publication` — the LOCAL record of what was published: the link to show
+ *   and copy. `null` means no local record.
+ * - `status` — whether a share exists and is serving, from the lifecycle
+ *   source of truth.
+ * - `freshness` — whether what is serving still matches current content.
+ *
+ * ## `publication: null` is not `status: 'none'`
+ *
+ * Losing the local record is a gap in what we know, not proof that nothing is
+ * shared. A share registered under this identity can be live and public while
+ * this daemon has no row for it — after a reinstall, a data-dir move, or a
+ * record written before this field existed.
+ *
+ * Collapsing the two makes the UI say "not shared" about a link that is
+ * serving, and takes away the only handle the person had on it. That is the
+ * same failure the `unknown` freshness rule exists to prevent, arriving
+ * through a different door.
+ *
+ * ## A local row does not prove the cloud says `active`
+ *
+ * `publication` is written by this daemon; `status` belongs to the share
+ * lifecycle, which lives on the other side of the network. A stopped share
+ * leaves the local row in place ON PURPOSE, so the same slug can resume.
+ * Deriving `status` from `publication != null` would make `stopped`
+ * unreachable and re-break the thing the four-state enum exists for.
+ *
+ * ## A failed read changes nothing
+ *
+ * On a non-2xx, a caller keeps what it already had: the previously known link
+ * stays on screen and freshness degrades to `unknown`. It must not rewrite
+ * state to `none` — a request that did not answer is not an answer.
+ *
+ * ## Caching
+ *
+ * Scope any cache by identity + project + file, because all three change what
+ * the correct answer is. Invalidate and re-read after a successful publish,
+ * update or stop. Drop the old scope's entries when the identity changes
+ * rather than letting them answer for the new one. The card and the toolbar
+ * read the SAME entry — two independent polls of the same fact would let the
+ * two surfaces disagree on screen.
+ */
+export interface ProjectFilePublicShareResponse {
+  /** Local record of the published link; `null` when we hold none. */
+  publication: PublicProjectFilePublication | null;
+  /** From the lifecycle source, not inferred from `publication`. */
+  status: ShareStatus;
+  /** From a content fingerprint comparison; `unknown` until one is available. */
+  freshness: ShareContentFreshness;
 }
