@@ -243,6 +243,8 @@ export const zhTW: Dict = {
   "libraryPicker.loading": "載入中…",
   "common.save": "儲存",
   'fileViewer.commentSync.sessionMissing': "尚未登入，評論暫停同步，暫時看不到訪客的新評論。",
+  'fileViewer.commentSync.shareStoppedPersonal': "連結已停用，評論暫停同步到分享頁。",
+  'fileViewer.commentSync.shareStoppedTeam': "連結已停用。",
   'fileViewer.shareGuide.tryShare': "試試分享",
   'fileViewer.shareGuide.neverShowAgain': "不再提示",
   'fileViewer.shareGuide.awaitingDesign': "待原圖",

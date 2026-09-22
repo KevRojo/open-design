@@ -235,6 +235,8 @@ export const id: Dict = {
   'libraryPicker.loading': 'Memuat…',
   'common.save': 'Simpan',
   'fileViewer.commentSync.sessionMissing': "Belum masuk. Sinkronisasi komentar dijeda; komentar baru pengunjung sementara tidak terlihat.",
+  'fileViewer.commentSync.shareStoppedPersonal': "Tautan dinonaktifkan. Sinkronisasi komentar ke halaman bersama dijeda.",
+  'fileViewer.commentSync.shareStoppedTeam': "Tautan dinonaktifkan.",
   'fileViewer.shareGuide.tryShare': "Coba bagikan",
   'fileViewer.shareGuide.neverShowAgain': "Jangan tampilkan lagi",
   'fileViewer.shareGuide.awaitingDesign': "Menunggu referensi desain",

@@ -243,6 +243,8 @@ export const zhCN: Dict = {
   "libraryPicker.loading": "加载中…",
   "common.save": "保存",
   'fileViewer.commentSync.sessionMissing': "未登录，评论暂停同步，访客的新评论暂时看不到。",
+  'fileViewer.commentSync.shareStoppedPersonal': "链接已停用，评论暂停同步到分享页。",
+  'fileViewer.commentSync.shareStoppedTeam': "链接已停用。",
   'fileViewer.shareGuide.tryShare': "试试分享",
   'fileViewer.shareGuide.neverShowAgain': "不再提示",
   'fileViewer.shareGuide.awaitingDesign': "待原图",

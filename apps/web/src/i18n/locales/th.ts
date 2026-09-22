@@ -235,6 +235,8 @@ export const th: Dict = {
   'libraryPicker.loading': 'กำลังโหลด…',
   'common.save': 'บันทึก',
   'fileViewer.commentSync.sessionMissing': "ยังไม่ได้เข้าสู่ระบบ การซิงค์ความคิดเห็นหยุดชั่วคราว จึงยังไม่เห็นความคิดเห็นใหม่ของผู้เข้าชม",
+  'fileViewer.commentSync.shareStoppedPersonal': "ลิงก์ถูกปิดใช้งาน การซิงค์ความคิดเห็นไปยังหน้าที่แชร์หยุดชั่วคราว",
+  'fileViewer.commentSync.shareStoppedTeam': "ลิงก์ถูกปิดใช้งาน",
   'fileViewer.shareGuide.tryShare': "ลองแชร์",
   'fileViewer.shareGuide.neverShowAgain': "ไม่ต้องแสดงอีก",
   'fileViewer.shareGuide.awaitingDesign': "รอภาพต้นแบบ",

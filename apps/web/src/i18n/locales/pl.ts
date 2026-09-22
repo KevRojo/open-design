@@ -235,6 +235,8 @@ export const pl: Dict = {
   'libraryPicker.loading': 'Ładowanie…',
   'common.save': 'Zapisz',
   'fileViewer.commentSync.sessionMissing': "Nie zalogowano. Synchronizacja komentarzy jest wstrzymana; nowe komentarze odwiedzających są tymczasowo niewidoczne.",
+  'fileViewer.commentSync.shareStoppedPersonal': "Link jest wyłączony. Synchronizacja komentarzy ze stroną udostępnioną jest wstrzymana.",
+  'fileViewer.commentSync.shareStoppedTeam': "Link jest wyłączony.",
   'fileViewer.shareGuide.tryShare': "Wypróbuj udostępnianie",
   'fileViewer.shareGuide.neverShowAgain': "Nie pokazuj ponownie",
   'fileViewer.shareGuide.awaitingDesign': "Oczekiwanie na projekt",

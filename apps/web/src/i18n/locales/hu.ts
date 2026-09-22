@@ -235,6 +235,8 @@ export const hu: Dict = {
   'libraryPicker.loading': 'Betöltés…',
   'common.save': 'Mentés',
   'fileViewer.commentSync.sessionMissing': "Nincs bejelentkezve. A hozzászólások szinkronizálása szünetel; a látogatók új hozzászólásai átmenetileg nem láthatók.",
+  'fileViewer.commentSync.shareStoppedPersonal': "A hivatkozás le van tiltva. A hozzászólások szinkronizálása a megosztott oldallal szünetel.",
+  'fileViewer.commentSync.shareStoppedTeam': "A hivatkozás le van tiltva.",
   'fileViewer.shareGuide.tryShare': "Megosztás kipróbálása",
   'fileViewer.shareGuide.neverShowAgain': "Ne jelenjen meg újra",
   'fileViewer.shareGuide.awaitingDesign': "Várakozás a látványtervre",

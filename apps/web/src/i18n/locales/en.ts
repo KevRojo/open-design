@@ -235,6 +235,8 @@ export const en: Dict = {
   'libraryPicker.loading': 'Loading…',
   'common.save': 'Save',
   'fileViewer.commentSync.sessionMissing': "Signed out. Comment sync is paused; new visitor comments are temporarily unavailable.",
+  'fileViewer.commentSync.shareStoppedPersonal': "The link is disabled. Comment sync to the shared page is paused.",
+  'fileViewer.commentSync.shareStoppedTeam': "The link is disabled.",
   'fileViewer.shareGuide.tryShare': "Try sharing",
   'fileViewer.shareGuide.neverShowAgain': "Don't show again",
   'fileViewer.shareGuide.awaitingDesign': "Awaiting design reference",

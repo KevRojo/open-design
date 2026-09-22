@@ -235,6 +235,8 @@ export const ru: Dict = {
   'libraryPicker.loading': 'Загрузка…',
   'common.save': 'Сохранить',
   'fileViewer.commentSync.sessionMissing': "Вы не вошли в аккаунт. Синхронизация комментариев приостановлена; новые комментарии посетителей временно не видны.",
+  'fileViewer.commentSync.shareStoppedPersonal': "Ссылка отключена. Синхронизация комментариев со страницей общего доступа приостановлена.",
+  'fileViewer.commentSync.shareStoppedTeam': "Ссылка отключена.",
   'fileViewer.shareGuide.tryShare': "Попробовать поделиться",
   'fileViewer.shareGuide.neverShowAgain': "Больше не показывать",
   'fileViewer.shareGuide.awaitingDesign': "Ожидание исходного дизайна",

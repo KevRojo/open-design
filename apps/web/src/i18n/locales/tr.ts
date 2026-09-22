@@ -235,6 +235,8 @@ export const tr: Dict = {
   'libraryPicker.loading': 'Yükleniyor…',
   'common.save': 'Kaydet',
   'fileViewer.commentSync.sessionMissing': "Oturum kapalı. Yorum eşitlemesi duraklatıldı; ziyaretçilerin yeni yorumları geçici olarak görünmüyor.",
+  'fileViewer.commentSync.shareStoppedPersonal': "Bağlantı devre dışı. Paylaşılan sayfaya yorum eşitlemesi duraklatıldı.",
+  'fileViewer.commentSync.shareStoppedTeam': "Bağlantı devre dışı.",
   'fileViewer.shareGuide.tryShare': "Paylaşmayı deneyin",
   'fileViewer.shareGuide.neverShowAgain': "Bir daha gösterme",
   'fileViewer.shareGuide.awaitingDesign': "Tasarım referansı bekleniyor",

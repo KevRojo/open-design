@@ -17290,6 +17290,7 @@ function HtmlViewer({
                         }))} />
                       </SharePanelHeader>
                       <ShareTab
+                        publicationStatus={projectShareHistory?.publications.find(publication => publication.sourceFilePath === file.name)?.status ?? null}
                         menuOrigin={menuOrigin}
                         workspaceContext={workspaceContext}
                         t={t}

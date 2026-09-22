@@ -29,6 +29,7 @@ function PublishProgressFrame({ value, label, children }: { value: number | null
 
 export function ShareTab({
   menuOrigin,
+  publicationStatus = null,
   workspaceContext,
   t,
   shareAccess,
@@ -58,6 +59,8 @@ export function ShareTab({
   shareLinkStatusHint,
 }: {
   menuOrigin: 'toolbar' | 'artifact-card';
+  /** Exact file status from authoritative project share-state, not local URL presence. */
+  publicationStatus?: 'active' | 'stopped' | null;
   workspaceContext: WorkspaceCollabContext | null;
   t: ReturnType<typeof useT>;
   shareAccess: 'private' | 'workspace';
@@ -109,6 +112,13 @@ export function ShareTab({
 
   return (
                       <div className={`chrome-unified-panel chrome-unified-panel--share ${styles.panel}`}>
+                      {publicationStatus === 'stopped' && workspaceContext ? (
+                        <p className={styles.publishHint} role="status">
+                          {workspaceContext.workspaceType === 'personal'
+                            ? t('fileViewer.commentSync.shareStoppedPersonal')
+                            : t('fileViewer.commentSync.shareStoppedTeam')}
+                        </p>
+                      ) : null}
                       {canPublishPublic ? (
                       <>
                       {filePublished && publishProgress !== null ? (

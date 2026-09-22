@@ -235,6 +235,8 @@ export const ar: Dict = {
   'libraryPicker.loading': 'جارٍ التحميل…',
   'common.save': 'حفظ',
   'fileViewer.commentSync.sessionMissing': "لم تسجّل الدخول. مزامنة التعليقات متوقفة مؤقتًا؛ تعليقات الزوار الجديدة غير ظاهرة حاليًا.",
+  'fileViewer.commentSync.shareStoppedPersonal': "الرابط معطّل. مزامنة التعليقات مع الصفحة المشتركة متوقفة مؤقتًا.",
+  'fileViewer.commentSync.shareStoppedTeam': "الرابط معطّل.",
   'fileViewer.shareGuide.tryShare': "جرّب المشاركة",
   'fileViewer.shareGuide.neverShowAgain': "عدم الإظهار مجددًا",
   'fileViewer.shareGuide.awaitingDesign': "بانتظار التصميم الأصلي",

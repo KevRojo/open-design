@@ -1542,27 +1542,3 @@ function linkedMobilePageHtml(
   </body>
 </html>`;
 }
-
-function deckHtml(): string {
-  return `<!doctype html>
-<html>
-  <body>
-    <section class="slide" data-od-id="slide-1"><h1>Slide One</h1></section>
-    <section class="slide" data-od-id="slide-2" hidden><h1>Slide Two</h1></section>
-    <script>
-      let active = 0;
-      const slides = Array.from(document.querySelectorAll('.slide'));
-      function render() { slides.forEach((slide, index) => { slide.hidden = index !== active; }); }
-      window.addEventListener('message', (event) => {
-        if (!event.data || event.data.type !== 'od:slide') return;
-        if (event.data.action === 'next') active = Math.min(slides.length - 1, active + 1);
-        if (event.data.action === 'prev') active = Math.max(0, active - 1);
-        render();
-        window.parent.postMessage({ type: 'od:slide-state', active, count: slides.length }, '*');
-      });
-      render();
-      window.parent.postMessage({ type: 'od:slide-state', active, count: slides.length }, '*');
-    </script>
-  </body>
-</html>`;
-}

@@ -235,6 +235,8 @@ export const fa: Dict = {
   'libraryPicker.loading': 'در حال بارگذاری…',
   'common.save': 'ذخیره',
   'fileViewer.commentSync.sessionMissing': "وارد حساب نشده‌اید. همگام‌سازی نظرها موقتاً متوقف است؛ نظرهای جدید بازدیدکنندگان فعلاً نمایش داده نمی‌شوند.",
+  'fileViewer.commentSync.shareStoppedPersonal': "پیوند غیرفعال است. همگام‌سازی نظرها با صفحهٔ اشتراکی متوقف شده است.",
+  'fileViewer.commentSync.shareStoppedTeam': "پیوند غیرفعال است.",
   'fileViewer.shareGuide.tryShare': "اشتراک‌گذاری را امتحان کنید",
   'fileViewer.shareGuide.neverShowAgain': "دیگر نمایش نده",
   'fileViewer.shareGuide.awaitingDesign': "در انتظار طرح اصلی",

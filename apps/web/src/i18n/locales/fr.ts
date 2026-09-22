@@ -235,6 +235,8 @@ export const fr: Dict = {
   'libraryPicker.loading': 'Chargement…',
   'common.save': 'Enregistrer',
   'fileViewer.commentSync.sessionMissing': "Vous êtes déconnecté. La synchronisation des commentaires est suspendue ; les nouveaux commentaires des visiteurs sont temporairement invisibles.",
+  'fileViewer.commentSync.shareStoppedPersonal': "Le lien est désactivé. La synchronisation des commentaires avec la page partagée est suspendue.",
+  'fileViewer.commentSync.shareStoppedTeam': "Le lien est désactivé.",
   'fileViewer.shareGuide.tryShare': "Essayer le partage",
   'fileViewer.shareGuide.neverShowAgain': "Ne plus afficher",
   'fileViewer.shareGuide.awaitingDesign': "En attente du modèle",
