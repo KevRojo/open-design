@@ -4637,9 +4637,20 @@ function AppInner() {
   } | null>(null);
   const [, setRouteProjectSnapshotRevision] = useState(0);
   const activeAccountGeneration = currentWorkspaceAccountGeneration();
-  let loadedActiveProject: Project | null = null;
-  if (route.kind === 'project') {
-    const listedProject = projects.find((project) => project.id === route.projectId);
+  // Full-page Settings temporarily hides the project but still edits the
+  // model used on return. Keep its snapshot and exact authority alive for
+  // this session, under the same account/selection fence as closeSettings.
+  const settingsReturnTarget = settingsReturnTargetRef.current;
+  const projectAuthorityRoute = route.kind === 'project'
+    ? route
+    : route.kind === 'home' && route.view === 'settings'
+      && settingsReturnTarget?.accountGeneration === activeAccountGeneration
+      && settingsReturnTarget.identityScopeKey === identityScopeKey
+        ? settingsReturnTarget.route
+        : null;
+  let catalogProject: Project | null = null;
+  if (projectAuthorityRoute) {
+    const listedProject = projects.find((project) => project.id === projectAuthorityRoute.projectId);
     if (listedProject) {
       const previous = routeProjectSnapshotRef.current;
       const openingWitness = projectOpenWorkspaceWitnessRef.current;
@@ -4675,21 +4686,21 @@ function AppInner() {
       };
       if (exactOpeningContext) projectOpenWorkspaceWitnessRef.current = null;
     } else if (
-      routeProjectSnapshotRef.current?.project.id !== route.projectId
+      routeProjectSnapshotRef.current?.project.id !== projectAuthorityRoute.projectId
       || routeProjectSnapshotRef.current.accountGeneration !== activeAccountGeneration
       || (
         appliedProjectListWitness?.scopeKey === currentProjectListScope
         && appliedProjectListWitness.workspaceView === 'all'
         && appliedProjectListWitness.generation
           > routeProjectSnapshotRef.current.capturedAfterListGeneration
-        && !appliedProjectListWitness.projectIds.has(route.projectId)
+        && !appliedProjectListWitness.projectIds.has(projectAuthorityRoute.projectId)
         && workspaceContext?.workspaceId
           === routeProjectSnapshotRef.current.project.workspaceId
       )
     ) {
       routeProjectSnapshotRef.current = null;
     }
-    loadedActiveProject =
+    catalogProject =
       listedProject
       ?? routeProjectSnapshotRef.current?.project
       ?? null;
@@ -4701,9 +4712,9 @@ function AppInner() {
   // binding + signed-in account directory instead; this is independent of
   // whichever Workspace another tab or the navigation rail currently selects.
   const projectRouteWorkspaceContext = useProjectRouteWorkspaceContext(
-    loadedActiveProject?.workspaceId,
+    catalogProject?.workspaceId,
     workspaceContextState,
-    routeProjectSnapshotRef.current?.project.id === loadedActiveProject?.id
+    routeProjectSnapshotRef.current?.project.id === catalogProject?.id
       ? routeProjectSnapshotRef.current?.workspaceContext
         ?? routeProjectSnapshotRef.current?.workspaceScope?.context
       : null,
@@ -4714,6 +4725,7 @@ function AppInner() {
   // Waiting for the real row is the authorization gate that turns the cold
   // start from two headerless 400 waves plus a scoped retry into one scoped
   // wave. Unbound local projects still mount as soon as their real row lands.
+  const loadedActiveProject = route.kind === 'project' ? catalogProject : null;
   const activeProject = loadedActiveProject;
   const activeProjectWorkspaceContext = activeProject
     ? projectRouteWorkspaceContext.context
@@ -4725,10 +4737,10 @@ function AppInner() {
     pending: amrModelsCatalogPending,
     identity: amrModelsCatalogIdentity,
   } = resolveAmrModelsCatalogScope({
-    routeKind: route.kind,
-    projectId: route.kind === 'project' ? route.projectId : null,
-    activeProject,
-    activeProjectWorkspaceContext,
+    routeKind: projectAuthorityRoute ? 'project' : route.kind,
+    projectId: projectAuthorityRoute?.projectId ?? null,
+    activeProject: catalogProject,
+    activeProjectWorkspaceContext: catalogProject ? projectRouteWorkspaceContext.context : null,
     ambientWorkspaceContext: workspaceContext,
     ambientWorkspaceLoading: workspaceContextState.loading,
     ambientWorkspaceFailure: workspaceContextState.failure,
