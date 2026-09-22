@@ -13,6 +13,21 @@ it.each(['{', 'null', '[]', JSON.stringify({ ...receipt, slug: 'wrong' }), JSON.
   await expect(publishVelaShareVersion(input, run)).rejects.toThrow('PUBLIC_SHARE_PUBLISH_FAILED');
   expect(run).toHaveBeenCalledTimes(1);
 });
+it.each(['workspaceId', 'projectId', 'resourceId', 'slug', 'sourceKey', 'entryPath', 'name', 'versionId'] as const)('rejects blank %s before invoking the CLI', async (field) => {
+  const run = vi.fn<typeof runVelaCommand>().mockResolvedValue(JSON.stringify(receipt));
+  await expect(publishVelaShareVersion({ ...input, [field]: '  ' }, run)).rejects.toThrow('PUBLIC_SHARE_PUBLISH_FAILED');
+  expect(run).not.toHaveBeenCalled();
+});
+it('pins receipt validation and return values to the invocation snapshot', async () => {
+  const request = { ...input };
+  const run = vi.fn<typeof runVelaCommand>().mockImplementation(async () => {
+    for (const field of Object.keys(request) as Array<keyof typeof request>) request[field] = 'changed';
+    return JSON.stringify(receipt);
+  });
+  expect(await publishVelaShareVersion(request, run)).toEqual({ slug: 'stable', version: 2, publishedAt: 1234, entryPath: 'index.html' });
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
 it('does not expose child stderr or retry after CLI failure', async () => {
   const run = vi.fn<typeof runVelaCommand>().mockRejectedValue(new Error('sensitive upstream details'));
   await expect(publishVelaShareVersion(input, run)).rejects.toThrow(/^PUBLIC_SHARE_PUBLISH_FAILED$/);
