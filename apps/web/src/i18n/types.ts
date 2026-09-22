@@ -2484,6 +2484,10 @@ export interface Dict {
   'designs.deleteTitle': string;
   'designs.deleteConfirm': string;
   'designs.deleteActiveShares': string;
+  'designs.deletedShareTitle': string;
+  'designs.deletedShareRetrying': string;
+  'designs.deletedShareFailed': string;
+  'designs.deletedShareRetry': string;
   'designs.cardFreeform': string;
   'designs.badgeLive': string;
   'designs.liveArtifactBadgesAria': string;
