@@ -476,8 +476,14 @@ export function createPublicFileStopStartup(
       }
     };
     for (const task of store.listRetryableStops()) {
-      if (mutations) await mutations.run(task.projectId, () => processTask(task));
-      else await processTask(task);
+      try {
+        if (mutations) await mutations.run(task.projectId, () => processTask(task));
+        else await processTask(task);
+      } catch {
+        // A failed ownership read must neither send an unverified stop nor
+        // abort unrelated tasks. Preserve the task and its network budget.
+        result.persistenceFailures++;
+      }
     }
     return result;
   });
