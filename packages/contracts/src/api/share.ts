@@ -1520,3 +1520,69 @@ export type SharePublishResponse =
 export function hasEverShared(input: { bindingExists: boolean }): boolean {
   return input.bindingExists;
 }
+
+/* ------------------------------------------------------------------ *
+ * Comment sync state
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the client can say about comment syncing, so the banners have an input.
+ *
+ * Today the outbox is daemon-internal — `CommentRelayOutboxStore.count()` has
+ * no way out — so the UI has nothing to render K8/K3/K5/K2 from. That is why
+ * those states are unbuildable rather than merely unbuilt: nobody can draw a
+ * condition the system never computes.
+ *
+ * Shape follows the Lane-4 board's S-4 draft. The invariants below are the
+ * part that is easy to get wrong.
+ */
+export interface CommentSyncState {
+  /** Outbox entries not yet sent. */
+  pending: number;
+  /** Last failure, sanitized for display. See the rules below. */
+  lastError: string | null;
+  /** K8. A CONJUNCTION — see below. */
+  sessionMissing: boolean;
+  /** K3. Distinct from never-shared. */
+  shareStopped: boolean;
+}
+
+/**
+ * `sessionMissing` is "needs to sync AND has no session", not "logged out".
+ *
+ * Someone signed out of a project with nothing to sync is not in a paused
+ * state — there is nothing being held back, and telling them sync is paused
+ * describes a problem they do not have. The banner exists to explain why
+ * something they wrote is not reaching anyone, which is only true when both
+ * halves hold.
+ *
+ * Neither half may be inferred from the other, and neither from a proxy:
+ * being logged out, having an empty publication list, or holding no share URL
+ * each answer a different question.
+ */
+export const COMMENT_SYNC_SESSION_MISSING_IS_A_CONJUNCTION = true;
+
+/**
+ * `pending > 0` is not a failure, and `lastError` is not a current state.
+ *
+ * - Entries are pending for a moment on every normal send. A count above zero
+ *   means work is queued, not that anything went wrong.
+ * - `lastError` records the most recent failure. A later attempt may have
+ *   succeeded and left it in place, so it must never be read as "syncing is
+ *   broken right now". It is context for a state established by the other
+ *   fields, not a state itself.
+ *
+ * Reading either as failure produces a banner that appears during healthy
+ * operation, which trains people to ignore the one that matters.
+ */
+export const COMMENT_SYNC_PENDING_AND_LAST_ERROR_ARE_NOT_FAILURE_STATES = true;
+
+/**
+ * `shareStopped` means a share existed and was stopped — never the absence of
+ * one.
+ *
+ * Same distinction as {@link hasEverShared}: a project that was never shared
+ * has no stopped state to report, and rendering K3 for it tells someone their
+ * sharing was stopped when they never started.
+ */
+export const COMMENT_SYNC_STOPPED_IS_NOT_NEVER_SHARED = true;
