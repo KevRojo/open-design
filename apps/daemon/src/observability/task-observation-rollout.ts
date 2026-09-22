@@ -511,9 +511,9 @@ async function taskAggregate(
         'Mapped OD Next Run is missing mandatory exact-send Prompt evidence.',
       );
     }
-    const exactFinalText = mapping.coldStartFinalText
-      && mapping.coldStartFinalText.sha256 === run.promptTelemetry?.odNextExactSend?.sha256
-      ? mapping.coldStartFinalText : mapping.finalText;
+    const exactFinalText = [mapping.resumeFinalText, mapping.coldStartFinalText]
+      .find(candidate => candidate && candidate.sha256 === run.promptTelemetry?.odNextExactSend?.sha256)
+      ?? mapping.finalText;
     if (run.promptTelemetry?.odNextExactSend) {
       assertOdNextExactSendPromptEvidence({
         telemetry: run.promptTelemetry,

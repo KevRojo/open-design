@@ -1,3 +1,4 @@
+import { persistStrategyResumeText } from '../../src/strategies/task-store.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -626,6 +627,24 @@ describe('task observation rollout', () => {
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('/home/alice');
     expect(serialized).not.toContain('private artifact body');
+  });
+
+  it('exports the incremental text actually sent instead of the full recovery bundle', async () => {
+    const exact = persistStrategyResumeText(db, 'run-1', 'Incremental request sentinel.');
+    const promptTelemetry = bindOdNextExactSendPromptEvidence({
+      telemetry: buildPromptStackTelemetry({ composedPrompt: exact.text,
+        sections: [{ kind: 'odNextExactFinalText', content: exact.text }] }),
+      finalText: exact.text, persisted: exact, stage: 'request',
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async () => acceptedResponse());
+    await expect(service({ mode: 'send', fetchImpl,
+      getRun: (runId) => runId === 'run-1' ? { ...syntheticRun(), promptTelemetry } : null,
+    }).finalizeForRun('run-1')).resolves.toMatchObject({ action: 'sent' });
+    const batch = JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body)).batch as Array<{
+      body: { name?: string; input?: Record<string, unknown> };
+    }>;
+    expect(batch.find(event => event.body.name === 'strategy-stage:request')?.body.input)
+      .toMatchObject({ kind: 'turn', sha256: exact.sha256, utf8Bytes: exact.utf8Bytes });
   });
 
   it('exports the mapped raw hostComposed identity and bounded exact-text payload', async () => {

@@ -1,5 +1,6 @@
 // @ts-nocheck
 
+import { usesProductionMarker, composeResumedRequest } from './strategies/od-next/request-resume.js';
 import { todoSnapshotHasUnfinishedWork } from '@open-design/contracts';
 import { createUserDesignSystem } from './design-systems/index.js';
 import { resolveWorkspaceScope } from './collab/workspace-scope.js';
@@ -548,6 +549,8 @@ import {
 import { createStrategyRunWriteEvidenceRecorder } from './strategies/od-next/run-write-evidence.js';
 
 import {
+  getStrategyTaskExecution,
+  persistStrategyResumeText,
   getStrategyTaskExecutionByRunId,
   reconcileStrategyTaskRunTerminal,
   isInitialStrategyTaskRun,
@@ -11890,9 +11893,12 @@ export async function startServer({
         // the probe failure and applies the identical fallback.
       }
     }
+    const previousMarkerTask = isOdNextInitialRun && strategyTaskAtStart?.continuedFromTaskExecutionId
+      ? getStrategyTaskExecution(db, strategyTaskAtStart.continuedFromTaskExecutionId) : null;
+    const requiresProtocolMigration = Boolean(previousMarkerTask && !usesProductionMarker(previousMarkerTask));
     const resolvedAgentResumeCtx =
       agentSupportsSessionResume && run.conversationId
-        && !(isOdNextInitialRun && strategyTaskAtStart?.continuedFromTaskExecutionId)
+        && !requiresProtocolMigration
         ? resolveAgentResumeContext(db, {
             conversationId: run.conversationId,
             agentId: def.id,
@@ -12231,6 +12237,14 @@ export async function startServer({
           odNextTaskInputSnapshot?.requestInputText ?? '',
         ].filter(Boolean).join('\n\n---\n\n')
       : '';
+    if (isOdNextInitialRun && previousMarkerTask && agentResumeCtx.isResuming) {
+      const incremental = composeResumedRequest(strategyTaskAtStart, previousMarkerTask);
+      if (incremental) {
+        const finalText = persistStrategyResumeText(db, run.id, incremental);
+        strategyRunMapping = { ...strategyRunMapping, finalText, resumeFinalText: finalText };
+        persistedStrategyFinalText = finalText.text;
+      }
+    }
     const composedResult = strategyTaskAtStart
       ? {
           composedPrompt: persistedStrategyFinalText!,
@@ -16127,7 +16141,9 @@ export async function startServer({
         const safeColdProduction = strategyRunMapping?.coldStartFinalText
           && !resumeSideEffects.toolCallSeen && !resumeSideEffects.artifactWriteSeen
           && !resumeSideEffects.liveArtifactSeen && !resumeSideEffects.userVisibleOutputSeen;
-        if (strategyTaskAtStart && !isOdNextInitialRun && !safeColdProduction) {
+        if (strategyTaskAtStart && ((!isOdNextInitialRun && !safeColdProduction)
+          || resumeSideEffects.toolCallSeen || resumeSideEffects.artifactWriteSeen
+          || resumeSideEffects.liveArtifactSeen || resumeSideEffects.userVisibleOutputSeen)) {
           const blocked = blockAutomaticContinuation(db, { runId: run.id });
           if (blocked) run.strategyTask = projectStrategyTask(blocked, run.id);
           send('error', createSseErrorPayload(

@@ -761,6 +761,87 @@ process.exit(127);
     expect(next.runs).toHaveLength(1);
   });
 
+  it('resumes current marker conversations with only the current request and host directives', async () => {
+    const fixture = await createPublicRolloutFixture('marker-question', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const first = await postRun(started.url, publicRunRequest(fixture, 'Original request sentinel.', 'resume-first'));
+    await waitForRunTerminal(started.url, first.runId as string);
+    await waitForTask(first.strategyTask!.taskExecutionId, 'completed');
+    const second = await postRun(started.url, publicRunRequest(fixture, 'Current request sentinel.', 'resume-second'));
+    expect((await waitForRunTerminal(started.url, second.runId as string)).status).toBe('succeeded');
+    const calls = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.argv).toContain('resume');
+    expect(calls[1]!.stdin).toContain('Current request sentinel.');
+    expect(calls[1]!.stdin).toContain('<od-production-ready key=');
+    expect(calls[1]!.stdin).not.toContain('Original request sentinel.');
+    expect(calls[1]!.stdin).not.toContain('<open_design_core_system_prompt>');
+    expect(calls[1]!.stdin).not.toContain('<session_skills>');
+    expect(calls[1]!.stdin).not.toContain('## Runtime tool environment');
+    expect(calls[1]!.stdin).not.toContain('capabilitySnapshotHash');
+    expect(calls[1]!.stdin).not.toContain('open_design_request_turn');
+    expect(calls[1]!.stdin.length).toBeLessThan(calls[0]!.stdin.length);
+    const firstKey = /<od-production-ready key="([a-f0-9]+)"/.exec(calls[0]!.stdin)?.[1];
+    expect(calls[1]!.stdin).not.toContain(firstKey!);
+  }, 45_000);
+
+  it('automatically produces again after a resumed request with its new marker key', async () => {
+    const fixture = await createPublicRolloutFixture('marker-production', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const first = await postRun(started.url, publicRunRequest(fixture, 'Make a landing page.', 'repeat-first'));
+    await waitForTask(first.strategyTask!.taskExecutionId, 'completed');
+    const second = await postRun(started.url, publicRunRequest(fixture, 'Design another site from scratch.', 'repeat-second'));
+    const task = await waitForTask(second.strategyTask!.taskExecutionId, 'completed');
+    expect(task.runs).toHaveLength(2);
+    expect(task.runs[0]!.settlementReason).toBe('production_ready');
+    expect(task.runs[1]!.inputStage).toBe('production');
+    expect(task.runs[0]!.resumeFinalText).toBeDefined();
+    const calls = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(calls).toHaveLength(4);
+    expect(calls[2]!.argv).toContain('resume');
+    expect(calls[2]!.stdin).not.toContain('<session_skills>');
+    expect(calls[3]!.argv).toContain('resume');
+    expect(calls[3]!.stdin).toContain('This is the production turn');
+  }, 45_000);
+
+  it('re-sends changed stable instructions while retaining a current native session', async () => {
+    const fixture = await createPublicRolloutFixture('marker-question', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const first = await postRun(started.url, publicRunRequest(fixture, 'Initial task.', 'change-first'));
+    await waitForTask(first.strategyTask!.taskExecutionId, 'completed');
+    const second = await postRun(started.url, {
+      ...publicRunRequest(fixture, 'Updated task.', 'change-second'),
+      systemPrompt: 'New stable rule: use yellow.',
+    });
+    await waitForTask(second.strategyTask!.taskExecutionId, 'completed');
+    const calls = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(calls[1]!.argv).toContain('resume');
+    expect(calls[1]!.stdin).toContain('New stable rule: use yellow.');
+    expect(calls[1]!.stdin).toContain('<open_design_core_system_prompt>');
+  }, 45_000);
+
+  it('restores the full frozen request when native request resume has expired', async () => {
+    const fixture = await createPublicRolloutFixture('marker-request-expired', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const first = await postRun(started.url, publicRunRequest(fixture, 'Original context to recover.', 'expired-first'));
+    await waitForTask(first.strategyTask!.taskExecutionId, 'completed');
+    const second = await postRun(started.url, publicRunRequest(fixture, 'Current followup.', 'expired-second'));
+    const task = await waitForTask(second.strategyTask!.taskExecutionId, 'completed');
+    expect(task.runs).toHaveLength(1);
+    const calls = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(calls).toHaveLength(3);
+    expect(calls[1]!.argv).toContain('resume');
+    expect(calls[1]!.stdin).not.toContain('<session_skills>');
+    expect(calls[2]!.argv).not.toContain('resume');
+    expect(calls[2]!.stdin).toContain('Original context to recover.');
+    expect(calls[2]!.stdin).toContain('Current followup.');
+    expect(calls[2]!.stdin).toContain('<session_skills>');
+  }, 45_000);
+
   it.each(['plan_ready', 'clarification_required', 'blocked'] as const)(
     'hands off historical %s through the current strategy and preserves exact retries after restart', async outcome => {
       const fixture = await createPublicRolloutFixture('marker-handoff', 'design');
@@ -2359,7 +2440,7 @@ process.exit(127);
     expect(followupTerminal.strategyTask!.taskExecutionId).not.toBe(task.taskExecutionId);
     const resumed = await readProjectInvocations(fixture.logPath, fixture.projectId);
     expect(resumed).toHaveLength(2);
-    expect(resumed[1]!.argv).not.toContain('resume');
+    expect(resumed[1]!.argv).toContain('resume');
   });
 
   it('does not report unfinished work when the task delivered under a stale plan', async () => {
@@ -2586,7 +2667,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => { stdin += chunk; });
 process.stdin.on('end', () => {
   fs.appendFileSync(logPath, JSON.stringify({ argv, stdin, cwd: process.cwd(), startedAt: Date.now() }) + '\\n');
-  if (['marker-expired-session', 'marker-expired-side-effect'].includes(${JSON.stringify(label)}) && argv.includes('resume')) {
+  if (['marker-expired-session', 'marker-expired-side-effect', 'marker-request-expired'].includes(${JSON.stringify(label)}) && argv.includes('resume')) {
     if (${JSON.stringify(label)} === 'marker-expired-side-effect') {
       console.log(JSON.stringify({ type: 'item.completed', item: {
         id: 'side-effect', type: 'command_execution', command: 'echo executed', aggregated_output: 'executed', exit_code: 0, status: 'completed',
@@ -2628,7 +2709,7 @@ process.stdin.on('end', () => {
       if (!key) throw new Error('Current host marker key was not injected');
       text = 'Plan: create a landing page and a matching deck.\\n<od-production-ready key="' + key + '" />';
     }
-  } else if (${JSON.stringify(label)} === 'marker-question') {
+  } else if (['marker-question', 'marker-request-expired'].includes(${JSON.stringify(label)})) {
     text = '<question-form id="scope">{"questions":[{"id":"audience","label":"Who is this for?"}]}</question-form>';
   }
   console.log(JSON.stringify({

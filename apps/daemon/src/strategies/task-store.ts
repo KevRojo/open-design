@@ -5,6 +5,7 @@ import {
   OD_NEXT_PROMPT_BUNDLE_SCHEMA_V1,
   OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2,
   OD_NEXT_REQUEST_TURN_SCHEMA_V1,
+  OD_NEXT_RESUME_REQUEST_SCHEMA,
   OD_NEXT_STRATEGY_ID,
   StrategyExecutionIntentV2Schema,
   StrategySettlementReasonV2Schema,
@@ -66,7 +67,7 @@ const COMPOSED_PROMPT_BUNDLE_SCHEMA = OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2;
  */
 const ACCEPTED_FINAL_TEXT_SCHEMAS = {
   bundle: [OD_NEXT_PROMPT_BUNDLE_SCHEMA_V1, OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2],
-  turn: [OD_NEXT_REQUEST_TURN_SCHEMA_V1, OD_NEXT_INTENT_RESOLUTION_TURN_SCHEMA],
+  turn: [OD_NEXT_REQUEST_TURN_SCHEMA_V1, OD_NEXT_INTENT_RESOLUTION_TURN_SCHEMA, OD_NEXT_RESUME_REQUEST_SCHEMA],
 } as const satisfies Record<
   StrategyTaskFinalTextKind,
   ReadonlyArray<StrategyTaskFinalTextSchema>
@@ -83,6 +84,7 @@ export interface StrategyTaskRunMapping {
   finalText: StrategyTaskFinalTextIdentity;
   /** Immutable alternative used only when native production resume is unavailable. */
   coldStartFinalText?: StrategyTaskFinalTextIdentity;
+  resumeFinalText?: StrategyTaskFinalTextIdentity;
   settlementReason?: StrategySettlementReasonV2;
 }
 
@@ -97,6 +99,7 @@ export type StrategyTaskFinalTextSchema =
   | typeof OD_NEXT_PROMPT_BUNDLE_SCHEMA_V1
   | typeof OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2
   | typeof OD_NEXT_REQUEST_TURN_SCHEMA_V1
+  | typeof OD_NEXT_RESUME_REQUEST_SCHEMA
   | typeof OD_NEXT_INTENT_RESOLUTION_TURN_SCHEMA;
 
 export interface StrategyTaskFinalTextIdentity {
@@ -299,6 +302,7 @@ export function migrateStrategyTaskStore(db: SqliteDb): void {
   addColumnIfMissing(db, 'strategy_task_executions', 'continued_from_task_execution_id TEXT');
   addColumnIfMissing(db, 'strategy_task_runs', 'settlement_reason TEXT');
   addColumnIfMissing(db, 'strategy_task_runs', 'cold_start_final_text_json TEXT');
+  addColumnIfMissing(db, 'strategy_task_runs', 'resume_final_text_json TEXT');
   migrateIntentResolutionStore(db);
   addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_schema TEXT');
   addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_text TEXT');
@@ -930,6 +934,7 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
            final_text_sha256 AS finalTextSha256,
            settlement_reason AS settlementReason,
            cold_start_final_text_json AS coldStartFinalTextJson,
+           resume_final_text_json AS resumeFinalTextJson,
            created_at AS createdAt
       FROM strategy_task_runs
      WHERE task_execution_id = ?
@@ -946,6 +951,7 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
     finalTextSha256: unknown;
     settlementReason: unknown;
     coldStartFinalTextJson: unknown;
+    resumeFinalTextJson: unknown;
     createdAt: unknown;
   }>;
   const createdAt = requireNonNegativeInteger(row['created_at'], 'created_at');
@@ -977,6 +983,14 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
       utf8Bytes: mapping.finalTextUtf8Bytes,
       sha256: mapping.finalTextSha256,
     });
+    const resumeFinalText = mapping.resumeFinalTextJson == null ? undefined
+      : parseStoredFinalText(JSON.parse(requireStoredString(mapping.resumeFinalTextJson, 'resume_final_text_json')));
+    if (resumeFinalText) {
+      if (resumeFinalText.kind !== 'turn' || resumeFinalText.schema !== OD_NEXT_RESUME_REQUEST_SCHEMA
+        || mapping.inputStage !== 'request' || taskRunIndex !== 0) {
+        throw new InvalidStrategyTaskRecordError('Resume input must belong to its initial request.');
+      }
+    }
     const coldStartFinalText = mapping.coldStartFinalTextJson == null ? undefined
       : parseStoredFinalText(JSON.parse(requireStoredString(mapping.coldStartFinalTextJson, 'cold_start_final_text_json')));
     if (coldStartFinalText) {
@@ -1002,6 +1016,7 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
         : { sourceRunId: requireStoredString(mapping.sourceRunId, 'source_run_id') }),
       finalText,
       ...(coldStartFinalText ? { coldStartFinalText } : {}),
+      ...(resumeFinalText ? { resumeFinalText } : {}),
       ...(mapping.settlementReason == null ? {} : { settlementReason: StrategySettlementReasonV2Schema.parse(mapping.settlementReason) }),
     };
   });
@@ -1707,4 +1722,20 @@ function errorMessage(error: unknown): string {
 function isMissingTaskStoreError(error: unknown): boolean {
   return error instanceof Error
     && /no such table: strategy_task_(?:executions|runs)/iu.test(error.message);
+}
+
+/** Preserve the actual incremental request alongside its full recovery bundle. */
+export function persistStrategyResumeText(db: Database.Database, runId: string, text: string): StrategyTaskFinalTextIdentity {
+  const task = getStrategyTaskExecutionByRunId(db, runId);
+  if (!task || task.initialRunId !== runId || !text.trim()) {
+    throw new InvalidStrategyTaskRecordError('Resume input must belong to its initial request.');
+  }
+  const identity = finalTextIdentity({ kind: 'turn', schema: OD_NEXT_RESUME_REQUEST_SCHEMA, text });
+  const existing = task.runs[0]?.resumeFinalText;
+  if (existing && !sameFinalTextIdentity(existing, identity)) {
+    throw new InvalidStrategyTaskRecordError('Persisted resume input cannot change within a Run.');
+  }
+  db.prepare('UPDATE strategy_task_runs SET resume_final_text_json = ? WHERE run_id = ?')
+    .run(JSON.stringify(identity), runId);
+  return identity;
 }

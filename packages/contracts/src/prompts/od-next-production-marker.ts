@@ -1,5 +1,8 @@
 import { serializeOdNextRequestTurnV1 } from './od-next-prompt-bundle.js';
 
+/** Host-only identity for plain incremental request text; never sent as a wrapper. */
+export const OD_NEXT_RESUME_REQUEST_SCHEMA = 'open-design.od-next-resume-request/v1' as const;
+
 export const OD_NEXT_PRODUCTION_MARKER_PROTOCOL = 'OD Next production-marker/v1';
 
 export const OD_NEXT_PLAN_OUTPUT_INSTRUCTIONS = `${OD_NEXT_PRODUCTION_MARKER_PROTOCOL}
