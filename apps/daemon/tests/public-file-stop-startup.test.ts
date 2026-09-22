@@ -9,6 +9,27 @@ import { createInMemoryPublicFilePublicationStore, createPublicFileStopStartup, 
 const key = { resourceTeamId: 'team-a', ownerMemberId: 'owner-a', projectId: 'deleted-project', filePath: 'index.html', slug: 'old-slug' };
 
 describe('public share stop startup pass', () => {
+  it.each(['memory', 'sqlite'])('isolates per-task read failures and retries next startup: %s', async (backend) => {
+    for (const read of ['queue', 'revision']) {
+      const db = new Database(':memory:');
+      try {
+        migratePublicFilePublications(db);
+        const store = backend === 'sqlite' ? createSqlitePublicFilePublicationStore(db) : createInMemoryPublicFilePublicationStore();
+        store.enqueueStop(key); store.enqueueStop({ ...key, slug: 'second' });
+        if (read === 'queue') vi.spyOn(store, 'listStops').mockImplementationOnce(() => { throw new Error('queue read failed'); });
+        else vi.spyOn(store, 'getRevision').mockImplementationOnce(() => { throw new Error('revision read failed'); });
+        const stopped: string[] = [];
+        const prepare = async (task: Readonly<PublicFileStopTaskKey>) => ({ ...task, stop: async () => { stopped.push(task.slug); } });
+        expect(await createPublicFileStopStartup(store, prepare)()).toEqual({ stopped: 1, failed: 0, deferred: 0, persistenceFailures: 1 });
+        expect(stopped).toEqual(['second']);
+        expect(store.listStops()).toEqual([{ ...key, failureCount: 1 }]);
+        expect(await createPublicFileStopStartup(store, prepare)()).toEqual({ stopped: 1, failed: 0, deferred: 0, persistenceFailures: 0 });
+        expect(stopped).toEqual(['second', key.slug]);
+        expect(store.listStops()).toEqual([]);
+      } finally { db.close(); }
+    }
+  });
+
   it('persists retry outcomes across SQLite reopen and clears only the successful exact key', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'od-stop-startup-'));
     const file = join(dir, 'queue.sqlite');
