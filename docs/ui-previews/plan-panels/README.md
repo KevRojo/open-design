@@ -6,7 +6,7 @@
 
 直接用浏览器打开 `index.html`，无需构建或联网。Free、Plus、Pro、Max 并排展示，顶部以英文文字区分；面板内嵌来自 https://open-design.ai/zh/pricing/ 的官方 SVG 标志。切换「全部」和「Loading 态」可持续查看对应状态。Free 不展示套餐额度或进度条。
 
-HTML 中的额度详情、充值与套餐管理弹窗仅为交互示意，不会发起支付。
+HTML 仅展示面板常规态、hover 和 Loading 态。面板内不支持点击、跳转或弹窗；仅顶部「全部 / Loading 态」按钮用于切换展示状态。
 
 ## Electron 客户端预览
 
