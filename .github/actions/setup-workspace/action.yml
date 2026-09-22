@@ -62,6 +62,7 @@ runs:
         --output "$RUNNER_TEMP/open-design-postinstall/${GITHUB_JOB}/plan.json"
 
     - name: Validate install profile
+      id: install-contract
       shell: bash
       env:
         INSTALL_PROFILE: ${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}
@@ -88,6 +89,14 @@ runs:
             exit 1
             ;;
         esac
+
+        # Full workspace stores are already compressed-package heavy and much
+        # larger than filtered profiles. Their measured 7-Zip cold-pack cost is
+        # not recovered by the small size reduction, so retain the native path.
+        if [ "$INSTALL_PROFILE" = "workspace" ]; then
+          PNPM_STORE_CACHE_FORMAT=native
+        fi
+        echo "cache-format=$PNPM_STORE_CACHE_FORMAT" >> "$GITHUB_OUTPUT"
 
     - name: Initialize postinstall timing observation
       id: postinstall-timing-path
@@ -185,7 +194,7 @@ runs:
 
     - name: Resolve pnpm store archive layout
       id: pnpm-store-archive
-      if: ${{ inputs.pnpm-store-cache-format == '7z-2603-mx1' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
+      if: ${{ steps.install-contract.outputs.cache-format == '7z-2603-mx1' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: |
         archive_path="$HOME/.cache/open-design/pnpm-store-archives/store-v1.7z"
@@ -198,7 +207,7 @@ runs:
 
     - name: Restore pnpm store
       id: pnpm-cache-restore
-      if: ${{ inputs.pnpm-store-cache-format == 'native' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
+      if: ${{ steps.install-contract.outputs.cache-format == 'native' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/restore@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}
@@ -211,7 +220,7 @@ runs:
 
     - name: Restore pnpm store archive
       id: pnpm-archive-cache-restore
-      if: ${{ inputs.pnpm-store-cache-format == '7z-2603-mx1' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
+      if: ${{ steps.install-contract.outputs.cache-format == '7z-2603-mx1' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/restore@v5
       with:
         path: ${{ steps.pnpm-store-archive.outputs.archive-path }}
@@ -380,7 +389,7 @@ runs:
         key: ${{ steps.tools-cache.outputs.cache-primary-key }}
 
     - name: Pack pnpm store archive
-      if: ${{ inputs.pnpm-store-cache-format == '7z-2603-mx1' && inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-archive-cache-restore.outputs.cache-hit != 'true' }}
+      if: ${{ steps.install-contract.outputs.cache-format == '7z-2603-mx1' && inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-archive-cache-restore.outputs.cache-hit != 'true' }}
       shell: bash
       run: >-
         python3 .github/scripts/pnpm_store_archive.py pack
@@ -390,14 +399,14 @@ runs:
         --timing-path "${{ steps.postinstall-timing-path.outputs.path }}"
 
     - name: Save pnpm store archive
-      if: ${{ inputs.pnpm-store-cache-format == '7z-2603-mx1' && inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-archive-cache-restore.outputs.cache-hit != 'true' }}
+      if: ${{ steps.install-contract.outputs.cache-format == '7z-2603-mx1' && inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-archive-cache-restore.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: ${{ steps.pnpm-store-archive.outputs.archive-path }}
         key: ${{ steps.pnpm-archive-cache-restore.outputs.cache-primary-key }}
 
     - name: Save pnpm store
-      if: ${{ inputs.pnpm-store-cache-format == 'native' && inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-cache-restore.outputs.cache-hit != 'true' }}
+      if: ${{ steps.install-contract.outputs.cache-format == 'native' && inputs.save-pnpm-cache == 'true' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' && steps.pnpm-cache-restore.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}

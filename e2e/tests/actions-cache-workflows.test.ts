@@ -118,6 +118,9 @@ describe("GitHub Actions cache workflows", () => {
     );
 
     expect(action).toContain("native|7z-2603-mx1");
+    expect(action).toContain('if [ "$INSTALL_PROFILE" = "workspace" ]');
+    expect(action).toContain('echo "cache-format=$PNPM_STORE_CACHE_FORMAT"');
+    expect(action).toContain("steps.install-contract.outputs.cache-format == '7z-2603-mx1'");
     expect(action).toContain("pnpm_store_archive.py bootstrap");
     expect(action).toContain("pnpm_store_archive.py unpack");
     expect(action).toContain("pnpm_store_archive.py pack");
