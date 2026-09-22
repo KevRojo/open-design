@@ -620,19 +620,37 @@ export const PUBLIC_SNAPSHOT_PATH_PREFIX = '/api/v1/public/snapshots';
  * snapshot.
  *
  * So a share URL keeps working across updates, and a viewer who reloads gets
- * the current version. What P0 does not build is the transport that would let
- * a page ALREADY OPEN notice the change on its own — no version poll, no
- * second request to compare versions, no push.
+ * the current version.
  *
- * The distinction is easy to collapse and expensive to get wrong in either
- * direction: read it as "one link, one version forever" and the update flow
- * looks impossible; read it as "the page keeps itself current" and every
- * share page grows a polling loop nobody asked for.
+ * An open page DOES learn that a new version exists: the share page's poll
+ * (see {@link SHARE_SYNC_INTERVALS_MS.sharePagePoll}) carries the share
+ * version alongside comments, and a version increase raises a toast — the
+ * owner deployed something new. See {@link SHARE_PAGE_ANNOUNCES_NEW_VERSION}.
  *
- * This constant exists so the absence stays a recorded decision rather than a
- * gap someone fills in with that loop.
+ * ⚠️ This constant previously read `false` with a docblock asserting "no
+ * version poll, no second request, no push". That was wrong against D113 Q2
+ * (product-set, 09-20), which had already decided the share page polls
+ * comments AND share version every 30s. Corrected 2026-09-22.
  */
-export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = false;
+export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = true;
+
+/**
+ * A new deployment announces itself; it does not take over the page.
+ *
+ * When the polled share version increases, the viewer gets a toast saying a
+ * new version has been deployed, with reloading left to them.
+ *
+ * ## Why it must not reload on its own
+ *
+ * The viewer may be part-way through writing a comment. Reloading discards
+ * that draft to show them something they did not ask for at a moment they did
+ * not choose — the page would be punishing them for the owner's timing. The
+ * whole point of the stable alias is that the link keeps working; nothing
+ * about a new version is urgent enough to interrupt someone mid-sentence.
+ *
+ * So: announce, and let them pick the moment.
+ */
+export const SHARE_PAGE_ANNOUNCES_NEW_VERSION = true;
 
 /* ------------------------------------------------------------------ *
  * Comment read state
@@ -1317,13 +1335,14 @@ export const SHARE_VIEWER_DOCUMENT_IS_UNCACHEABLE = true;
  * What the host does with `409`.
  *
  * It tells the person the share moved on and offers to reload. It does NOT
- * re-POST anything, and it does NOT start polling the artifact's version to
- * find out when it changed again — a share page that polls is a share page
- * that keeps a tab busy forever for a change that may never come.
+ * re-POST anything, and it does not start a SECOND polling loop of its own —
+ * the share page already polls the version on its normal cadence (see
+ * {@link SHARE_SYNC_INTERVALS_MS.sharePagePoll}).
  *
- * This matches {@link SHARE_SNAPSHOT_DISCOVERY_IN_P0}: an already-open page
- * does not track updates on its own. `409` is the one moment it learns, and
- * it learns because the person acted.
+ * `409` and the new-version toast are different moments and must stay that
+ * way. The toast says "there is something newer, whenever you want it"; a
+ * `409` says "the request you just made cannot be served" — the page asked
+ * for a snapshot that is no longer current, so that one is not optional.
  */
 export const SHARE_VIEWER_409_PROMPTS_RELOAD_WITHOUT_POLLING = true;
 
