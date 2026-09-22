@@ -511,6 +511,8 @@ export interface RunCreatedProps extends RunTaskLineageProps {
    * common case.
    */
   od_next_blocked_reason_code?: string;
+  /** Host-observed reason this physical round ended. */
+  od_next_settlement_reason?: string;
 }
 
 export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {

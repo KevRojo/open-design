@@ -1,14 +1,22 @@
+import type { StrategySettlementReasonV2 } from '@open-design/contracts';
 import type { OdNextReply } from './protocol.js';
 import type Database from 'better-sqlite3';
 import { countRenderableQuestionForms } from '../../question-form-detect.js';
 import { compareAndTransitionStrategyTaskExecution, getStrategyTaskExecution, type StrategyTaskExecutionRecord } from '../task-store.js';
 import type { OdNextCoordinatorResult } from './coordinator.js';
 
+export interface MarkerCompletionEvidence {
+  physicalStatus: 'succeeded' | 'failed' | 'canceled';
+  deliverableValid: boolean;
+  truncated?: boolean;
+  todoUnfinished?: boolean;
+}
+
 export function settleMarkerTurn(db: Database.Database, input: {
   taskExecutionId: string;
   runId: string;
   parsed: OdNextReply;
-  completionEvidence?: { physicalStatus: 'succeeded' | 'failed' | 'canceled'; deliverableValid: boolean };
+  completionEvidence?: MarkerCompletionEvidence;
   updatedAt?: number;
 }): OdNextCoordinatorResult {
   const task = getStrategyTaskExecution(db, input.taskExecutionId);
@@ -21,9 +29,19 @@ export function settleMarkerTurn(db: Database.Database, input: {
     : status !== 'succeeded' ? 'blocked'
       : ready ? 'plan_ready' : 'completed';
   const reasonCodes = outcome === 'blocked' ? ['od_next_physical_run_not_succeeded'] : [];
+  const settlementReason: StrategySettlementReasonV2 = status === 'canceled' ? 'canceled'
+    : status !== 'succeeded' ? 'run_failed'
+      : ready ? 'production_ready'
+        : input.completionEvidence?.deliverableValid ? 'deliverable_valid'
+          : countRenderableQuestionForms(input.parsed.visibleText) > 0 ? 'question'
+            : input.completionEvidence?.truncated ? 'truncated'
+              : input.completionEvidence?.todoUnfinished ? 'todo_unfinished'
+                : task.executionIntent === 'plan_only' ? 'plan_only'
+                  : input.parsed.visibleText.trim() ? 'text_only' : 'empty_reply';
   const settled = compareAndTransitionStrategyTaskExecution(db, {
     taskExecutionId: task.taskExecutionId, expectedRevision: task.revision,
     deliverableValid: input.completionEvidence?.deliverableValid === true,
+    settlementReason,
     to: {
       route: task.route ?? 'full_plan', inputStage: task.inputStage,
       outcome, executionMode: task.executionMode ?? (ready ? 'simple' : null),

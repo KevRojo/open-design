@@ -94,6 +94,7 @@ export interface StrategyTaskObservationRootV1 {
   projectId: string;
   conversationId: string;
   status: StrategyTaskOutcome;
+  roundSettlements?: Array<{ runId: string; reason: string }>;
   route: StrategyTaskExecutionRecord['route'];
   executionMode: StrategyTaskExecutionRecord['executionMode'];
   taskType: string | null;
@@ -663,6 +664,8 @@ export function aggregateStrategyTaskObservations(input: {
       projectId: input.task.projectId,
       conversationId: input.task.conversationId,
       status: input.task.outcome,
+      roundSettlements: input.task.runs.flatMap(run => run.settlementReason
+        ? [{ runId: run.runId, reason: run.settlementReason }] : []),
       route: input.task.route,
       executionMode: input.task.executionMode,
       taskType,
@@ -1130,6 +1133,7 @@ export function buildLegacyTaskObservationPayload(
       executionMode: aggregate.root.executionMode,
       taskType: aggregate.root.taskType,
       outcome: aggregate.root.status,
+      roundSettlements: aggregate.root.roundSettlements,
       strategyId: aggregate.root.strategyId,
       strategyVersion: aggregate.root.strategyVersion,
       strategyPackageHash: aggregate.root.strategyPackageHash,

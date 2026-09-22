@@ -7,6 +7,8 @@ import {
   OD_NEXT_REQUEST_TURN_SCHEMA_V1,
   OD_NEXT_STRATEGY_ID,
   StrategyExecutionIntentV2Schema,
+  StrategySettlementReasonV2Schema,
+  type StrategySettlementReasonV2,
   parseOdNextPromptBundleV1,
   parseOdNextPromptBundleV2,
   parseOdNextRequestTurnV1,
@@ -79,6 +81,9 @@ export interface StrategyTaskRunMapping {
   sourceRunId?: string;
   purpose?: 'intent_resolution';
   finalText: StrategyTaskFinalTextIdentity;
+  /** Immutable alternative used only when native production resume is unavailable. */
+  coldStartFinalText?: StrategyTaskFinalTextIdentity;
+  settlementReason?: StrategySettlementReasonV2;
 }
 
 export type StrategyTaskFinalTextKind = 'bundle' | 'turn';
@@ -187,6 +192,7 @@ export interface CompareAndTransitionStrategyTaskInput {
     runId: string;
     sourceRunId: string;
     finalText: string;
+    coldStartText?: string;
   };
   blockedContext?: {
     reasonCodes: readonly string[];
@@ -194,6 +200,7 @@ export interface CompareAndTransitionStrategyTaskInput {
   };
   updatedAt?: number;
   deliverableValid?: boolean;
+  settlementReason?: StrategySettlementReasonV2;
 }
 
 export class InvalidStrategyTaskRecordError extends Error {
@@ -290,6 +297,8 @@ export function migrateStrategyTaskStore(db: SqliteDb): void {
   addColumnIfMissing(db, 'strategy_task_executions', 'intent_resolution_version INTEGER');
   addColumnIfMissing(db, 'strategy_task_executions', 'deliverable_valid INTEGER');
   addColumnIfMissing(db, 'strategy_task_executions', 'continued_from_task_execution_id TEXT');
+  addColumnIfMissing(db, 'strategy_task_runs', 'settlement_reason TEXT');
+  addColumnIfMissing(db, 'strategy_task_runs', 'cold_start_final_text_json TEXT');
   migrateIntentResolutionStore(db);
   addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_schema TEXT');
   addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_text TEXT');
@@ -625,6 +634,11 @@ export function compareAndTransitionStrategyTaskExecution(
           taskRunIndex: nextRunIndex,
         })
       : null;
+    if (input.nextRun?.coldStartText && next.inputStage !== 'production') {
+      throw new InvalidStrategyTaskTransitionError('Cold start is only valid for production.');
+    }
+    const coldStartFinalText = input.nextRun?.coldStartText
+      ? composedPromptBundleIdentity(input.nextRun.coldStartText) : null;
     const clarificationCount = current.clarificationCount
       + (next.inputStage === 'clarification' && current.inputStage !== 'clarification' ? 1 : 0);
     const repairAttempts = current.planContractRepairAttempts
@@ -680,6 +694,10 @@ export function compareAndTransitionStrategyTaskExecution(
       );
     }
 
+    if (input.settlementReason) {
+      db.prepare('UPDATE strategy_task_runs SET settlement_reason = ? WHERE run_id = ?')
+        .run(StrategySettlementReasonV2Schema.parse(input.settlementReason), current.latestRunId);
+    }
     if (TERMINAL_OUTCOMES.has(next.outcome)) failIntentResolutionRecord(db, current.taskExecutionId);
     if (input.nextRun) {
       try {
@@ -702,6 +720,10 @@ export function compareAndTransitionStrategyTaskExecution(
           nextRunFinalText!.sha256,
           updatedAt,
         );
+        if (coldStartFinalText) {
+          db.prepare('UPDATE strategy_task_runs SET cold_start_final_text_json = ? WHERE run_id = ?')
+            .run(JSON.stringify(coldStartFinalText), input.nextRun.runId);
+        }
       } catch (error) {
         throw new StrategyTaskTransitionConflictError(
           `Strategy next Run is already claimed: ${errorMessage(error)}`,
@@ -750,6 +772,7 @@ export function cancelStrategyTaskExecution(
         'Strategy task changed while applying cancellation.',
       );
     }
+    db.prepare('UPDATE strategy_task_runs SET settlement_reason = ? WHERE run_id = ?').run('canceled', current.latestRunId);
     failIntentResolutionRecord(db, current.taskExecutionId);
   });
   cancel.immediate();
@@ -799,7 +822,11 @@ export function reconcileStrategyTaskRunTerminal(
         current.revision,
         input.runId,
       );
-      if (result.changes === 1) failIntentResolutionRecord(db, current.taskExecutionId);
+      if (result.changes === 1) {
+        db.prepare('UPDATE strategy_task_runs SET settlement_reason = ? WHERE run_id = ?')
+          .run(input.status === 'canceled' ? 'canceled' : 'interrupted', input.runId);
+        failIntentResolutionRecord(db, current.taskExecutionId);
+      }
       return result.changes === 1;
     });
     return reconcile.immediate();
@@ -901,6 +928,8 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
            final_text AS finalText,
            final_text_utf8_bytes AS finalTextUtf8Bytes,
            final_text_sha256 AS finalTextSha256,
+           settlement_reason AS settlementReason,
+           cold_start_final_text_json AS coldStartFinalTextJson,
            created_at AS createdAt
       FROM strategy_task_runs
      WHERE task_execution_id = ?
@@ -915,6 +944,8 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
     finalText: unknown;
     finalTextUtf8Bytes: unknown;
     finalTextSha256: unknown;
+    settlementReason: unknown;
+    coldStartFinalTextJson: unknown;
     createdAt: unknown;
   }>;
   const createdAt = requireNonNegativeInteger(row['created_at'], 'created_at');
@@ -946,6 +977,15 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
       utf8Bytes: mapping.finalTextUtf8Bytes,
       sha256: mapping.finalTextSha256,
     });
+    const coldStartFinalText = mapping.coldStartFinalTextJson == null ? undefined
+      : parseStoredFinalText(JSON.parse(requireStoredString(mapping.coldStartFinalTextJson, 'cold_start_final_text_json')));
+    if (coldStartFinalText) {
+      if (mapping.inputStage !== 'production' || coldStartFinalText.kind !== 'bundle'
+        || coldStartFinalText.schema !== OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2) {
+        throw new InvalidStrategyTaskRecordError('Cold start input must be a production bundle.');
+      }
+      parseOdNextPromptBundleV2(coldStartFinalText.text);
+    }
     validateMappedFinalText(finalText, {
       taskExecutionId,
       inputStage: parseStage(mapping.inputStage),
@@ -961,6 +1001,8 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
         ? {}
         : { sourceRunId: requireStoredString(mapping.sourceRunId, 'source_run_id') }),
       finalText,
+      ...(coldStartFinalText ? { coldStartFinalText } : {}),
+      ...(mapping.settlementReason == null ? {} : { settlementReason: StrategySettlementReasonV2Schema.parse(mapping.settlementReason) }),
     };
   });
   const initialRunId = requireStoredString(row['initial_run_id'], 'initial_run_id');

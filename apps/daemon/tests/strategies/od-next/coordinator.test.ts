@@ -262,6 +262,8 @@ describe('OD Next planning coordinator', () => {
     expect(final.start).toBe(false);
     expect(final.result.action).toBe('completed'); expect(final.result.reasonCodes).toEqual([]);
     expect(final.result.task.runs).toHaveLength(2);
+    expect(projectStrategyTask(final.result.task, 'marker-request')).toMatchObject({ settlementReason: 'production_ready' });
+    expect(projectStrategyTask(final.result.task, 'marker-production')).toMatchObject({ settlementReason: 'text_only' });
     expect(StrategyTaskProjectionV2Schema.safeParse(projectStrategyTask(final.result.task)).success).toBe(true);
   });
 
@@ -281,6 +283,25 @@ describe('OD Next planning coordinator', () => {
     expect(result.result.reasonCodes).toEqual([]); expect(physical.size).toBe(0);
   });
 
+  it.each([
+    { text: 'Hello', facts: {}, reason: 'text_only' },
+    { text: '', facts: {}, reason: 'empty_reply' },
+    { text: 'Partial answer', facts: { truncated: true }, reason: 'truncated' },
+    { text: 'Still working', facts: { todoUnfinished: true }, reason: 'todo_unfinished' },
+    { text: 'Delivered', facts: { deliverableValid: true, todoUnfinished: true }, reason: 'deliverable_valid' },
+    { text: '<question-form id="scope">{"questions":[{"id":"audience","label":"Who?"}]}</question-form>', facts: {}, reason: 'question' },
+  ])('persists host settlement $reason without declaring delivery', ({ text, facts, reason }) => {
+    const { task, service } = markerHarness();
+    prepareAutomaticStrategyContinuation({
+      db, service, task, parsed: markerReply(text), createMeta: () => ({}),
+      completionEvidence: { physicalStatus: 'succeeded', deliverableValid: false, ...facts },
+    });
+    const reloaded = getStrategyTaskExecution(db, task.taskExecutionId)!;
+    expect(projectStrategyTask(reloaded)).toMatchObject({
+      outcome: 'completed', settlementReason: reason, deliverableValid: facts.deliverableValid === true,
+    });
+  });
+
   it.each(['failed', 'canceled'] as const)('marker protocol does not continue a %s process', status => {
     const { task, service, physical } = markerHarness();
     const result = prepareAutomaticStrategyContinuation({
@@ -289,6 +310,7 @@ describe('OD Next planning coordinator', () => {
     });
     expect(result.result.action).toBe(status === 'failed' ? 'blocked' : 'canceled');
     expect(physical.size).toBe(0);
+    expect(projectStrategyTask(result.result.task).settlementReason).toBe(status === 'failed' ? 'run_failed' : 'canceled');
   });
 
   it.each(['succeeded', 'failed', 'canceled'] as const)('marker fallback persists physical %s separately from delivery', status => {

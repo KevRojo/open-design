@@ -1,3 +1,5 @@
+import { composeColdProductionBundle } from './cold-production.js';
+import type { MarkerCompletionEvidence } from './marker-settlement.js';
 import type { OdNextReply } from './protocol.js';
 import { composeOdNextMarkerProductionTurn } from '@open-design/contracts';
 import type Database from 'better-sqlite3';
@@ -16,7 +18,7 @@ export function prepareMarkerContinuation<TMeta extends InternalRunCreateInput, 
   task: StrategyTaskExecutionRecord;
   parsed: OdNextReply;
   createMeta: (stage: 'production', instruction: string, taskRunIndex: number) => TMeta;
-  completionEvidence?: { physicalStatus: 'succeeded' | 'failed' | 'canceled'; deliverableValid: boolean };
+  completionEvidence?: MarkerCompletionEvidence;
   updatedAt?: number;
 }): PreparedAutomaticStrategyContinuation<TRun> {
   const settle = () => settleMarkerTurn(input.db, {
@@ -31,6 +33,9 @@ export function prepareMarkerContinuation<TMeta extends InternalRunCreateInput, 
   const instruction = composeOdNextMarkerProductionTurn({
     taskExecutionId: input.task.taskExecutionId, taskRunIndex: input.task.runs.length,
   });
+  const coldStartText = composeColdProductionBundle({
+    frozenBundleText: input.task.promptBundle.text, planningReply: input.parsed.visibleText, productionTurn: instruction,
+  });
   const meta = input.createMeta('production', instruction, input.task.runs.length);
   meta.doneKey = mintRunDoneKey();
   let result: OdNextCoordinatorResult | undefined;
@@ -42,7 +47,7 @@ export function prepareMarkerContinuation<TMeta extends InternalRunCreateInput, 
       const task = compareAndTransitionStrategyTaskExecution(input.db, {
         taskExecutionId: accepted.task.taskExecutionId, expectedRevision: accepted.task.revision,
         to: { route: 'full_plan', inputStage: 'production', outcome: 'running', executionMode: accepted.task.executionMode },
-        nextRun: { runId: nextRun.id, sourceRunId: input.task.latestRunId, finalText: instruction },
+        nextRun: { runId: nextRun.id, sourceRunId: input.task.latestRunId, finalText: instruction, coldStartText },
         ...(input.updatedAt === undefined ? {} : { updatedAt: input.updatedAt }),
       });
       result = { ...accepted, task };

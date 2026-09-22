@@ -1,3 +1,4 @@
+import type { MarkerCompletionEvidence } from './marker-settlement.js';
 import type { OdNextReply } from './protocol.js';
 
 import { prepareMarkerContinuation } from './marker-continuation.js';
@@ -30,6 +31,7 @@ export function projectStrategyTask(
   const viewedIndex = viewedRunId
     ? task.runs.findIndex((mapping) => mapping.runId === viewedRunId)
     : -1;
+  const settlementReason = task.runs[viewedRunId ? viewedIndex : task.runs.length - 1]?.settlementReason;
   const nextRunId = viewedIndex >= 0 ? task.runs[viewedIndex + 1]?.runId : undefined;
   const terminal = TERMINAL_OUTCOMES.has(task.outcome);
   const activeRunId = task.activeRunId ?? task.terminalRunId ?? task.latestRunId;
@@ -49,6 +51,7 @@ export function projectStrategyTask(
       snapshotId: task.snapshotId,
     },
     inputStage: task.inputStage,
+    ...(settlementReason ? { settlementReason } : {}),
     ...(task.deliverableValid === undefined ? {} : { deliverableValid: task.deliverableValid }),
     outcome: task.outcome,
     route: task.route,
@@ -90,7 +93,7 @@ export function prepareAutomaticStrategyContinuation<TMeta extends InternalRunCr
   task: StrategyTaskExecutionRecord;
   parsed: OdNextReply;
   createMeta: (stage: 'production', instruction: string, taskRunIndex: number) => TMeta;
-  completionEvidence?: { physicalStatus: 'succeeded' | 'failed' | 'canceled'; deliverableValid: boolean };
+  completionEvidence?: MarkerCompletionEvidence;
   updatedAt?: number;
 }): PreparedAutomaticStrategyContinuation<TRun> {
   return prepareMarkerContinuation(input);
@@ -106,7 +109,7 @@ export function completeAutomaticSimpleProduction(db: SqliteDb, input: {
     ...(input.updatedAt === undefined ? {} : { updatedAt: input.updatedAt }),
   }).task;
 }
-/** Fail closed when a continuation cannot prove native-session continuity. */
+/** Retain a stop for legacy mappings without recovery context or unsafe replay. */
 export function blockAutomaticContinuation(db: SqliteDb, input: {
   runId: string;
   updatedAt?: number;
@@ -123,6 +126,7 @@ export function blockAutomaticContinuation(db: SqliteDb, input: {
   return compareAndTransitionStrategyTaskExecution(db, {
     taskExecutionId: current.taskExecutionId,
     expectedRevision: current.revision,
+    settlementReason: 'run_failed',
     to: {
       route: current.route ?? 'full_plan',
       inputStage: current.inputStage,

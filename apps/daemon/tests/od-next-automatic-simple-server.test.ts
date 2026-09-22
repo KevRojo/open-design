@@ -672,6 +672,49 @@ process.exit(127);
     expect(history.messages.some(message => message.strategyTaskDelivered)).toBe(false);
   });
 
+  it.each(['missing-session', 'expired-session'] as const)('marker production cold-starts with its plan when %s', async mode => {
+    const fixture = await createPublicRolloutFixture(`marker-${mode}`, 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const created = await postRun(started.url, publicRunRequest(fixture, 'Create a landing page and a presentation.', `cold-${mode}`));
+    const request = await waitForRunTerminal(started.url, created.runId as string);
+    expect(request.status).toBe('succeeded');
+    const task = getStrategyTaskExecution(database(), created.strategyTask!.taskExecutionId)!;
+    expect(task.runs).toHaveLength(2);
+    const production = await waitForRunTerminal(started.url, task.latestRunId);
+    expect(production.status, JSON.stringify(production)).toBe('succeeded');
+    const invocations = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(invocations).toHaveLength(mode === 'expired-session' ? 3 : 2);
+    const cold = invocations.at(-1)!;
+    expect(cold.argv).not.toContain('resume');
+    expect(cold.stdin).toContain('open_design_prompt_bundle');
+    expect(cold.stdin).toContain('Create a landing page and a presentation.');
+    expect(cold.stdin).toContain('Plan: create a landing page and a matching deck.');
+    expect(cold.stdin).toContain('This is the production turn');
+    expect(cold.stdin).not.toContain('Plan-to-production continuation:');
+    const events = (await readFile(production.eventsLogPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const transports = events.filter(event => event.data?.type === 'strategy_production_transport').map(event => event.data.transport);
+    expect(transports).toEqual(mode === 'expired-session' ? ['resume', 'cold_start'] : ['cold_start']);
+    expect(await readFile(path.join(cold.cwd, 'landing.html'), 'utf8')).toContain('Landing');
+    const settled = getStrategyTaskExecution(database(), task.taskExecutionId)!;
+    expect(settled.outcome).toBe('completed');
+    expect(settled.runs[0]?.settlementReason).toBe('production_ready');
+    expect(settled.runs).toHaveLength(2);
+  });
+
+  it('does not cold-replay production after a tool ran before resume failure', async () => {
+    const fixture = await createPublicRolloutFixture('marker-expired-side-effect', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const created = await postRun(started.url, publicRunRequest(fixture, 'Create a landing page and a presentation.', 'unsafe-cold'));
+    await waitForRunTerminal(started.url, created.runId as string);
+    const task = getStrategyTaskExecution(database(), created.strategyTask!.taskExecutionId)!;
+    const production = await waitForRunTerminal(started.url, task.latestRunId);
+    expect(production.status).toBe('failed');
+    expect(production.strategyTask).toMatchObject({ outcome: 'blocked', settlementReason: 'run_failed' });
+    expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(2);
+  });
+
   it('marker protocol delivers an independent image while preserving an existing prototype page', async () => {
     const fixture = await createPublicRolloutFixture('marker-image', 'design');
     started = fixture.started; binDir = fixture.binDir;
@@ -2543,7 +2586,18 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => { stdin += chunk; });
 process.stdin.on('end', () => {
   fs.appendFileSync(logPath, JSON.stringify({ argv, stdin, cwd: process.cwd(), startedAt: Date.now() }) + '\\n');
+  if (['marker-expired-session', 'marker-expired-side-effect'].includes(${JSON.stringify(label)}) && argv.includes('resume')) {
+    if (${JSON.stringify(label)} === 'marker-expired-side-effect') {
+      console.log(JSON.stringify({ type: 'item.completed', item: {
+        id: 'side-effect', type: 'command_execution', command: 'echo executed', aggregated_output: 'executed', exit_code: 0, status: 'completed',
+      } }));
+    }
+    process.stderr.write('no rollout found for thread id invalid-session\\n');
+    process.exit(1);
+  }
+  if (${JSON.stringify(label)} !== 'marker-missing-session') {
   console.log(JSON.stringify({ type: 'thread.started', thread_id: ${JSON.stringify(label.startsWith('marker-') ? THREAD_ID : 'public-rollout-session')} }));
+  }
   console.log(JSON.stringify({ type: 'turn.started' }));
   if (stdin.includes('Hold the public rollout run open until canceled.') && !stdin.includes('Historical task context.')) {
     setInterval(() => {}, 1 << 30);
@@ -2564,7 +2618,7 @@ process.stdin.on('end', () => {
       if (!key) throw new Error('Current host marker key was not injected');
       text = 'Plan: deliver a standalone dog image only.\\n<od-production-ready key="' + key + '" />';
     }
-  } else if (${JSON.stringify(label)} === 'marker-production') {
+  } else if (['marker-production', 'marker-missing-session', 'marker-expired-session', 'marker-expired-side-effect'].includes(${JSON.stringify(label)})) {
     if (stdin.includes('This is the production turn')) {
       fs.writeFileSync('landing.html', '<!doctype html><html><body>Landing</body></html>');
       fs.writeFileSync('deck.html', '<!doctype html><html><body>Deck</body></html>');

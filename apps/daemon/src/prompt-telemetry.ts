@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-import { OD_NEXT_INTENT_RESOLUTION_TURN_SCHEMA, parseOdNextIntentResolutionTurnV1, type StrategyInputStageV2 } from '@open-design/contracts';
+import { OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2, OD_NEXT_INTENT_RESOLUTION_TURN_SCHEMA, parseOdNextIntentResolutionTurnV1, type StrategyInputStageV2 } from '@open-design/contracts';
 
 import { redactSecrets } from './redact.js';
 import type { StrategyTaskFinalTextIdentity } from './strategies/task-store.js';
@@ -497,7 +497,9 @@ export function bindOdNextExactSendPromptEvidence(input: {
       throw new InvalidOdNextExactSendPromptError('OD Next exact-send Prompt kind does not match its mapped task stage.');
     }
   }
-  const expectedKind = input.stage === 'request' && !resolution ? 'bundle' : 'turn';
+  const coldProduction = input.stage === 'production' && input.persisted.kind === 'bundle'
+    && input.persisted.schema === OD_NEXT_PROMPT_BUNDLE_SCHEMA_V2;
+  const expectedKind = (input.stage === 'request' && !resolution) || coldProduction ? 'bundle' : 'turn';
   if (input.persisted.kind !== expectedKind) {
     throw new InvalidOdNextExactSendPromptError(
       'OD Next exact-send Prompt kind does not match its mapped task stage.',

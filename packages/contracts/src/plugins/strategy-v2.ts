@@ -329,6 +329,14 @@ const StrategyTaskBlockedContextV2Schema = z.object({
 }).strict();
 export type StrategyTaskBlockedContextV2 = z.infer<typeof StrategyTaskBlockedContextV2Schema>;
 
+/** Host observations, not model declarations or file-delivery verdicts. */
+export const StrategySettlementReasonV2Schema = z.enum([
+  'production_ready', 'deliverable_valid', 'question', 'plan_only',
+  'truncated', 'todo_unfinished', 'text_only', 'empty_reply',
+  'run_failed', 'canceled', 'interrupted',
+]);
+export type StrategySettlementReasonV2 = z.infer<typeof StrategySettlementReasonV2Schema>;
+
 export const StrategyTaskProjectionV2Schema = z.object({
   taskExecutionId: z.string().min(1),
   strategy: StrategyTaskProjectionIdentityV2Schema,
@@ -348,6 +356,8 @@ export const StrategyTaskProjectionV2Schema = z.object({
   }).strict()).max(3).optional(),
   /** Host file observation, independent of terminal turn status. Absent on old tasks. */
   deliverableValid: z.boolean().optional(),
+  /** Reason for the viewed physical round ending; absent before settlement. */
+  settlementReason: StrategySettlementReasonV2Schema.optional(),
   terminal: z.boolean(),
   blockedContext: StrategyTaskBlockedContextV2Schema.optional(),
 }).strict().superRefine((value, context) => {

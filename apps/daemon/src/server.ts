@@ -1,5 +1,6 @@
 // @ts-nocheck
 
+import { todoSnapshotHasUnfinishedWork } from '@open-design/contracts';
 import { createUserDesignSystem } from './design-systems/index.js';
 import { resolveWorkspaceScope } from './collab/workspace-scope.js';
 import { startEvidenceDelivery } from './services/evidence-delivery.js';
@@ -10796,7 +10797,7 @@ export async function startServer({
         'OD Next Run retains an immutable input owner but has no persisted task mapping.',
       );
     }
-    const strategyRunMapping = strategyTaskAtStart?.runs.find(
+    let strategyRunMapping = strategyTaskAtStart?.runs.find(
       (mapping) => mapping.runId === run.id,
     ) ?? null;
     if (
@@ -10827,7 +10828,7 @@ export async function startServer({
         'OD Next Run, request, immutable input owner, and persisted task mapping are not one exact scope.',
       );
     }
-    const persistedStrategyFinalText = strategyRunMapping?.finalText.text ?? null;
+    let persistedStrategyFinalText = strategyRunMapping?.finalText.text ?? null;
     const isOdNextInitialRun = Boolean(strategyTaskAtStart && isInitialStrategyTaskRun(strategyTaskAtStart, run.id));
     const hasExplicitCurrentPrompt = Object.prototype.hasOwnProperty.call(
       chatBody,
@@ -11928,12 +11929,25 @@ export async function startServer({
       strategyTaskAtStart
       && !isOdNextInitialRun
       && !agentResumeCtx.isResuming
+      && !strategyRunMapping?.coldStartFinalText
     ) {
       const blocked = blockAutomaticContinuation(db, { runId: run.id });
       if (blocked) run.strategyTask = projectStrategyTask(blocked, run.id);
       throw new Error(
         'OD Next continuation requires the locked native session; cold re-seeding is forbidden.',
       );
+    }
+    if (strategyRunMapping?.coldStartFinalText) {
+      const transport = agentResumeCtx.isResuming ? 'resume' : 'cold_start';
+      if (transport === 'cold_start') {
+        strategyRunMapping = { ...strategyRunMapping, finalText: strategyRunMapping.coldStartFinalText };
+        persistedStrategyFinalText = strategyRunMapping.finalText.text;
+      }
+      design.runs.emit(run, 'diagnostic', {
+        type: 'strategy_production_transport', transport,
+        sourceRunId: strategyRunMapping.sourceRunId,
+        promptSha256: strategyRunMapping.finalText.sha256,
+      });
     }
     const publishNativeSessionRecoveryMetadata = () => {
       if (!run.nativeSessionRecovery) return;
@@ -16109,12 +16123,16 @@ export async function startServer({
           resumeSessionId: agentResumePromptPolicy.resumeSessionId,
         }).autoReseedFullTranscript
       ) {
-        if (strategyTaskAtStart && !isOdNextInitialRun) {
+        const resumeSideEffects = runSideEffectsForRun(run);
+        const safeColdProduction = strategyRunMapping?.coldStartFinalText
+          && !resumeSideEffects.toolCallSeen && !resumeSideEffects.artifactWriteSeen
+          && !resumeSideEffects.liveArtifactSeen && !resumeSideEffects.userVisibleOutputSeen;
+        if (strategyTaskAtStart && !isOdNextInitialRun && !safeColdProduction) {
           const blocked = blockAutomaticContinuation(db, { runId: run.id });
           if (blocked) run.strategyTask = projectStrategyTask(blocked, run.id);
           send('error', createSseErrorPayload(
             'AGENT_SESSION_RESUME_FAILED',
-            'The locked OD Next native session is unavailable; the task was blocked without cold re-seeding.',
+            'The OD Next native session is unavailable and a safe cold restart cannot be proven.',
             { retryable: false },
           ));
           return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
@@ -16856,7 +16874,11 @@ export async function startServer({
               service: internalRunCreation,
               task: strategyTaskAtStart,
               parsed: strategyProtocolResult,
-              completionEvidence: { physicalStatus: 'succeeded', deliverableValid },
+              completionEvidence: {
+                physicalStatus: 'succeeded', deliverableValid,
+                truncated: run.truncatedMidTurn === true,
+                todoUnfinished: todoSnapshotHasUnfinishedWork(run.lastTodoSnapshot),
+              },
               createMeta: (stage, instruction, taskRunIndex) => {
                 const identity = createHash('sha256')
                   .update(`${strategyTaskAtStart.taskExecutionId}:${stage}:${taskRunIndex}`)
