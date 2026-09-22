@@ -5,13 +5,16 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
-import { closeDatabase, openDatabase, insertProject, insertConversation, upsertPreviewComment } from '../src/db.js';
+import { closeDatabase, openDatabase, insertProject, insertConversation, upsertPreviewComment, getWorkspaceProjectByProjectId } from '../src/db.js';
 import { createCollabRuntime } from '../src/collab/runtime.js';
 import { registerCollabSyncRoutes } from '../src/routes/collab-sync.js';
 import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
 import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
 import { enqueuePublishedFileComments } from '../src/collab/published-file-comment-backfill.js';
-import { createCommentRelayOutboxStore } from '../src/collab/comment-relay-outbox.js';
+import { createCommentRelayOutboxStore, commentRelayLocalBindingMatches } from '../src/collab/comment-relay-outbox.js';
+import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
+import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.js';
+import { commentRelayScope } from '../src/collab/comment-relay-scope.js';
 import { runVelaResourceCommand } from '../src/collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../src/integrations/vela.js';
 
@@ -84,6 +87,46 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
         expect(row.comment).toMatchObject({ filePath: scope.filePath, memberId: 'original-author' });
         expect(row.publication).toEqual({ ...store.getRevision(scope), publicFilePath: 'index.html' });
       }
+      // Discard publisher objects before creating a fresh delivery service.
+      const revision = store.getRevision(scope);
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      runtime.dispose(); closeDatabase();
+      const reopened = openDatabase(root);
+      const recoveredQueue = createCommentRelayOutboxStore(reopened);
+      const recoveredStore = createSqlitePublicFilePublicationStore(reopened);
+      expect(recoveredQueue.listDue(Date.now())).toEqual(rows);
+      expect(recoveredQueue.listDue(Date.now()).every(row => recoveredQueue.isPublicationCurrent!(row))).toBe(true);
+      let offline = true;
+      const delivered: unknown[] = [];
+      const relay = createCollabCloudService({
+        client: createVelaCliCollabClient({ run: async (args, workspaceId, options) => {
+          expect(args).toEqual(['comment', 'push', 'p', '--comment-file', '-']);
+          expect(workspaceId).toBe('w');
+          if (offline) throw new Error('simulated transport offline');
+          if (typeof options?.input !== 'string') throw new Error('expected serialized comment on stdin');
+          delivered.push(JSON.parse(options.input));
+          return JSON.stringify({ seq: delivered.length });
+        } }),
+        commentOutbox: recoveredQueue, listProjectIds: () => [], retryDelayMs: () => 0,
+        resolveCommentRelayWorkspaceContext: async () => context,
+        listRemoteProjectRelayBindings: async () => [{ projectId: 'p', ownerMemberId: 'owner' }],
+        validateCommentRelayProjectBinding: record => commentRelayLocalBindingMatches(record, getWorkspaceProjectByProjectId(reopened, record.projectId)),
+        commentRelayScope: (projectId, filePath, ctx) => commentRelayScope({ projectId, filePath, context: ctx,
+          binding: getWorkspaceProjectByProjectId(reopened, projectId), publications: recoveredStore }),
+        resolveLocalConversationId: () => 'a', mergeComment: () => 'unchanged',
+      });
+      try {
+        await relay.flushPendingComments();
+        expect(delivered).toEqual([]); expect(recoveredQueue.count()).toBe(2);
+        expect(recoveredStore.getRevision(scope)).toEqual(revision);
+        offline = false;
+        await relay.flushPendingComments();
+        expect(delivered).toEqual(['first', 'second'].map(id => expect.objectContaining({
+          id, note: id, memberId: 'original-author', filePath: 'index.html',
+        })));
+        expect(recoveredQueue.count()).toBe(0);
+        await relay.flushPendingComments(); expect(delivered).toHaveLength(2);
+      } finally { relay.dispose(); }
     }
   } finally {
     if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
