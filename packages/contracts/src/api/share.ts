@@ -887,3 +887,107 @@ export interface SharePublishBindingPending {
  * response is a token in a log.
  */
 export const SHARE_PUBLISH_RESPONSE_OMITS_INTERNAL_IDS = true;
+
+/* ------------------------------------------------------------------ *
+ * Share entry: is what is serving still what you would publish?
+ * ------------------------------------------------------------------ */
+
+/**
+ * Whether the live share still matches the content it would publish now.
+ *
+ * This is a SECOND axis, orthogonal to {@link ShareStatus}. Status answers
+ * "does a share exist and is it serving"; freshness answers "is what it
+ * serves still current". Folding them into one enum would force a `stopped`
+ * share to also claim a freshness it cannot have.
+ *
+ * ## `unknown` is a third value, not a default
+ *
+ * It means the comparison could not be made — the query is in flight, it
+ * failed, or the stored record predates fingerprinting and cannot be compared.
+ * It is NOT `outdated` and it is NOT "never shared". Collapsing it in either
+ * direction is a visible defect:
+ *
+ * - read as fresh → the entry shows a confident "shared" state for content
+ *   that may have moved on
+ * - read as outdated → the person is nagged to re-publish something that is
+ *   already current
+ * - read as none → **the existing share link disappears from the UI**, which
+ *   is the worst of the three: the share is still live and public, and the
+ *   person has just lost the only handle they had on it
+ *
+ * So `unknown` keeps the plain entry and keeps the copy-link affordance. It
+ * says less, and says nothing false.
+ */
+export const SHARE_CONTENT_FRESHNESS = ['current', 'outdated', 'unknown'] as const;
+export type ShareContentFreshness = (typeof SHARE_CONTENT_FRESHNESS)[number];
+
+/**
+ * What may and may not establish `current`.
+ *
+ * `current` requires positive proof: a fingerprint over the COMPLETE publish
+ * plan, compared against the payload of the last successful publish. Complete
+ * means the dependency resources too — a share whose entry HTML is untouched
+ * but whose stylesheet changed is `outdated`, and a comparison that only
+ * looked at the entry would call it `current` and be wrong.
+ *
+ * None of the following may stand in for that comparison:
+ *
+ * - **`status === 'active'`** — proves a share is serving, says nothing about
+ *   what it serves.
+ * - **file mtime** — changes without content changing, and fails to change
+ *   when content is restored to an earlier state.
+ * - **url or slug** — the slug is a STABLE alias across updates by design
+ *   (see the addressing section above). It cannot distinguish versions; that
+ *   is the point of it.
+ * - **a revision or counter that is not derived from content** — it answers
+ *   "did we publish again", not "is the content the same".
+ *
+ * When the fingerprint is unavailable, the answer is `unknown`. Guessing from
+ * any of the above is how a confident wrong state gets shipped.
+ */
+export const SHARE_FRESHNESS_REQUIRES_CONTENT_FINGERPRINT = true;
+
+/**
+ * What the share entry should show, derived once so no surface re-derives it.
+ *
+ * Three appearances, and the mapping is a total function of the two axes:
+ *
+ * - `plain` — no live share to point at, or nothing trustworthy to say about
+ *   one. Covers `none`, `stopped`, `preparing`, and every `unknown`.
+ * - `published` — the "already shared" affirmative state. Requires BOTH an
+ *   `active` share AND `current` freshness. Nothing else earns it.
+ * - `outdated` — an active share whose content has provably moved on. Leads
+ *   to the update path; it must never be drawn as the affirmative state.
+ *
+ * `canCopyLink` is deliberately separate from appearance: a share that is
+ * `active` still has a working link while its freshness is `unknown` or
+ * `outdated`, and hiding the copy affordance there would strand the person.
+ */
+export interface ShareEntryPresentation {
+  appearance: 'plain' | 'published' | 'outdated';
+  /** True whenever a live link exists, regardless of how fresh it is. */
+  canCopyLink: boolean;
+}
+
+/**
+ * The single place the two axes become an appearance.
+ *
+ * Kept as a function rather than a table so the `unknown` rule cannot be
+ * quietly dropped by a caller writing `status === 'active' ? green : plain`.
+ */
+export function shareEntryPresentation(input: {
+  status: ShareStatus;
+  freshness: ShareContentFreshness;
+}): ShareEntryPresentation {
+  if (input.status !== 'active') {
+    return { appearance: 'plain', canCopyLink: false };
+  }
+  if (input.freshness === 'current') {
+    return { appearance: 'published', canCopyLink: true };
+  }
+  if (input.freshness === 'outdated') {
+    return { appearance: 'outdated', canCopyLink: true };
+  }
+  // unknown: the link works, but nothing affirmative may be claimed about it.
+  return { appearance: 'plain', canCopyLink: true };
+}
