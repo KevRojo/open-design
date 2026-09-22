@@ -384,6 +384,17 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   }
   await page.setViewportSize({ width: 1600, height: 720 });
   await expect(floatingComposer).toHaveCSS('width', '300px');
+  await expect(floatingComposer).toHaveCSS('gap', '8px');
+  const composerTitle = floatingComposer.locator('.comment-popover-titlebar');
+  const composerBody = floatingComposer.locator('.comment-popover-body');
+  const composerActions = floatingComposer.locator('.comment-popover-actions');
+  await expect(composerTitle).toHaveCSS('margin', '0px');
+  await expect(composerActions).toHaveCSS('margin-top', '0px');
+  const titleRect = await composerTitle.boundingBox();
+  const bodyRect = await composerBody.boundingBox();
+  const actionsRect = await composerActions.boundingBox();
+  expect(bodyRect!.y - (titleRect!.y + titleRect!.height)).toBeCloseTo(8, 0);
+  expect(actionsRect!.y - (bodyRect!.y + bodyRect!.height)).toBeCloseTo(8, 0);
   await test.info().attach('comment-composer-width-wide', { body: await page.screenshot(), contentType: 'image/png' });
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect.poll(async () => (await floatingComposer.boundingBox())?.width ?? 0).toBeLessThan(300);

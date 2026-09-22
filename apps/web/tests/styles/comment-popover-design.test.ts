@@ -4,6 +4,17 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'postcss';
 
 describe('floating comment card surface', () => {
+  it('owns the three-section gap without stacking legacy margins', () => {
+    const css = parse(readFileSync(resolve(__dirname, '../../src/components/BoardComposerPopover.module.css'), 'utf8'));
+    const values = (selector: string) => {
+      const declarations: Record<string, string> = {};
+      css.walkRules(selector, rule => { rule.walkDecls(decl => { declarations[decl.prop] = decl.value; }); });
+      return declarations;
+    };
+    expect(values('.surface:global(.comment-popover)')).toMatchObject({ gap: '8px' });
+    expect(values('.surface > :global(.comment-popover-titlebar)')).toMatchObject({ margin: '0' });
+    expect(values('.surface > :global(.comment-popover-actions)')).toMatchObject({ 'margin-top': '0' });
+  });
   it('distinguishes editable and readonly notes without truncating content or removing focus treatment', () => {
     const css = parse(readFileSync(resolve(__dirname, '../../src/components/BoardComposerPopover.module.css'), 'utf8'));
     const declarations = (selector: string) => {

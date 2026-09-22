@@ -14,9 +14,18 @@
   color: #666666;
 }
 
+.surface > :global(.comment-popover-titlebar) {
+  margin: 0;
+}
+
+.surface > :global(.comment-popover-actions) {
+  margin-top: 0;
+}
+
 /* Floating annotation card only; the docked composer keeps its host surface. */
 .surface:global(.comment-popover) {
   width: min(300px, calc(100% - 28px));
+  gap: 8px;
   padding: 12px;
   border: 1px solid #0000000D;
   border-radius: 10px;
