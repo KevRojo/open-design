@@ -321,7 +321,7 @@ const SHARE_BOOLEAN_FLAGS = new Set([
   'help', 'h', 'json',
 ]);
 const COMMENT_STRING_FLAGS = new Set([
-  'daemon-url', 'workspace', 'workspace-member', 'prompt', 'prompt-file', 'target', 'status', 'read-at',
+  'daemon-url', 'workspace', 'workspace-member', 'prompt', 'prompt-file', 'target', 'status', 'read-at', 'file',
 ]);
 const COMMENT_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 // Defined near the top because `runFigma` is reachable through the
@@ -445,10 +445,13 @@ function printCommentHelp() {
   od comment delete <projectId> <conversationId> <commentId> [--json]
   od comment read <projectId> [--read-at <epoch-ms>] [--json]
   od comment align <projectId> [--json]
+  od comment sync-state <projectId> [--file <path>] [--json]
+  od comment retry-backfill <projectId> --file <path> [--json]
 
 Manage comments through the same daemon HTTP API as the workspace UI.
 
 Options:
+  --file <path>               Exact locally published file for backfill status/retry.
   --target <json>             PreviewCommentTarget JSON for create/update.
   --prompt <text>             Comment body.
   --prompt-file <path|->      Read the comment body from a file or stdin; mutually exclusive with --prompt.
@@ -496,14 +499,31 @@ async function runComment(args) {
   }
   const positional = positionalArgs(rest, COMMENT_STRING_FLAGS);
   const [projectId, conversationId, commentId] = positional;
-  if (!['list', 'create', 'update', 'status', 'delete', 'read', 'align'].includes(sub)) {
+  if (!['list', 'create', 'update', 'status', 'delete', 'read', 'align', 'sync-state', 'retry-backfill'].includes(sub)) {
     commentUsageError(`unknown subcommand: od comment ${sub}`);
   }
-  if (!projectId || (sub !== 'read' && sub !== 'align' && (!conversationId || ((sub === 'update' || sub === 'status' || sub === 'delete') && !commentId)))) {
+  if (!projectId || (!['read', 'align', 'sync-state', 'retry-backfill'].includes(sub) && (!conversationId || ((sub === 'update' || sub === 'status' || sub === 'delete') && !commentId)))) {
     commentUsageError(`od comment ${sub} requires projectId, conversationId${sub === 'update' || sub === 'status' || sub === 'delete' ? ', and commentId' : ''}`);
   }
   const workspaceHeaders = workspaceHeadersFromExplicitFlags(flags) ?? {};
   const base = await cliDaemonBaseUrl(flags);
+  if (sub === 'sync-state' || sub === 'retry-backfill') {
+    if (sub === 'retry-backfill' && !flags.file?.trim()) commentUsageError('retry-backfill requires --file');
+    const query = flags.file === undefined ? '' : `?filePath=${encodeURIComponent(flags.file)}`;
+    let response;
+    try {
+      response = await fetch(`${base}/api/projects/${encodeURIComponent(projectId)}/comment-sync-state${query}`, {
+        method: sub === 'retry-backfill' ? 'POST' : 'GET', headers: workspaceHeaders,
+      });
+    } catch (error) {
+      surfaceFetchError(error, base);
+      process.exit(3);
+    }
+    if (!response.ok) return structuredHttpFailure(response, 'comment-sync-rejected');
+    const payload = await response.json();
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return;
+  }
   if (sub === 'align') {
     let response;
     try {

@@ -1,10 +1,15 @@
 import { it, expect } from 'vitest';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { createSqlitePublicFilePublicationStore } from '../src/collab/public-file-publication-store.js';
+import { recordPublishedCommentBackfill } from '../src/collab/published-comment-backfill-state.js';
 import express from 'express';
 import { createServer } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
+import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext, type CommentSyncState } from '@open-design/contracts';
 import { openDatabase, closeDatabase, insertProject } from '../src/db.js';
 import { createCommentRelayOutboxStore } from '../src/collab/comment-relay-outbox.js';
 import { createCommentSyncStateService } from '../src/collab/comment-sync-state.js';
@@ -53,6 +58,38 @@ it('supplies scoped K8 over HTTP with unknown, login recovery, isolated retry an
     expect(db.prepare("SELECT * FROM comment_relay_outbox WHERE comment_id!='mine'").all()).toEqual(foreignBefore);
     queue.acknowledge(mine); available = false;
     expect(await (await fetch(url)).json()).toEqual({ pending: 0, lastError: 'COMMENT_SYNC_DELIVERY_FAILED', sessionMissing: false, shareStopped: null });
+    available = true;
+    const publications = createSqlitePublicFilePublicationStore(db);
+    for (const filePath of ['a.html', 'b.html']) {
+      const scope = { resourceTeamId: 'w', ownerMemberId: 'm', projectId: 'p', filePath };
+      publications.set(scope, { slug: filePath, url: 'https://example.test', fileName: filePath });
+      const revision = publications.getRevision(scope)!;
+      db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: revision, commentIds: [filePath] }))();
+      for (const id of [filePath, `late-${filePath}`]) {
+        queue.enqueue({ workspaceId: 'w', workspaceMemberId: 'm', teamId: 'w', relayScope: 'personal', projectId: 'p', expectedOwnerMemberId: 'm', comment: { id, filePath } as never, publication: { ...revision, publicFilePath: filePath } });
+        const row = queue.listDue(Date.now()).find(row => row.commentId === id)!;
+        queue.defer(row, { nextAttemptAt: 9000000000000, error: 'private transport detail' });
+      }
+    }
+    expect((await (await fetch(url)).json() as CommentSyncState).backfill).toBeUndefined();
+    const fileUrl = `${url}?filePath=a.html`;
+    const state = await (await fetch(fileUrl)).json() as CommentSyncState;
+    expect(state.backfill).toMatchObject({ state: 'failed', filePath: 'a.html', retryable: true });
+    expect(JSON.stringify(state)).not.toContain('private transport detail');
+    expect((await fetch(`${url}?filePath=`, { method: 'POST' })).status).toBe(400);
+    const untouched = db.prepare("SELECT * FROM comment_relay_outbox WHERE comment_id!='a.html'").all();
+    const base = `http://127.0.0.1:${address.port}`;
+    const run = (action: string) => promisify(execFile)(process.execPath, [
+      fileURLToPath(new URL('../../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
+      fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'comment', action, 'p', '--file', 'a.html', '--daemon-url', base, '--json',
+    ], { env: { ...process.env, NODE_OPTIONS: '' }, timeout: 15000 });
+    expect(JSON.parse((await run('sync-state')).stdout).backfill).toEqual(state.backfill);
+    expect(JSON.parse((await run('retry-backfill')).stdout).backfill.state).toBe('failed');
+    expect(queue.listDue(Date.now()).filter(row => row.projectId === 'p' && row.workspaceId === 'w' && row.workspaceMemberId === 'm').map(row => row.commentId)).toEqual(['a.html']);
+    expect(db.prepare("SELECT * FROM comment_relay_outbox WHERE comment_id!='a.html'").all()).toEqual(untouched);
+    queue.acknowledge(queue.listDue(Date.now()).find(row => row.commentId === 'a.html')!, 'delivered');
+    expect(await (await fetch(fileUrl)).json()).toMatchObject({ backfill: { state: 'succeeded' } });
+    expect(await (await fetch(`${url}?filePath=b.html`)).json()).toMatchObject({ backfill: { state: 'failed' } });
     fail = true; expect((await fetch(url)).status).toBe(503);
   } finally {
     if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));

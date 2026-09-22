@@ -218,7 +218,12 @@ export function registerCommentSyncStateRoutes(app: Express, deps: {
         if (!resolution.ok) return res.status(resolution.status).json({ error: resolution.code });
         const context = resolution.context;
         if (!context?.workspaceId || !context.workspaceMemberId) return res.json(null);
-        const scope = { projectId, workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+        const requestedFile = req.query.filePath;
+        if (requestedFile !== undefined && (typeof requestedFile !== 'string' || !requestedFile.trim())) {
+          return res.status(400).json({ error: 'COMMENT_SYNC_FILE_REQUIRED' });
+        }
+        const scope = { projectId, workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId,
+          ...(typeof requestedFile === 'string' ? { filePath: requestedFile } : {}) };
         return res.json(await deps.service[method === 'post' ? 'retry' : 'read'](scope));
       } catch {
         return res.status(503).json({ error: 'COMMENT_SYNC_STATE_UNAVAILABLE' });
