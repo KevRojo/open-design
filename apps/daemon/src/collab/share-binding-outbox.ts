@@ -78,12 +78,13 @@ export function createShareBindingOutbox(db: Database.Database): ShareBindingOut
 /** Use only after server-confirmed content publication and failed binding.
  * Availability is explicit: storage alone is not an automatic retry mechanism.
  */
-export function recordPendingShareBinding(outbox: ShareBindingOutbox, intent: ShareBindingIntent, retryAvailable = false): SharePublishResult {
+export function recordPendingShareBinding(outbox: ShareBindingOutbox, intent: ShareBindingIntent, retryAvailable = false, propagateStorageFailure = false): SharePublishResult {
   const receipt = confirmedReceipt(intent.receipt);
   try {
     const task = outbox.enqueue({ ...intent, receipt });
     return { status: 'binding_pending', receipt, binding: { retrying: retryAvailable && task.failureCount < 5 } };
-  } catch {
+  } catch (error) {
+    if (propagateStorageFailure) throw error;
     return { status: 'binding_pending', receipt, binding: { retrying: false, code: 'SHARE_BINDING_RETRY_UNAVAILABLE' } };
   }
 }
