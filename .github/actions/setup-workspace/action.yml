@@ -176,8 +176,13 @@ runs:
       uses: actions/cache/restore@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}
-        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        # A filtered install only guarantees the dependency set selected by its
+        # profile. Keep that set in the cache identity so the first narrow job
+        # cannot publish a partial store under the workspace-wide lockfile key.
+        key: pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-${{ hashFiles('pnpm-lock.yaml') }}
         restore-keys: |
+          pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-
+          pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           pnpm-store-${{ runner.os }}-
 
     - name: Install dependencies
@@ -335,7 +340,7 @@ runs:
       uses: actions/cache/save@v5
       with:
         path: ${{ steps.pnpm-store.outputs.path }}
-        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        key: pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-${{ hashFiles('pnpm-lock.yaml') }}
 
     - name: Summarize postinstall timing observation
       id: postinstall-timings

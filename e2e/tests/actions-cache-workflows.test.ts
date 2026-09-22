@@ -85,12 +85,21 @@ describe("GitHub Actions cache workflows", () => {
       "- name: Install dependencies",
     );
     expect(restoreStep).toContain("restore-keys: |");
+    expect(restoreStep).toContain(
+      "pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-",
+    );
+    expect(restoreStep).toContain(
+      "pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}",
+    );
     expect(restoreStep).toContain("pnpm-store-${{ runner.os }}-");
 
     const saveStep = action.slice(action.indexOf("- name: Save pnpm store"));
     expect(saveStep).toContain("inputs.save-pnpm-cache == 'true'");
     expect(saveStep).toContain("steps.persistent-pnpm-store.outputs.enabled != 'true'");
     expect(saveStep).toContain("steps.pnpm-cache-restore.outputs.cache-hit != 'true'");
+    expect(saveStep).toContain(
+      "pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-${{ hashFiles('pnpm-lock.yaml') }}",
+    );
     expect(saveStep).not.toContain("github.ref");
     expect(saveStep).not.toContain("github.event_name");
     expect(action).not.toContain("feat/plan-foundation");
