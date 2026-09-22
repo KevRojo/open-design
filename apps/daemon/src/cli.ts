@@ -7162,8 +7162,8 @@ function printProjectShareHelp() {
                     Publish a project file using the same endpoint as the UI.
   od project share get <id> --path <file> [--json]
                     Read the current publication (null when not published).
-  od project share status <id> --path <file> [--json]
-                    Alias for get.
+  od project share status <id> [--path <file>] [--json]
+                    Project binding history, or file lifecycle with --path.
   od project share stop <id> --path <file> --slug <slug> [--json]
                     Stop the specified public snapshot (not resumable).
 
@@ -7199,10 +7199,11 @@ async function runProjectShare(args) {
   const positional = positionalArgs(rest, stringFlags);
   const id = positional[0];
   const filePath = typeof flags.path === 'string' ? flags.path.trim() : '';
+  const projectStatus = requestedAction === 'status' && !filePath;
   const missingFlagValue = [...stringFlags].some((key) =>
     typeof flags[key] === 'string' && (!flags[key].trim() || flags[key].startsWith('--')));
   const slug = typeof flags.slug === 'string' ? flags.slug.trim() : '';
-  if (!['publish', 'get', 'stop', 'retry-stop'].includes(action) || positional.length !== 1 || !id?.trim() || !filePath || missingFlagValue || (['stop', 'retry-stop'].includes(action) && !slug)) {
+  if (!['publish', 'get', 'stop', 'retry-stop'].includes(action) || positional.length !== 1 || !id?.trim() || (!filePath && !projectStatus) || missingFlagValue || (['stop', 'retry-stop'].includes(action) && !slug)) {
     console.error('Usage: od project share <publish|get|status|stop|retry-stop> <id> --path <file> [--json] (stop requires --slug <slug>)');
     process.exit(2);
   }
@@ -7212,7 +7213,7 @@ async function runProjectShare(args) {
   let resp;
   try {
     resp = await fetch(
-      action === 'retry-stop' ? `${base}/api/public-file-stops/retry` : `${base}/api/projects/${encodeURIComponent(id)}/files/${encodeURIComponent(filePath)}/publish-public`,
+      projectStatus ? `${base}/api/projects/${encodeURIComponent(id)}/share-state` : action === 'retry-stop' ? `${base}/api/public-file-stops/retry` : `${base}/api/projects/${encodeURIComponent(id)}/files/${encodeURIComponent(filePath)}/publish-public`,
       action === 'retry-stop'
         ? { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ projectId: id, filePath, slug }) }
         : action === 'stop'
@@ -7226,6 +7227,7 @@ async function runProjectShare(args) {
   if (!resp.ok) return structuredHttpFailure(resp);
   const data = await resp.json();
   if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+  if (projectStatus) return console.log(JSON.stringify(data, null, 2));
   if (['stop', 'retry-stop'].includes(action)) return console.log('Sharing stopped.');
   const publication = action === 'get' ? data.publication : data;
   console.log(publication ? publication.url : 'Not published.');
@@ -7257,8 +7259,8 @@ async function runProject(args) {
                     Publish a project file.
   od project share get <id> --path <file> [--json]
                     Read the current publication.
-  od project share status <id> --path <file> [--json]
-                    Alias for get.
+  od project share status <id> [--path <file>] [--json]
+                    Project binding history, or file lifecycle with --path.
   od project share stop <id> --path <file> --slug <slug> [--json]
                     Stop the specified public snapshot (not resumable).
   od project revoke-public-link <id> --path <file> --url <public-url>

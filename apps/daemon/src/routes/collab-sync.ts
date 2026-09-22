@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import type { ReadProjectShareState } from '../collab/vela-project-share-state.js';
 import { publishReservedVelaShareVersion } from '../collab/vela-share-publish.js';
 import type { createShareAliasReservations } from '../collab/share-alias-reservation.js';
 import type { createSharePublicationCompletion } from '../collab/share-publication-completion.js';
@@ -231,6 +232,7 @@ export interface RegisterCollabSyncRoutesDeps {
   /** Durable publication metadata used to restore public links after restart. */
   publicFilePublicationStore?: PublicFilePublicationStore;
   shareContentFingerprints?: ShareContentFingerprints;
+  readProjectShareState?: ReadProjectShareState;
   recordPublicFilePublication?: RecordPublicFilePublication;
   sharePublishing?: {
     reservations: ReturnType<typeof createShareAliasReservations>;
@@ -1452,7 +1454,24 @@ export function registerCollabSyncRoutes(
     }
   }));
 
+  app.get('/api/projects/:id/share-state', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const projectId = String(req.params.id);
+    const verification = await verifiedWorkspaceContextForRequest(req, projectId);
+    if (!verification.ok) return sendWorkspaceVerificationFailure(res, verification);
+    const context = verification.context;
+    const principal = publicFilePrincipal(context);
+    if (!context || !principal) return res.status(409).json(workspaceIdentityRequiredBody());
+    if (!deps.readProjectShareState) return res.status(503).json({ error: 'SHARE_STATE_UNAVAILABLE' });
+    try {
+      return res.json(await deps.readProjectShareState({ projectId, resourceTeamId: principal.teamId, ownerMemberId: principal.memberId }));
+    } catch {
+      return res.status(503).json({ error: 'SHARE_STATE_UNAVAILABLE' });
+    }
+  });
+
   app.get(/^\/api\/projects\/([^/]+)\/files\/(.+)\/publish-public$/u, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     // SAFETY: these RegExp routes expose numeric capture keys; Express types model named keys only.
     const params = req.params as unknown as { 0?: string; 1?: string };
     const projectId = String(params[0] ?? '');
@@ -1499,13 +1518,21 @@ export function registerCollabSyncRoutes(
         // Keep publication visibility independent from failed comparison.
       }
     }
-    const revision = publicFilePublicationStore.getRevision(scope);
-    const bindingPending = revision && deps.sharePublishing?.outbox.list().some(task =>
-      task.resourceTeamId === scope.resourceTeamId && task.ownerMemberId === scope.ownerMemberId
-      && task.projectId === scope.projectId && task.receipt.filePath === scope.filePath
-      && task.receipt.slug === revision.slug && task.publicationRevision === revision.token);
-    // A durable pending record is a retry witness, not a working copyable link.
-    return res.json({ publication: bindingPending ? null : publicFilePublicationStore.get(scope), freshness });
+    if (!deps.readProjectShareState) return res.status(503).json({ error: 'SHARE_STATE_UNAVAILABLE' });
+    try {
+      const history = await deps.readProjectShareState(scope);
+      const remote = history.publications.find(item => item.sourceFilePath === filePath);
+      const local = publicFilePublicationStore.get(scope);
+      const response: import('@open-design/contracts').ProjectFilePublicShareResponse = {
+        publication: local && local.slug === remote?.slug ? local : null,
+        status: remote?.status ?? 'none',
+        freshness,
+      };
+      return res.json(response);
+    } catch {
+      // A failed lifecycle read must not erase the caller's previously known link.
+      return res.status(503).json({ error: 'SHARE_STATE_UNAVAILABLE' });
+    }
   });
 
   app.post('/api/projects/:id/collab/sync-intent', async (req, res) => {
