@@ -5,26 +5,19 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 from typing import Any
 
+from lib.postinstall_plan import (
+    PLAN_SCHEMA_VERSION,
+    canonical_json,
+    plan_digest,
+    resolve_plan,
+)
 
-SCHEMA_VERSION = 1
-INSTALL_PROFILES = {
-    "workspace",
-    "source-web",
-    "release-executor",
-    "release-tools",
-    "release-validation",
-    "mac-runtime",
-}
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+SCHEMA_VERSION = PLAN_SCHEMA_VERSION
 
 
 def load_object(path: Path, label: str) -> dict[str, Any]:
@@ -47,99 +40,18 @@ def append_outputs(values: dict[str, str]) -> None:
             output.write(f"{key}={value}\n")
 
 
-def target_catalog(root: Path) -> list[str]:
-    config = load_object(root / "scripts/postinstall.config.json", "postinstall local config")
-    if config.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError("postinstall local config has an unsupported schemaVersion")
-    local = config.get("localDevelopment")
-    if not isinstance(local, dict):
-        raise ValueError("postinstall local config requires localDevelopment")
-    targets = local.get("targets")
-    if not isinstance(targets, list) or not targets or any(not isinstance(item, str) or not item for item in targets):
-        raise ValueError("postinstall local config requires non-empty string targets")
-    if len(set(targets)) != len(targets):
-        raise ValueError("postinstall local targets must be unique")
-    return targets
-
-
-def package_manifest(root: Path, target: str) -> dict[str, Any]:
-    return load_object(root / target / "package.json", f"{target}/package.json")
-
-
-def dependency_map(root: Path, targets: list[str]) -> dict[str, list[str]]:
-    names: dict[str, str] = {}
-    manifests: dict[str, dict[str, Any]] = {}
-    for target in targets:
-        manifest = package_manifest(root, target)
-        manifests[target] = manifest
-        name = manifest.get("name")
-        if isinstance(name, str) and name:
-            names[name] = target
-
-    result: dict[str, list[str]] = {}
-    for target in targets:
-        dependencies: list[str] = []
-        manifest = manifests[target]
-        for field in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
-            values = manifest.get(field, {})
-            if not isinstance(values, dict):
-                continue
-            for name, specifier in values.items():
-                dependency = names.get(name)
-                if dependency and isinstance(specifier, str) and specifier.startswith("workspace:"):
-                    dependencies.append(dependency)
-        result[target] = list(dict.fromkeys(dependencies))
-    return result
-
-
-def resolve_closure(root: Path, requested: list[str], targets: list[str]) -> list[str]:
-    unknown = [target for target in requested if target not in targets]
-    if unknown:
-        raise ValueError(f"postinstall intent references unknown targets: {unknown}")
-    dependencies = dependency_map(root, targets)
-    selected: set[str] = set()
-
-    def include(target: str) -> None:
-        if target in selected:
-            return
-        selected.add(target)
-        for dependency in dependencies[target]:
-            include(dependency)
-
-    for target in requested:
-        include(target)
-    return [target for target in targets if target in selected]
-
-
-def plan_digest(plan: dict[str, Any]) -> str:
-    unsigned = {key: value for key, value in plan.items() if key != "digest"}
-    return hashlib.sha256(canonical_json(unsigned).encode("utf-8")).hexdigest()
-
-
 def create_plan(args: argparse.Namespace) -> dict[str, Any]:
     root = repository_root()
-    workflow_config = load_object(args.config, "postinstall workflow config")
-    if workflow_config.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError("postinstall workflow config has an unsupported schemaVersion")
-    intents = workflow_config.get("intents")
-    if not isinstance(intents, dict) or args.intent not in intents:
-        raise ValueError(f"unknown postinstall intent: {args.intent}")
-    recipe = intents[args.intent]
-    if not isinstance(recipe, dict) or set(recipe) != {"installProfile", "requestedTargets"}:
-        raise ValueError(f"postinstall intent {args.intent} has an invalid recipe")
-    install_profile = recipe["installProfile"]
-    if install_profile not in INSTALL_PROFILES:
-        raise ValueError(f"postinstall intent {args.intent} has an invalid install profile")
+    def load_repository_json(path: str) -> dict[str, Any]:
+        configured = args.config if path == ".github/config/postinstall.json" else root / path
+        return load_object(configured, path)
 
-    targets = target_catalog(root)
-    requested_value = recipe["requestedTargets"]
-    requested = list(targets) if requested_value == "all" else requested_value
-    if not isinstance(requested, list) or any(not isinstance(item, str) or not item for item in requested):
-        raise ValueError(f"postinstall intent {args.intent} has invalid requestedTargets")
-    requested = list(dict.fromkeys(requested))
-    resolved = resolve_closure(root, requested, targets)
+    canonical = resolve_plan(args.intent, load_repository_json)
+    install_profile = canonical["installProfile"]
+    requested = canonical["requestedTargets"]
+    resolved = canonical["resolvedTargets"]
+    requirements = canonical["requirements"]
     cache_tools = args.cache_tools == "true"
-    partial = install_profile != "workspace"
     plan: dict[str, Any] = {
         "schemaVersion": SCHEMA_VERSION,
         "id": f"{os.environ.get('GITHUB_WORKFLOW', 'workflow')}/{os.environ.get('GITHUB_JOB', 'job')}/{args.intent}",
@@ -148,10 +60,11 @@ def create_plan(args: argparse.Namespace) -> dict[str, Any]:
         "cacheTools": cache_tools,
         "requestedTargets": requested,
         "resolvedTargets": resolved,
+        "requirements": requirements,
         "entries": {
             "dependencies": {
-                "materializeDomToPptx": not partial,
-                "probeNativeDependencies": not partial,
+                "materializeDomToPptx": requirements["materializeDomToPptx"],
+                "probeNativeDependencies": requirements["probeNativeDependencies"],
                 "resolvedTargets": [],
                 "concurrency": args.concurrency,
             },
@@ -162,14 +75,14 @@ def create_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "concurrency": args.concurrency,
             },
             "all": {
-                "materializeDomToPptx": not partial,
-                "probeNativeDependencies": not partial,
+                "materializeDomToPptx": requirements["materializeDomToPptx"],
+                "probeNativeDependencies": requirements["probeNativeDependencies"],
                 "resolvedTargets": resolved,
                 "concurrency": args.concurrency,
             },
         },
     }
-    plan["digest"] = plan_digest(plan)
+    plan["digest"] = plan_digest(canonical)
     return plan
 
 
@@ -203,7 +116,10 @@ def load_receipts(path: Path) -> list[dict[str, Any]]:
 
 def consume_command(args: argparse.Namespace) -> int:
     plan = load_object(args.plan, "postinstall plan")
-    if plan.get("schemaVersion") != SCHEMA_VERSION or plan.get("digest") != plan_digest(plan):
+    canonical = {key: plan.get(key) for key in (
+        "schemaVersion", "installProfile", "requestedTargets", "resolvedTargets", "requirements",
+    )}
+    if plan.get("schemaVersion") != SCHEMA_VERSION or plan.get("digest") != plan_digest(canonical):
         raise ValueError("postinstall plan digest is invalid")
     receipts = load_receipts(args.receipts)
     for receipt in receipts:
@@ -263,7 +179,9 @@ def validate_command(args: argparse.Namespace) -> int:
             cache_tools="false", concurrency=1, config=args.config, intent=intent,
         )
         create_plan(namespace)
-    print(canonical_json({"schemaVersion": SCHEMA_VERSION, "intents": sorted(intents), "targets": target_catalog(root)}))
+    local = load_object(root / "scripts/postinstall.config.json", "postinstall local config")
+    targets = local.get("localDevelopment", {}).get("targets", [])
+    print(canonical_json({"schemaVersion": SCHEMA_VERSION, "intents": sorted(intents), "targets": targets}))
     return 0
 
 

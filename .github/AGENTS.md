@@ -80,6 +80,17 @@ in the producing attempt, even when an unrelated gate failed. Only trusted
 `convergence.atom.yml` code or explicitly authorized release runners may publish immutable results. `lib/r2.py` knows R2
 transport only and must not interpret workload policy or handoff schemas.
 
+Workloads prepared through workflow postinstall may declare `postinstallIntent`.
+The shared stdlib Python resolver projects that intent and the selected Git tree
+into one canonical Plan; the Plan digest, rather than the setup action's file
+identity, enters the workload identity. The Plan describes delivered workspace
+state only. Job IDs, concurrency, cache hits, cache formats, compression,
+storage, retries and timing are execution policy and must stay outside its
+digest. `postinstall.py` and `convergence.py` must use the same resolver, and
+receipts must bind the executed or restored closure to the canonical Plan.
+Change the Plan schema version when serialized fields acquire new delivery
+meaning that the serialized target state does not otherwise express.
+
 Manual CI may select existing workload IDs through `workloads`; the resulting
 check is explicitly selected validation, never a complete merge gate. Workload
 declarations stay in `convergence.json`, scheduling stays in `ci.yml`, and the

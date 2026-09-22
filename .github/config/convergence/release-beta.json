@@ -1,6 +1,6 @@
 {
   "schema": {
-    "version": 9
+    "version": 10
   },
   "resources": {
     "repository-validation": {
@@ -29,8 +29,7 @@
         "tools/pack/src/*.ts",
         "tools/pack/src/config/",
         "tools/pack/src/workspace/",
-        "tools/pack/tsconfig.json",
-        ".github/actions/setup-workspace/"
+        "tools/pack/tsconfig.json"
       ],
       "exclude": [
         "**/tests/**",
@@ -66,15 +65,6 @@
         "type",
         "types"
       ]
-    },
-    "source-postinstall": {
-      "paths": [
-        "scripts/postinstall.mjs",
-        "scripts/postinstall.config.json",
-        ".github/config/postinstall.json",
-        ".github/scripts/postinstall.py"
-      ],
-      "exclude": []
     },
     "source-web": {
       "paths": [
@@ -120,8 +110,7 @@
         "packages/sidecar/",
         "packages/sidecar-proto/",
         "tools/pack/",
-        "tools/release/",
-        ".github/actions/setup-workspace/"
+        "tools/release/"
       ],
       "exclude": [
         "**/tests/**",
@@ -135,8 +124,7 @@
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
-        "tools/pack/",
-        ".github/actions/setup-workspace/"
+        "tools/pack/"
       ],
       "exclude": [
         "**/tests/**",
@@ -188,11 +176,6 @@
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
-        "scripts/postinstall.mjs",
-        "scripts/postinstall.config.json",
-        ".github/config/postinstall.json",
-        ".github/scripts/postinstall.py",
-        ".github/actions/setup-workspace/",
         ".github/scripts/release/test_unit.py"
       ],
       "exclude": []
@@ -240,22 +223,18 @@
       ".github/actions/setup-workspace/"
     ],
     "source-packages": [
-      "resource://source-common",
-      "resource://source-postinstall"
+      "resource://source-common"
     ],
     "source-daemon": [
       "resource://source-common",
-      "resource://source-postinstall",
       "resource://source-daemon"
     ],
     "source-web": [
       "resource://source-common",
-      "resource://source-postinstall",
       "resource://source-web"
     ],
     "source-shell": [
       "resource://source-common",
-      "resource://source-postinstall",
       "resource://source-shell",
       "resource://packaged-execution"
     ],
@@ -286,6 +265,7 @@
       "policy": "beta-isolated-v1",
       "workloads": {
         "source_js_packages": {
+          "postinstallIntent": "shared-javascript",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-packages"
@@ -300,6 +280,7 @@
           }
         },
         "source_js_daemon": {
+          "postinstallIntent": "shared-javascript",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-daemon"
@@ -314,6 +295,7 @@
           }
         },
         "source_js_shell": {
+          "postinstallIntent": "shared-javascript",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-shell"
@@ -328,6 +310,7 @@
           }
         },
         "source_mac_arm64_web": {
+          "postinstallIntent": "source-web",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-web"
@@ -342,6 +325,7 @@
           }
         },
         "source_mac_x64_web": {
+          "postinstallIntent": "source-web",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-web"
@@ -356,6 +340,7 @@
           }
         },
         "source_mac_x64_executor": {
+          "postinstallIntent": "release-executor",
           "successBoundary": "steps",
           "inputs": [
             "suite://platform-executor"
@@ -370,6 +355,7 @@
           }
         },
         "source_mac_x64_runtime": {
+          "postinstallIntent": "mac-runtime",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-packages",
@@ -387,6 +373,7 @@
           }
         },
         "source_win_x64_web": {
+          "postinstallIntent": "source-web",
           "successBoundary": "steps",
           "inputs": [
             "suite://source-web"
@@ -401,6 +388,7 @@
           }
         },
         "source_win_x64_executor": {
+          "postinstallIntent": "release-executor",
           "successBoundary": "steps",
           "inputs": [
             "suite://platform-executor"
@@ -415,6 +403,7 @@
           }
         },
         "test_web_workspace_tests": {
+          "postinstallIntent": "test-web",
           "inputs": [
             "suite://web-tests"
           ],
@@ -433,6 +422,7 @@
           }
         },
         "test_e2e_vitest": {
+          "postinstallIntent": "test-e2e",
           "inputs": [
             "suite://repository-validation"
           ],
@@ -448,6 +438,7 @@
           "successBoundary": "steps"
         },
         "test_daemon_unit_tests": {
+          "postinstallIntent": "test-daemon",
           "inputs": [
             "suite://daemon-tests"
           ],
@@ -474,6 +465,7 @@
           }
         },
         "test_verify": {
+          "postinstallIntent": "test-verify",
           "inputs": [
             "suite://repository-validation"
           ],
@@ -489,6 +481,7 @@
           "successBoundary": "steps"
         },
         "test_functional_e2e": {
+          "postinstallIntent": "test-ui",
           "inputs": [
             "suite://ui-tests"
           ],

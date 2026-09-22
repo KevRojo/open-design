@@ -15,7 +15,7 @@ if (!["all", "dependencies", "build", "describe"].includes(phase)) {
 
 const localConfig = JSON.parse(readFileSync(resolve(scriptDir, "postinstall.config.json"), "utf8"));
 if (
-  localConfig.schemaVersion !== 1 ||
+  localConfig.schemaVersion !== 2 ||
   !Array.isArray(localConfig.localDevelopment?.targets) ||
   localConfig.localDevelopment.targets.length === 0 ||
   localConfig.localDevelopment.targets.some((target) => typeof target !== "string" || target.length === 0) ||
@@ -39,15 +39,29 @@ function canonicalValue(value) {
 }
 
 function planDigest(plan) {
-  const { digest: _digest, ...unsigned } = plan;
-  return createHash("sha256").update(JSON.stringify(canonicalValue(unsigned))).digest("hex");
+  const canonical = {
+    schemaVersion: plan.schemaVersion,
+    installProfile: plan.installProfile,
+    requestedTargets: plan.requestedTargets,
+    resolvedTargets: plan.resolvedTargets,
+    requirements: plan.requirements,
+  };
+  return createHash("sha256").update(JSON.stringify(canonicalValue(canonical))).digest("hex");
 }
 
 function readExternalPlan() {
   if (externalPlanPath.length === 0) return null;
   const path = resolve(repoRoot, externalPlanPath);
   const plan = JSON.parse(readFileSync(path, "utf8"));
-  if (plan?.schemaVersion !== 1 || typeof plan.id !== "string" || typeof plan.digest !== "string") {
+  if (
+    plan?.schemaVersion !== 2 ||
+    typeof plan.id !== "string" ||
+    typeof plan.digest !== "string" ||
+    typeof plan.requirements !== "object" ||
+    plan.requirements == null ||
+    typeof plan.requirements.materializeDomToPptx !== "boolean" ||
+    typeof plan.requirements.probeNativeDependencies !== "boolean"
+  ) {
     throw new Error("External postinstall plan has an invalid schema");
   }
   if (plan.digest !== planDigest(plan)) {
@@ -125,7 +139,7 @@ process.on("exit", (code) => {
       appendFileSync(
         resolvedPath,
         `${JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: externalPlan.schemaVersion,
           planId: externalPlan.id,
           planDigest: externalPlan.digest,
           entry: planEntry,

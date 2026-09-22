@@ -304,6 +304,15 @@ with tempfile.TemporaryDirectory(prefix="beta-test-identity-") as scratch:
         for token in resource.get("exclude", []):
             names.add(token.replace("**", "fixture").replace("*", "fixture"))
     git("update-index", "--index-info", content="".join("100644 " + oid + "\\t" + name + "\\n" for name in sorted(names)))
+    plan_paths = [".github/config/postinstall.json", "scripts/postinstall.config.json"]
+    target_config = (Path(sys.argv[3]) / "scripts/postinstall.config.json").read_text()
+    import json
+    for target in json.loads(target_config)["localDevelopment"]["targets"]:
+        plan_paths.append(target + "/package.json")
+    for name in plan_paths:
+        content = (Path(sys.argv[3]) / name).read_text()
+        plan_oid = git("hash-object", "-w", "--stdin", content=content)
+        git("update-index", "--add", "--cacheinfo", "100644," + plan_oid + "," + name)
     baseline_tree = git("write-tree")
     baseline = keys()
     cases = {
@@ -460,7 +469,7 @@ else: raise AssertionError("ignored unsafe sibling")
     expect(result.status, result.stderr).toBe(0);
   });
 
-  test("beta source identity follows its execution action, not release transport", () => {
+  test("beta source identity follows its canonical plan, not release transport or cache mechanics", () => {
     const result = spawnSync("python3", ["-c", `
 import os, subprocess, sys, tempfile
 from pathlib import Path
@@ -486,7 +495,7 @@ with tempfile.TemporaryDirectory(prefix="beta-source-identity-") as scratch:
     assert identity() == baseline, "release transport invalidated source products"
     git("read-tree", "HEAD")
     change(".github/actions/setup-workspace/action.yml")
-    assert identity() != baseline, "source execution change reused stale products"
+    assert identity() == baseline, "cache mechanics invalidated canonical source delivery"
 `, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
   });
@@ -515,16 +524,23 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
                            ("apps/web/tests/plan-witness.test.ts", set()),
                            ("tools/pack/src/workspace/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
                            ("tools/pack/src/mac/report.ts", set()),
-                           ("scripts/postinstall.mjs", {"packages", "daemon", "web", "shell"}),
-                           ("scripts/postinstall.config.json", {"packages", "daemon", "web", "shell"}),
-                           (".github/config/postinstall.json", {"packages", "daemon", "web", "shell"}),
-                           (".github/scripts/postinstall.py", {"packages", "daemon", "web", "shell"}),
+                           ("scripts/postinstall.mjs", set()),
+                           (".github/scripts/postinstall.py", set()),
                            ("packages/download/src/archive.ts", {"packages", "daemon", "web", "shell"})):
         git("read-tree", "HEAD")
         oid = git("hash-object", "-w", "--stdin", content="// identity witness")
         git("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
         changed = {units[key] for key, digest in identities().items() if digest != baseline[key]}
         assert changed == expected, (path, changed, expected)
+    for intent, expected in (("shared-javascript", {"packages", "daemon", "shell"}), ("source-web", {"web"})):
+        git("read-tree", "HEAD")
+        path = ".github/config/postinstall.json"
+        config = json.loads(git("show", "HEAD:" + path))
+        config["intents"][intent]["requestedTargets"] = ["tools/release"]
+        oid = git("hash-object", "-w", "--stdin", content=json.dumps(config))
+        git("update-index", "--cacheinfo", "100644," + oid + "," + path)
+        changed = {units[key] for key, digest in identities().items() if digest != baseline[key]}
+        assert changed == expected, (intent, changed, expected)
     git("read-tree", "HEAD")
     path = "apps/packaged/package.json"
     manifest = json.loads(git("show", "HEAD:" + path))
@@ -560,10 +576,10 @@ with tempfile.TemporaryDirectory(prefix="platform-executor-identity-") as scratc
     git("read-tree", "HEAD")
     baseline = identity()
     for path in ("packages/download/src/plan-witness.ts", "packages/sidecar/src/plan-witness.ts",
-                 "tools/pack/src/plan-witness.ts", "tools/release/src/plan-witness.ts",
-                 ".github/actions/setup-workspace/plan-witness.yml"):
+                 "tools/pack/src/plan-witness.ts", "tools/release/src/plan-witness.ts"):
         assert changed(path) != baseline, path + " reused a stale executor"
     for path in ("packages/diagnostics/src/plan-witness.ts", "apps/web/src/plan-witness.ts",
+                 ".github/actions/setup-workspace/plan-witness.yml",
                  "tools/pack/tests/plan-witness.test.ts"):
         assert changed(path) == baseline, path + " invalidated the executor"
 `, path.dirname(convergenceScript), repoRoot], { encoding: "utf8" });
@@ -1121,7 +1137,7 @@ print("snapshot and candidate binding passed")
     const stale = spawnSync("python3", [convergenceScript, "--root", fixture.root,
       "--config", fixture.configPath, "validate"], { encoding: "utf8" });
     expect(stale.status).toBe(2);
-    expect(stale.stderr).toContain("requires schema.version 9");
+    expect(stale.stderr).toContain("requires schema.version in [9, 10]");
   });
   test("rejects restoring a miss instead of manufacturing successful output", () => {
     const fixture = createRepository();
@@ -1250,24 +1266,33 @@ print("snapshot and candidate binding passed")
     expect(sequencer).toContain("partitionsByFamily.get(family)!.get(shard.index)!");
   });
 
-  test("includes postinstall plan controls in formal release workload identities", () => {
-    const controls = [
-      "scripts/postinstall.mjs",
-      "scripts/postinstall.config.json",
-      ".github/config/postinstall.json",
-      ".github/scripts/postinstall.py",
-    ];
-
-    for (const channel of ["beta", "prerelease", "stable"]) {
-      const config = JSON.parse(readFileSync(
-        path.join(repoRoot, ".github", "config", "convergence", `release-${channel}.json`),
-        "utf8",
-      )) as any;
-      expect(config.resources["source-postinstall"]).toEqual(expect.objectContaining({
-        paths: expect.arrayContaining(controls),
-      }));
-      expect(config.resources["test-environment"].paths).toEqual(expect.arrayContaining(controls));
-      expect(config.suites["source-web"]).toContain("resource://source-postinstall");
+  test("binds beta workloads to canonical postinstall plans without cache implementation inputs", () => {
+    const config = JSON.parse(readFileSync(
+      path.join(repoRoot, ".github", "config", "convergence", "release-beta.json"),
+      "utf8",
+    )) as any;
+    const expectedIntents: Record<string, string> = {
+      source_js_packages: "shared-javascript",
+      source_js_daemon: "shared-javascript",
+      source_js_shell: "shared-javascript",
+      source_mac_arm64_web: "source-web",
+      source_mac_x64_web: "source-web",
+      source_mac_x64_executor: "release-executor",
+      source_mac_x64_runtime: "mac-runtime",
+      source_win_x64_web: "source-web",
+      source_win_x64_executor: "release-executor",
+      test_web_workspace_tests: "test-web",
+      test_e2e_vitest: "test-e2e",
+      test_daemon_unit_tests: "test-daemon",
+      test_verify: "test-verify",
+      test_functional_e2e: "test-ui",
+    };
+    expect(Object.fromEntries(Object.entries(config.workflows["release-beta"].workloads)
+      .map(([name, workload]: [string, any]) => [name, workload.postinstallIntent])))
+      .toEqual(expectedIntents);
+    expect(config.resources["source-postinstall"]).toBeUndefined();
+    for (const resource of ["source-common", "platform-executor", "platform-mac-runtime", "test-environment"]) {
+      expect(config.resources[resource].paths).not.toContain(".github/actions/setup-workspace/");
     }
   });
 

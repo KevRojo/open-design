@@ -37,16 +37,20 @@ from lib.github import (
 )
 from lib.r2 import R2Client, R2Credentials, R2Error, R2PreconditionFailed, self_check as r2_self_check
 from lib.workload_products import materialize_products
+from lib.postinstall_plan import plan_digest as postinstall_plan_digest
+from lib.postinstall_plan import resolve_plan as resolve_postinstall_plan
 
 
 PROTOCOL = "nexu-workload-result-v1"
 # Identity/declaration semantics have one version. Storage receipts remain v1.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
+SUPPORTED_SCHEMA_VERSIONS = {9, SCHEMA_VERSION}
 CONTROL_SUITE = "convergence-control"
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
 PRODUCT_TYPES = {"job", "url"}
 PUBLIC_READ_USER_AGENT = "open-design-workload-convergence/1"
+JSON_BLOB_CACHE: dict[str, dict[str, Any]] = {}
 STORAGE_ENV = {
     "endpoint": "CLOUDFLARE_R2_WORKLOAD_RESULTS_URL",
     "bucket": "CLOUDFLARE_R2_WORKLOAD_RESULTS_BUCKET",
@@ -82,7 +86,8 @@ class Workload:
         expected = {"inputs", "runnerClass", "products", "reusable"}
         if value.get("reusable") is True:
             expected.add("success")
-        if not expected.issubset(value) or set(value) - expected - {"recipe", "trustedSources", "successBoundary"}:
+        optional = {"postinstallIntent", "recipe", "trustedSources", "successBoundary"}
+        if not expected.issubset(value) or set(value) - expected - optional:
             raise ConfigError(
                 f"convergence.workflows.{workflow}.workloads.{identity} keys must be {sorted(expected)}"
             )
@@ -110,6 +115,10 @@ class Workload:
                     or len(set(steps)) != len(steps)):
                 raise ConfigError(f"success job {job} requires unique non-empty execution steps")
         self.recipe = require_identity(value["recipe"], "shared recipe") if "recipe" in value else None
+        self.postinstall_intent = (
+            require_identity(value["postinstallIntent"], f"workload {workflow}/{identity} postinstall intent")
+            if "postinstallIntent" in value else None
+        )
         self.trusted_sources = value.get("trustedSources", [])
         if not isinstance(self.trusted_sources, list):
             raise ConfigError("trustedSources must be an array")
@@ -212,8 +221,9 @@ class ConvergenceContract:
         if not {"schema", "suites", "workflows"}.issubset(value) or set(value) - {"schema", "suites", "workflows", "resources"}:
             raise ConfigError("convergence keys must be schema, suites, workflows, and optional resources")
         schema = object_value(value["schema"], "convergence.schema")
-        if set(schema) != {"version"} or type(schema["version"]) is not int or schema["version"] != SCHEMA_VERSION:
-            raise ConfigError(f"convergence requires schema.version {SCHEMA_VERSION}")
+        if (set(schema) != {"version"} or type(schema["version"]) is not int
+                or schema["version"] not in SUPPORTED_SCHEMA_VERSIONS):
+            raise ConfigError(f"convergence requires schema.version in {sorted(SUPPORTED_SCHEMA_VERSIONS)}")
         self.schema_version = schema["version"]
         self.resources = object_value(value.get("resources", {}), "convergence.resources")
         for name, resource in self.resources.items():
@@ -247,6 +257,12 @@ class ConvergenceContract:
         self.workflows = {name: WorkflowContract(name, raw) for name, raw in workflows.items()}
         if not self.workflows:
             raise ConfigError("convergence.workflows must not be empty")
+        if self.schema_version < 10 and any(
+            workload.postinstall_intent
+            for workflow in self.workflows.values()
+            for workload in workflow.workloads.values()
+        ):
+            raise ConfigError("postinstallIntent requires convergence schema.version 10")
         self.validate_graph()
 
     @staticmethod
@@ -330,6 +346,8 @@ class GitFingerprinter:
         self.root = root
         self.index = index
         self.cache: dict[str, list[tuple[str, str, str, str]]] = {}
+        self.json_cache: dict[str, dict[str, Any]] = {}
+        self.tracked_files: dict[str, tuple[str, str, str, str]] | None = None
 
     def records(self, token: str) -> list[tuple[str, str, str, str]]:
         if token in self.cache:
@@ -395,6 +413,33 @@ class GitFingerprinter:
             projected = {"path": path, "mode": mode, "stage": stage, "value": value}
         return hashlib.sha256(canonical_json({"declaration": resource, "value": projected}).encode()).hexdigest()
 
+    def json_object(self, path: str) -> dict[str, Any]:
+        if path in self.json_cache:
+            return self.json_cache[path]
+        if self.tracked_files is None:
+            result = subprocess.run(
+                ["git", "ls-files", "-s", "-z"], cwd=self.root, check=True, stdout=subprocess.PIPE,
+                env={**os.environ, "GIT_INDEX_FILE": str(self.index)} if self.index else None,
+            )
+            self.tracked_files = {}
+            for raw in result.stdout.split(b"\0"):
+                if not raw:
+                    continue
+                metadata, raw_path = raw.split(b"\t", 1)
+                mode, oid, stage = metadata.decode("ascii").split()
+                name = raw_path.decode("utf-8", "surrogateescape")
+                self.tracked_files[name] = (name, mode, oid, stage)
+        record = self.tracked_files.get(path)
+        if record is None or record[1] not in {"100644", "100755"} or record[3] != "0":
+            raise ConfigError(f"JSON input requires one regular, unconflicted Git file: {path}")
+        oid = record[2]
+        if oid not in JSON_BLOB_CACHE:
+            raw = subprocess.check_output(["git", "cat-file", "blob", oid], cwd=self.root)
+            JSON_BLOB_CACHE[oid] = object_value(json.loads(raw), f"JSON input {path}")
+        value = JSON_BLOB_CACHE[oid]
+        self.json_cache[path] = value
+        return value
+
 
 def digest_tokens(
     contract: ConvergenceContract,
@@ -435,6 +480,7 @@ def calculate(
     workflow = contract.workflow(workflow_name)
     resolved: dict[str, str] = {}
     fingerprinter = GitFingerprinter(root, index)
+    postinstall_plans: dict[str, dict[str, Any]] = {}
     results: dict[str, dict[str, Any]] = {}
     for identity, workload in workflow.workloads.items():
         if identities is not None and identity not in identities:
@@ -452,9 +498,25 @@ def calculate(
             {} if workload.recipe else resolved,
         )
         execution_class = canonical_json({"runnerClass": workload.runner_class, "labels": labels})
+        postinstall = None
+        if workload.postinstall_intent:
+            try:
+                if workload.postinstall_intent not in postinstall_plans:
+                    postinstall_plans[workload.postinstall_intent] = resolve_postinstall_plan(
+                        workload.postinstall_intent, fingerprinter.json_object,
+                    )
+                plan = postinstall_plans[workload.postinstall_intent]
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConfigError(
+                    f"invalid postinstall plan for {workflow_name}/{identity}: {error}"
+                ) from error
+            postinstall = {
+                "intent": workload.postinstall_intent,
+                "digest": postinstall_plan_digest(plan),
+            }
         # Control source is an admission boundary, not a global cache input.
         # Workloads declare execution-affecting source/configuration explicitly.
-        digest = hashlib.sha256(canonical_json({
+        identity_material = {
             "schemaVersion": contract.schema_version, "protocol": PROTOCOL,
             "identity": {"recipe": workload.recipe} if workload.recipe else {
                 "workflow": workflow_name, "policy": workflow.policy, "workload": identity,
@@ -465,7 +527,10 @@ def calculate(
             "successBoundary": workload.success_boundary,
             "request": workflow.requests.get(identity),
             "execution": workflow.executions.get(identity),
-        }).encode())
+        }
+        if postinstall is not None:
+            identity_material["postinstallPlan"] = postinstall
+        digest = hashlib.sha256(canonical_json(identity_material).encode())
         results[identity] = {
             "digest": digest.hexdigest(),
             "executionClass": json.loads(execution_class),
@@ -473,6 +538,8 @@ def calculate(
             "reusable": workload.reusable,
             "trustedSources": workload.trusted_sources,
         }
+        if postinstall is not None:
+            results[identity]["postinstallPlan"] = postinstall
     return results
 
 

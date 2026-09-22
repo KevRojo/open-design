@@ -152,21 +152,25 @@ function canonicalValue(value: unknown): unknown {
 }
 
 function writeExternalPlan(sandbox: string, targets: string[]): string {
-  const unsigned = {
-    schemaVersion: 1,
-    id: "fixture/postinstall",
-    intent: "fixture",
+  const canonical = {
+    schemaVersion: 2,
     installProfile: "workspace",
-    cacheTools: false,
     requestedTargets: targets,
     resolvedTargets: targets,
+    requirements: { materializeDomToPptx: true, probeNativeDependencies: true },
+  };
+  const unsigned = {
+    ...canonical,
+    id: "fixture/postinstall",
+    intent: "fixture",
+    cacheTools: false,
     entries: {
       dependencies: { materializeDomToPptx: true, probeNativeDependencies: true, resolvedTargets: [], concurrency: 1 },
       build: { materializeDomToPptx: false, probeNativeDependencies: false, resolvedTargets: targets, concurrency: 1 },
       all: { materializeDomToPptx: true, probeNativeDependencies: true, resolvedTargets: targets, concurrency: 1 },
     },
   };
-  const digest = createHash("sha256").update(JSON.stringify(canonicalValue(unsigned))).digest("hex");
+  const digest = createHash("sha256").update(JSON.stringify(canonicalValue(canonical))).digest("hex");
   const path = join(sandbox, "postinstall-plan.json");
   writeFileSync(path, `${JSON.stringify({ ...unsigned, digest })}\n`);
   return path;
@@ -275,6 +279,26 @@ describe("postinstall script contract", () => {
       expect(plan.resolvedTargets).toEqual(expect.arrayContaining(["packages/release", "tools/pack"]));
       expect(typeof plan.digest).toBe("string");
 
+      const semanticDigest = plan.digest;
+      const alternateExecution = spawnSync("python3", [
+        workflowPostinstallPath,
+        "plan",
+        "--intent", "shared-javascript",
+        "--cache-tools", "false",
+        "--concurrency", "7",
+        "--output", output,
+      ], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_WORKFLOW: "alternate", GITHUB_JOB: "alternate" },
+      });
+      expect(alternateExecution.status, alternateExecution.stderr).toBe(0);
+      const alternatePlan = JSON.parse(readFileSync(output, "utf8")) as JsonObject;
+      expect(alternatePlan.digest).toBe(semanticDigest);
+      expect(alternatePlan.id).toBe("alternate/alternate/shared-javascript");
+      expect(alternatePlan.cacheTools).toBe(false);
+      expect((alternatePlan.entries as JsonObject).all).toEqual(expect.objectContaining({ concurrency: 7 }));
+
       const exactInstallProfiles: Record<string, string> = {
         "release-control": "release-tools",
         "release-publish": "release-tools",
@@ -342,7 +366,7 @@ describe("postinstall script contract", () => {
         entry: "all",
         executedTargets: ["packages/release", "tools/pack"],
         planId: "fixture/postinstall",
-        schemaVersion: 1,
+        schemaVersion: 2,
         status: "success",
       });
       const resultPath = join(sandbox, "postinstall-result.json");
