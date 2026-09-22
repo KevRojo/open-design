@@ -515,8 +515,10 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
                            ("apps/web/tests/plan-witness.test.ts", set()),
                            ("tools/pack/src/workspace/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
                            ("tools/pack/src/mac/report.ts", set()),
-                           ("scripts/postinstall.mjs", {"packages", "daemon", "shell"}),
-                           ("scripts/postinstall.config.json", {"packages", "daemon", "shell"}),
+                           ("scripts/postinstall.mjs", {"packages", "daemon", "web", "shell"}),
+                           ("scripts/postinstall.config.json", {"packages", "daemon", "web", "shell"}),
+                           (".github/config/postinstall.json", {"packages", "daemon", "web", "shell"}),
+                           (".github/scripts/postinstall.py", {"packages", "daemon", "web", "shell"}),
                            ("packages/download/src/archive.ts", {"packages", "daemon", "web", "shell"})):
         git("read-tree", "HEAD")
         oid = git("hash-object", "-w", "--stdin", content="// identity witness")
@@ -1184,6 +1186,12 @@ print("snapshot and candidate binding passed")
     )) as any;
 
     expect(config.suites["workspace-install"]).toContain(".github/workflows/ci.yml");
+    expect(config.suites["workspace-install"]).toEqual(expect.arrayContaining([
+      "scripts/postinstall.mjs",
+      "scripts/postinstall.config.json",
+      ".github/config/postinstall.json",
+      ".github/scripts/postinstall.py",
+    ]));
     for (const shard of [1, 2, 3, 4]) {
       expect(config.workflows.ci.workloads[`daemon_unit_${shard}`].inputs).toEqual(["suite://daemon"]);
     }
@@ -1212,6 +1220,27 @@ print("snapshot and candidate binding passed")
     for (const entry of config.workflows.ci.matrices.ui_p0) {
       expect(config.workflows.ci.workloads[entry.workload].inputs).toEqual(["suite://ui-runtime"]);
       expect(config.workflows.ci.workloads[entry.workload].reusable).toBe(true);
+    }
+  });
+
+  test("includes postinstall plan controls in formal release workload identities", () => {
+    const controls = [
+      "scripts/postinstall.mjs",
+      "scripts/postinstall.config.json",
+      ".github/config/postinstall.json",
+      ".github/scripts/postinstall.py",
+    ];
+
+    for (const channel of ["beta", "prerelease", "stable"]) {
+      const config = JSON.parse(readFileSync(
+        path.join(repoRoot, ".github", "config", "convergence", `release-${channel}.json`),
+        "utf8",
+      )) as any;
+      expect(config.resources["source-postinstall"]).toEqual(expect.objectContaining({
+        paths: expect.arrayContaining(controls),
+      }));
+      expect(config.resources["test-environment"].paths).toEqual(expect.arrayContaining(controls));
+      expect(config.suites["source-web"]).toContain("resource://source-postinstall");
     }
   });
 

@@ -70,7 +70,9 @@
     "source-postinstall": {
       "paths": [
         "scripts/postinstall.mjs",
-        "scripts/postinstall.config.json"
+        "scripts/postinstall.config.json",
+        ".github/config/postinstall.json",
+        ".github/scripts/postinstall.py"
       ],
       "exclude": []
     },
@@ -187,6 +189,9 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts/postinstall.mjs",
+        "scripts/postinstall.config.json",
+        ".github/config/postinstall.json",
+        ".github/scripts/postinstall.py",
         ".github/actions/setup-workspace/",
         ".github/scripts/release/test_unit.py"
       ],
@@ -245,6 +250,7 @@
     ],
     "source-web": [
       "resource://source-common",
+      "resource://source-postinstall",
       "resource://source-web"
     ],
     "source-shell": [

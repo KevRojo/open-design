@@ -33,6 +33,8 @@
       "pnpm-workspace.yaml",
       "scripts/postinstall.mjs",
       "scripts/postinstall.config.json",
+      ".github/config/postinstall.json",
+      ".github/scripts/postinstall.py",
       ".github/actions/configure-ci-parallelism/",
       ".github/actions/setup-workspace/",
       ".github/workflows/ci.yml"
