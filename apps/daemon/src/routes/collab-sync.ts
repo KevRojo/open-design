@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import type { ShareContentFingerprints } from '../collab/share-content-fingerprint.js';
+import { createShareFileMapping, publishedPathForSource, type ShareFileMapping } from '../collab/share-file-mapping.js';
 import { publicFileMutationHandler } from './public-file-mutation-handler.js';
 import type { PublicFileMutations } from '../collab/public-file-mutations.js';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -400,19 +401,24 @@ async function buildSharePlan(
   projectDir: string,
   entryName: string,
   metadata: unknown,
-): Promise<{ summary: SharePlanSummary; files: Awaited<ReturnType<typeof buildDeployFilePlan>>['files'] }> {
+): Promise<{ summary: SharePlanSummary; files: Awaited<ReturnType<typeof buildDeployFilePlan>>['files']; mapping: ShareFileMapping; entryPath: string }> {
   const deployPlan = await buildDeployFilePlan(
     path.dirname(projectDir),
     path.basename(projectDir),
     entryName,
     { metadata, hookScriptUrl: '', assetUrlPolicy: 'share-relative' },
   );
+  const mapping = createShareFileMapping(deployPlan.files);
+  const entryPath = publishedPathForSource(mapping, deployPlan.entryPath);
+  if (!entryPath) throw new Error('SHARE_ENTRY_MAPPING_UNAVAILABLE');
   const totalBytes = deployPlan.files.reduce(
     (total, file) => total + Buffer.from(file.data).byteLength,
     0,
   );
   return {
     files: deployPlan.files,
+    mapping,
+    entryPath,
     summary: {
       fileCount: deployPlan.files.length,
       totalBytes,
@@ -1360,7 +1366,7 @@ export function registerCollabSyncRoutes(
       }
       const publication: PublicProjectFilePublication = {
         // The deploy planner rewrites the selected HTML to the snapshot root.
-        url: publicSnapshotFileUrl(baseUrl, snapshot.slug, 'index.html'),
+        url: publicSnapshotFileUrl(baseUrl, snapshot.slug, sharePlan.entryPath),
         slug: snapshot.slug,
         fileName: filePath,
       };
