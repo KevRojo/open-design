@@ -1,0 +1,13 @@
+/* Temporary behavior fixture: anchor below Share. Replace only from Owner-01 artwork. */
+.placeholder {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-end: 0;
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  min-width: 200px;
+  border: 1px solid currentColor;
+  background: var(--bg, white);
+}
