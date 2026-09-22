@@ -736,9 +736,22 @@ export interface ProjectCommentReadRequest {
  * reads rather than a separate channel one of them might not subscribe to.
  */
 export interface ProjectDeleteShareResidual {
+  /**
+   * Which file's link is still serving.
+   *
+   * Publications are per FILE, not per project: `public_file_publications` is
+   * keyed by `(resource_team_id, owner_member_id, project_id, file_path)`. A
+   * person who published three files from one project and then deleted it can
+   * therefore be left with three live links, each of which may fail to stop
+   * for its own reason.
+   *
+   * Without this, a message could only say "a link is still up" — and the
+   * person has no way to tell which of their files it is.
+   */
+  filePath: string;
   /** The public slug that may still be serving. */
   slug: string;
-  /** Will the daemon keep trying on its own? */
+  /** Will the daemon keep trying THIS one on its own? */
   retrying: boolean;
   /** The failure's error code, when the stop attempt produced one. */
   code?: string;
@@ -752,6 +765,17 @@ export interface ProjectDeleteShareResidual {
  */
 export interface ProjectDeleteResponse {
   ok: true;
-  /** Absent means the project had no live share, or the stop succeeded. */
-  shareResidual?: ProjectDeleteShareResidual;
+  /**
+   * Every file whose public link may still be serving, one entry each.
+   *
+   * A list, not a single value: see {@link ProjectDeleteShareResidual.filePath}
+   * — publications are per file, so one delete can leave several behind, and
+   * they do not share a fate. Some may be queued for retry while others are
+   * terminal, which is why `retrying` lives on each entry rather than here.
+   *
+   * Absent or empty means the project had no live share, or every stop
+   * succeeded. A caller must not treat a single-element list as the only
+   * possible shape.
+   */
+  shareResiduals?: ReadonlyArray<ProjectDeleteShareResidual>;
 }
