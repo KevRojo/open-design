@@ -728,6 +728,26 @@ describe('resolveAmrModelsCatalogScope', () => {
     workspaceMemberId: 'member-b',
   };
 
+  it.each([
+    { loading: true, failure: undefined, pending: true },
+    { loading: false, failure: 'unavailable' as const, pending: true },
+    { loading: false, failure: 'reauth-required' as const, pending: true },
+    { loading: false, failure: 'unsupported' as const, pending: false },
+    { loading: false, failure: undefined, pending: false },
+  ])('gates a null ambient catalog on authority: %j', ({ loading, failure, pending }) => {
+    const scope = resolveAmrModelsCatalogScope({
+      routeKind: 'home',
+      activeProject: null,
+      activeProjectWorkspaceContext: null,
+      ambientWorkspaceContext: null,
+      ambientWorkspaceLoading: loading,
+      ambientWorkspaceFailure: failure,
+      identityChangePending: false,
+      accountGeneration: 1,
+    });
+    expect(scope.pending).toBe(pending);
+  });
+
   it('uses the open project workspace on project routes even when ambient rail is B', () => {
     const scope = resolveAmrModelsCatalogScope({
       routeKind: 'project',
@@ -735,6 +755,7 @@ describe('resolveAmrModelsCatalogScope', () => {
       activeProject: { id: 'proj-a', workspaceId: 'ws-a' },
       activeProjectWorkspaceContext: workspaceA,
       ambientWorkspaceContext: workspaceB,
+      ambientWorkspaceLoading: false,
       identityChangePending: false,
       accountGeneration: 3,
     });
@@ -753,6 +774,7 @@ describe('resolveAmrModelsCatalogScope', () => {
       activeProject: null,
       activeProjectWorkspaceContext: null,
       ambientWorkspaceContext: workspaceB,
+      ambientWorkspaceLoading: false,
       identityChangePending: false,
       accountGeneration: 1,
     });
@@ -766,6 +788,7 @@ describe('resolveAmrModelsCatalogScope', () => {
       activeProject: null,
       activeProjectWorkspaceContext: null,
       ambientWorkspaceContext: workspaceA,
+      ambientWorkspaceLoading: false,
       identityChangePending: true,
       accountGeneration: 4,
     });
@@ -786,6 +809,7 @@ describe('resolveAmrModelsCatalogScope', () => {
       activeProject: { id: 'proj-a', workspaceId: 'ws-a' },
       activeProjectWorkspaceContext: null,
       ambientWorkspaceContext: workspaceB,
+      ambientWorkspaceLoading: false,
       identityChangePending: false,
       accountGeneration: 2,
     });
@@ -808,6 +832,7 @@ describe('resolveAmrModelsCatalogScope', () => {
       activeProject: { id: 'proj-a', workspaceId: 'ws-a' },
       activeProjectWorkspaceContext: null,
       ambientWorkspaceContext: workspaceB,
+      ambientWorkspaceLoading: false,
       identityChangePending: false,
       accountGeneration: 2,
     });
@@ -822,6 +847,7 @@ describe('resolveAmrModelsCatalogScope', () => {
       activeProject: { id: 'proj-personal', workspaceId: null },
       activeProjectWorkspaceContext: null,
       ambientWorkspaceContext: workspaceB,
+      ambientWorkspaceLoading: false,
       identityChangePending: false,
       accountGeneration: 1,
     });

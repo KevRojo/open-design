@@ -27,6 +27,7 @@ const workspaceContextHarness = vi.hoisted(() => {
     context: WorkspaceCollabContext | null;
     loading: boolean;
     identityChangePending: boolean;
+    failure?: 'unsupported' | 'unavailable' | 'reauth-required';
   };
   let snapshot: Snapshot = {
     context: null,
@@ -143,9 +144,11 @@ vi.mock('../../src/components/pet/pets', () => ({
 vi.mock('../../src/components/SettingsDialog', () => ({
   SettingsDialog: ({
     onRefreshAgents,
+    agentsLoading,
     onAmrLoginStatusChange,
     onClose,
   }: {
+    agentsLoading: boolean;
     onRefreshAgents: (
       options?: { agentCliEnv?: AppConfig['agentCliEnv'] },
     ) => void | Promise<Array<{ id: string; models?: Array<{ id: string }> }>>;
@@ -184,6 +187,7 @@ vi.mock('../../src/components/SettingsDialog', () => ({
         rescan agents bare
       </button>
       <div data-testid="refresh-agents-amr-model">unset</div>
+      <div data-testid="agents-loading">{String(agentsLoading)}</div>
       <button
         onClick={() => {
           window.dispatchEvent(new CustomEvent('od:amr-login-status-change'));
@@ -784,6 +788,58 @@ describe('App AMR polling', () => {
     });
   });
 
+  it('resumes polling when a Settings retry recovers a refreshing preset', async () => {
+    mockedFetchAmrModels.mockReset();
+    mockedFetchAmrModels
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        source: 'preset', refreshing: true,
+        models: [{ id: 'preset', label: 'preset' }],
+      })
+      .mockResolvedValue({
+        source: 'remote', refreshing: false,
+        models: [{ id: 'workspace-remote', label: 'workspace-remote' }],
+      });
+    render(<App />);
+    await waitFor(() => expect(mockedFetchAmrModels).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('open settings'));
+    await waitFor(() => expect(screen.getByText('rescan agents bare')).toBeTruthy());
+    fireEvent.click(screen.getByText('rescan agents bare'));
+    await waitFor(() => {
+      expect(screen.getByTestId('refresh-agents-amr-model').textContent).toBe('preset');
+    });
+    await waitFor(() => expect(mockedFetchAmrModels).toHaveBeenCalledTimes(3));
+    fireEvent.click(screen.getByText('close settings'));
+    await waitFor(() => expect(screen.getByTestId('amr-model').textContent).toBe('workspace-remote'));
+  });
+
+  it('waits for ambient authority before polling or retrying a catalog', async () => {
+    workspaceContextHarness.set({ loading: true });
+    mockedFetchAmrModels.mockReset();
+    mockedFetchAmrModels.mockResolvedValue({
+      source: 'remote', refreshing: false,
+      models: [{ id: 'team-catalog', label: 'team-catalog' }],
+    });
+    render(<App />);
+    fireEvent.click(screen.getByText('open settings'));
+    await waitFor(() => expect(screen.getByText('rescan agents bare')).toBeTruthy());
+    fireEvent.click(screen.getByText('rescan agents bare'));
+    await waitFor(() => {
+      expect(screen.getByTestId('refresh-agents-amr-model').textContent).toBe('none');
+    });
+    expect(mockedFetchAmrModels).not.toHaveBeenCalled();
+    await act(async () => {
+      workspaceContextHarness.set({ loading: false, failure: 'unavailable' });
+    });
+    expect(mockedFetchAmrModels).not.toHaveBeenCalled();
+    await act(async () => {
+      workspaceContextHarness.set({ context: retainedTeamWorkspace, failure: undefined });
+    });
+    await waitFor(() => expect(mockedFetchAmrModels).toHaveBeenCalledWith(retainedTeamWorkspace));
+    fireEvent.click(screen.getByText('close settings'));
+    await waitFor(() => expect(screen.getByTestId('amr-model').textContent).toBe('team-catalog'));
+  });
+
   it('skips refreshAgents Path A re-probe while catalog authority is pending', async () => {
     // Account transitions retain the prior workspace context while pending.
     // Main poll already skips; refreshAgents must not re-probe that retained
@@ -881,6 +937,7 @@ describe('App AMR polling', () => {
     await waitFor(() => {
       expect(amrModelCalls).toBe(2);
     });
+    expect(screen.getByTestId('agents-loading').textContent).toBe('true');
     const callsBeforeIdentityFlip = amrModelCalls;
 
     // Enter pending while the re-probe is in flight: identity changes and the
@@ -903,6 +960,7 @@ describe('App AMR polling', () => {
     // Pending gate must not start a replacement Path A probe for the discarded
     // response either.
     expect(amrModelCalls).toBe(callsBeforeIdentityFlip);
+    expect(screen.getByTestId('agents-loading').textContent).toBe('false');
   });
 
   it('refreshes renderer config and clears stale AMR models after a desktop app-config change event', async () => {

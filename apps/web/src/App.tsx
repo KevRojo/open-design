@@ -147,6 +147,7 @@ import {
   resolveCurrentWorkspaceContextReadWitness,
   useWorkspaceBillingResponse,
   useWorkspaceContext,
+  type WorkspaceContextState,
   workspaceBillingSummaryForContext,
   workspaceIdentityCacheKey,
   workspaceResourceReadContext,
@@ -639,6 +640,8 @@ export function resolveAmrModelsCatalogScope(input: {
   activeProject: { id: string; workspaceId?: string | null } | null;
   activeProjectWorkspaceContext: WorkspaceCollabContext | null;
   ambientWorkspaceContext: WorkspaceCollabContext | null;
+  ambientWorkspaceLoading: boolean;
+  ambientWorkspaceFailure?: WorkspaceContextState['failure'];
   identityChangePending: boolean;
   accountGeneration: number;
 }): {
@@ -655,8 +658,14 @@ export function resolveAmrModelsCatalogScope(input: {
   // to a headerless personal-catalog fetch while the pinned workspace is
   // unknown — that would let Settings show/persist models the project cannot
   // use once authority recovers.
+  const ambientPending = !onProjectRoute && (
+    input.ambientWorkspaceLoading
+    || (input.ambientWorkspaceFailure !== undefined
+      && input.ambientWorkspaceFailure !== 'unsupported')
+  );
   const pending =
-    input.identityChangePending
+    ambientPending
+    || input.identityChangePending
     || (onProjectRoute && input.activeProject == null)
     || (
       onProjectRoute
@@ -668,7 +677,7 @@ export function resolveAmrModelsCatalogScope(input: {
       ? [
           input.identityChangePending
             ? 'pending-account'
-            : 'pending-project-workspace',
+            : ambientPending ? 'pending-ambient-workspace' : 'pending-project-workspace',
           input.accountGeneration,
           onProjectRoute ? input.projectId ?? null : null,
           onProjectRoute ? input.activeProject?.workspaceId ?? null : null,
@@ -3029,15 +3038,24 @@ function AppInner() {
             const issuedIdentity = amrModelsCatalogIdentityRef.current;
             const issuedWorkspaceContext = amrModelsCatalogContextRef.current;
             const scoped = await fetchAmrModels(issuedWorkspaceContext);
-            if (
-              !isCurrentAgentStreamRequest(agentRequestId)
-              || amrModelsCatalogIdentityRef.current !== issuedIdentity
-            ) {
+            if (!isCurrentAgentStreamRequest(agentRequestId)) {
+              return mergeAmrModelsIntoAgents(ordered, amrModelsRef.current);
+            }
+            if (amrModelsCatalogIdentityRef.current !== issuedIdentity) {
+              // Identity changes do not supersede the agent stream request.
+              // This request still owns its loading state, even though the
+              // catalog response belongs to an obsolete workspace/account.
+              setAgentsLoading(false);
               return mergeAmrModelsIntoAgents(ordered, amrModelsRef.current);
             }
             if (scoped && Array.isArray(scoped.models) && scoped.models.length > 0) {
               amrModelsRef.current = scoped;
               pathACatalog = scoped;
+              // A recovered preset is provisional: the earlier poll may have
+              // stopped on an empty result, so resume it for the remote catalog.
+              if (scoped.source === 'preset' && !scoped.remoteError) {
+                restartAmrPolling();
+              }
             } else {
               // Prefer a concurrent Path A win over stomping a just-landed catalog.
               pathACatalog = amrModelsRef.current;
@@ -3062,7 +3080,7 @@ function AppInner() {
         return [];
       }
     },
-    [beginAgentStreamRequest, isCurrentAgentStreamRequest],
+    [beginAgentStreamRequest, isCurrentAgentStreamRequest, restartAmrPolling],
   );
 
   useEffect(() => {
@@ -4712,6 +4730,8 @@ function AppInner() {
     activeProject,
     activeProjectWorkspaceContext,
     ambientWorkspaceContext: workspaceContext,
+    ambientWorkspaceLoading: workspaceContextState.loading,
+    ambientWorkspaceFailure: workspaceContextState.failure,
     identityChangePending: workspaceContextState.identityChangePending === true,
     accountGeneration: workspaceAccountGeneration,
   });
