@@ -150,6 +150,23 @@ function renderViewer(workspaceContext: WorkspaceCollabContext | null, options: 
   return render(<CollabProvider value={collabValue(workspaceContext)}>{viewer}</CollabProvider>);
 }
 
+it('does not issue a stop request from a read-only published HTML share panel', async () => {
+  const request = stubFetch(true);
+  const context = teamContext();
+  const file = htmlFile();
+  function Host({ readOnly }: { readOnly: boolean }) {
+    return <CollabProvider value={collabValue(context)}><FileViewer projectId="project-1" projectKind="prototype" file={file} liveHtml="<html><body>Hello</body></html>" viewerOnly={readOnly} /></CollabProvider>;
+  }
+  const { rerender } = render(<Host readOnly={false} />);
+  fireEvent.click(toolbarAction('Share'));
+  await screen.findByRole('button', { name: 'Stop sharing' });
+  rerender(<Host readOnly />);
+  // The host already clears publication state on a permission change. Preserve
+  // that stricter policy; isolated ShareTab tests cover a retained read-only URL.
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop sharing' })).toBeNull());
+  expect(request.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+});
+
 function toolbarAction(label: 'Share' | 'Export'): HTMLButtonElement {
   const node = document.querySelector<HTMLButtonElement>(
     `button.chrome-action-unified[aria-label="${label}"]`,

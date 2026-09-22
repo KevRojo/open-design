@@ -6815,7 +6815,7 @@ function ReactComponentViewer({
   }
 
   async function unpublishCurrentFilePublic() {
-    if (!publishedFileSlug || publishingPublicFile) return;
+    if (viewerOnly || !publishedFileSlug || publishingPublicFile) return;
     const requestProjectId = projectId;
     const requestFileName = file.name;
     const requestSlug = publishedFileSlug;
@@ -7170,7 +7170,8 @@ function ReactComponentViewer({
                                 <button
                                   type="button"
                                   className="chrome-publish-button chrome-publish-button--ghost"
-                                  disabled={publishingPublicFile}
+                                  disabled={viewerOnly || publishingPublicFile}
+                                  title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
                                   onClick={() => {
                                     void unpublishCurrentFilePublic();
                                   }}
@@ -8316,7 +8317,7 @@ function HtmlViewer({
   }
 
   async function unpublishCurrentFilePublic() {
-    if (!publishedFileSlug || publishingPublicFile) return;
+    if (viewerOnly || !publishedFileSlug || publishingPublicFile) return;
     const requestProjectId = projectId;
     const requestFileName = file.name;
     const requestSlug = publishedFileSlug;

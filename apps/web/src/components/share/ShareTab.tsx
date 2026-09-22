@@ -180,7 +180,8 @@ export function ShareTab({
                               <button
                                 type="button"
                                 className="chrome-publish-button chrome-publish-button--ghost"
-                                disabled={publishingPublicFile}
+                                disabled={viewerOnly || publishingPublicFile}
+                                title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
                                 onClick={() => {
                                   void unpublishCurrentFilePublic();
                                 }}

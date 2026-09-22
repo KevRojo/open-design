@@ -31,6 +31,24 @@ const checkPath = 'm3 8 3 3 7-7';
 const linkPath = 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7';
 
 describe('S3/S4/S4-C copy-button rendering seam', () => {
+  it.each(['toolbar', 'artifact-card'] as const)('keeps read-only %s links copyable but prevents stopping them', async menuOrigin => {
+    const input = props({ menuOrigin, viewerOnly: true });
+    const { rerender } = render(<ShareTab {...input} />);
+    const stop = screen.getByRole('button', { name: 'fileViewer.unpublishFile' });
+    expect(stop).toBeDisabled();
+    expect(stop).toHaveAttribute('title', 'read only');
+    fireEvent.click(stop);
+    expect(input.unpublishCurrentFilePublic).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'fileViewer.copyShareLink' })));
+    expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(input.publishedFileUrl)).toBeVisible();
+    expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
+    rerender(<ShareTab {...input} viewerOnly={false} />);
+    expect(stop).toBeEnabled();
+    fireEvent.click(stop);
+    expect(input.unpublishCurrentFilePublic).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['copied', 'failed'] as const)('shows pending until the clipboard settles, then delegates %s feedback', async (feedback) => {
     let finish!: () => void;
     const pending = new Promise<void>((resolve) => { finish = resolve; });
@@ -148,7 +166,7 @@ describe('S3/S4/S4-C copy-button rendering seam', () => {
     fireEvent.click(copy);
     expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(state.streaming ? 0 : 1);
     expect((screen.getByRole('button', { name: 'fileViewer.unpublishFile' }) as HTMLButtonElement).disabled)
-      .toBe(state.publishingPublicFile);
+      .toBe(state.viewerOnly || state.publishingPublicFile);
   });
 
   it('removes the success icon when the existing feedback returns to null or fails', () => {
