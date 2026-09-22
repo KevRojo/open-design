@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "intents": {
+    "release-control": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/release"]
+    },
+    "shared-javascript": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/pack"]
+    },
+    "source-web": {
+      "installProfile": "source-web",
+      "requestedTargets": ["packages/download"]
+    },
+    "release-executor": {
+      "installProfile": "release-executor",
+      "requestedTargets": ["packages/download"]
+    },
+    "mac-runtime": {
+      "installProfile": "mac-runtime",
+      "requestedTargets": ["packages/download"]
+    },
+    "platform-build": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/dev", "tools/pack", "tools/release", "tools/serve"]
+    },
+    "workspace": {
+      "installProfile": "workspace",
+      "requestedTargets": "all"
+    },
+    "release-publish": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/release"]
+    },
+    "test-web": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/pack"]
+    },
+    "test-e2e": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/dev", "tools/pack", "tools/release", "tools/serve"]
+    },
+    "test-verify": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/dev", "tools/pack", "tools/release", "tools/serve"]
+    },
+    "test-daemon": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/pack"]
+    },
+    "test-ui": {
+      "installProfile": "workspace",
+      "requestedTargets": ["tools/dev", "tools/pack"]
+    },
+    "release-validation": {
+      "installProfile": "workspace",
+      "requestedTargets": ["packages/contracts", "tools/dev", "tools/pack", "tools/release", "tools/serve"]
+    }
+  }
+}

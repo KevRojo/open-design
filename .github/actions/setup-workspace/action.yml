@@ -26,8 +26,18 @@ inputs:
     description: Dependency installation boundary (workspace|source-web|release-executor|mac-runtime)
     required: false
     default: 'workspace'
+  postinstall-intent:
+    description: Workflow workspace-initialization intent resolved by .github/scripts/postinstall.py
+    required: false
+    default: ''
 
 outputs:
+  postinstall-plan-json:
+    description: Frozen workflow postinstall plan; empty for the local-compatible legacy path
+    value: ${{ steps.postinstall-plan.outputs.json }}
+  postinstall-result-json:
+    description: Validated postinstall execution and restore result
+    value: ${{ steps.postinstall-result.outputs.json }}
   postinstall-timings-json:
     description: Optional postinstall timing observations collected during setup
     value: ${{ steps.postinstall-timings.outputs.json }}
@@ -35,19 +45,33 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Resolve workflow postinstall plan
+      id: postinstall-plan
+      if: ${{ inputs.postinstall-intent != '' }}
+      shell: bash
+      env:
+        POSTINSTALL_INTENT: ${{ inputs.postinstall-intent }}
+        CACHE_TOOLS: ${{ inputs.cache-tools }}
+      run: >-
+        python3 .github/scripts/postinstall.py plan
+        --intent "$POSTINSTALL_INTENT" --cache-tools "$CACHE_TOOLS"
+        --output "$RUNNER_TEMP/open-design-postinstall/${GITHUB_JOB}/plan.json"
+
     - name: Validate install profile
       shell: bash
+      env:
+        INSTALL_PROFILE: ${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}
       run: |
-        case "${{ inputs.install-profile }}" in
+        case "$INSTALL_PROFILE" in
           workspace) ;;
           source-web|release-executor|mac-runtime)
             if [ "${{ inputs.cache-tools }}" = "true" ]; then
-              echo "${{ inputs.install-profile }} install profile cannot cache the full workspace tool closure" >&2
+              echo "$INSTALL_PROFILE install profile cannot cache the full workspace tool closure" >&2
               exit 1
             fi
             ;;
           *)
-            echo "unsupported setup-workspace install profile: ${{ inputs.install-profile }}" >&2
+            echo "unsupported setup-workspace install profile: $INSTALL_PROFILE" >&2
             exit 1
             ;;
         esac
@@ -59,9 +83,12 @@ runs:
       run: |
         action_id="$(printf '%s' "${GITHUB_ACTION:-setup-workspace}" | tr -c '[:alnum:]_-' '_')"
         timing_path="$RUNNER_TEMP/open-design-timings/postinstall-${GITHUB_JOB}-${action_id}.jsonl"
+        receipt_path="$RUNNER_TEMP/open-design-timings/postinstall-${GITHUB_JOB}-${action_id}-receipts.jsonl"
         mkdir -p "$(dirname "$timing_path")"
         : > "$timing_path"
+        : > "$receipt_path"
         echo "path=$timing_path" >> "$GITHUB_OUTPUT"
+        echo "receipt-path=$receipt_path" >> "$GITHUB_OUTPUT"
 
     - name: Detect persistent pnpm store
       id: persistent-pnpm-store
@@ -122,6 +149,9 @@ runs:
       if: ${{ inputs.cache-tools == 'true' }}
       id: tools
       shell: bash
+      env:
+        OPEN_DESIGN_POSTINSTALL_ENTRY: build
+        OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
       run: python3 .github/scripts/workspace.py
 
     - name: '[restore] Installed workspace dependencies'
@@ -151,14 +181,17 @@ runs:
           pnpm-store-${{ runner.os }}-
 
     - name: Install dependencies
-      if: ${{ inputs.cache-tools != 'true' && inputs.install-profile == 'workspace' }}
+      if: ${{ inputs.cache-tools != 'true' && (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'workspace' }}
       shell: bash
       env:
+        OPEN_DESIGN_POSTINSTALL_ENTRY: all
+        OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
+        OPEN_DESIGN_POSTINSTALL_RECEIPT_PATH: ${{ steps.postinstall-timing-path.outputs.receipt-path }}
         OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm install --frozen-lockfile
 
     - name: '[prepare] Web source dependencies'
-      if: ${{ inputs.install-profile == 'source-web' }}
+      if: ${{ (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'source-web' }}
       shell: bash
       run: >-
         pnpm install --frozen-lockfile --ignore-scripts
@@ -167,7 +200,7 @@ runs:
         --filter @open-design/web...
 
     - name: '[prepare] Release executor dependencies'
-      if: ${{ inputs.install-profile == 'release-executor' }}
+      if: ${{ (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'release-executor' }}
       shell: bash
       run: >-
         pnpm install --frozen-lockfile --ignore-scripts
@@ -175,7 +208,7 @@ runs:
         --filter @open-design/tools-release...
 
     - name: '[prepare] macOS runtime product dependencies'
-      if: ${{ inputs.install-profile == 'mac-runtime' }}
+      if: ${{ (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'mac-runtime' }}
       shell: bash
       run: >-
         pnpm install --frozen-lockfile --ignore-scripts
@@ -185,16 +218,29 @@ runs:
         --filter @open-design/daemon...
 
     - name: '[prepare] Workspace restore support'
-      if: ${{ inputs.install-profile == 'source-web' || inputs.install-profile == 'release-executor' || inputs.install-profile == 'mac-runtime' }}
+      if: ${{ inputs.postinstall-intent == '' && (inputs.install-profile == 'source-web' || inputs.install-profile == 'release-executor' || inputs.install-profile == 'mac-runtime') }}
       shell: bash
       run: >-
         pnpm --filter '@open-design/download...'
         --workspace-concurrency=1 --if-present run build
 
+    - name: '[prepare] Planned workspace restore support'
+      if: ${{ inputs.postinstall-intent != '' && (steps.postinstall-plan.outputs.install-profile == 'source-web' || steps.postinstall-plan.outputs.install-profile == 'release-executor' || steps.postinstall-plan.outputs.install-profile == 'mac-runtime') }}
+      shell: bash
+      env:
+        OPEN_DESIGN_POSTINSTALL_ENTRY: build
+        OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
+        OPEN_DESIGN_POSTINSTALL_RECEIPT_PATH: ${{ steps.postinstall-timing-path.outputs.receipt-path }}
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
+      run: pnpm run postinstall build
+
     - name: '[prepare] Workspace dependencies'
       if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       shell: bash
       env:
+        OPEN_DESIGN_POSTINSTALL_ENTRY: dependencies
+        OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
+        OPEN_DESIGN_POSTINSTALL_RECEIPT_PATH: ${{ steps.postinstall-timing-path.outputs.receipt-path }}
         OPEN_DESIGN_POSTINSTALL_PHASE: dependencies
         OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm install --frozen-lockfile
@@ -203,6 +249,9 @@ runs:
       if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit == 'true' }}
       shell: bash
       env:
+        OPEN_DESIGN_POSTINSTALL_ENTRY: dependencies
+        OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
+        OPEN_DESIGN_POSTINSTALL_RECEIPT_PATH: ${{ steps.postinstall-timing-path.outputs.receipt-path }}
         OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm run postinstall dependencies
 
@@ -231,13 +280,30 @@ runs:
       if: ${{ inputs.cache-tools == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
       shell: bash
       env:
+        OPEN_DESIGN_POSTINSTALL_ENTRY: build
+        OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
+        OPEN_DESIGN_POSTINSTALL_RECEIPT_PATH: ${{ steps.postinstall-timing-path.outputs.receipt-path }}
         OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm run postinstall build
 
     - name: '[validate] Packaging tool readiness'
-      if: ${{ inputs.cache-tools == 'true' && contains(env.OPEN_DESIGN_POSTINSTALL_TARGETS, 'tools/pack') }}
+      if: ${{ inputs.cache-tools == 'true' && (contains(steps.postinstall-plan.outputs.json, 'tools/pack') || contains(env.OPEN_DESIGN_POSTINSTALL_TARGETS, 'tools/pack')) }}
       shell: bash
       run: pnpm exec tools-pack --help
+
+    - name: '[validate] Planned workspace initialization'
+      id: postinstall-result
+      if: ${{ inputs.postinstall-intent != '' }}
+      shell: bash
+      env:
+        PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}
+        RECEIPT_PATH: ${{ steps.postinstall-timing-path.outputs.receipt-path }}
+        TOOLS_CACHE_HIT: ${{ steps.tools-cache.outputs.cache-hit || 'false' }}
+      run: >-
+        python3 .github/scripts/postinstall.py consume
+        --plan "$PLAN_PATH" --receipts "$RECEIPT_PATH"
+        --tools-cache-hit "$TOOLS_CACHE_HIT"
+        --output "$RUNNER_TEMP/open-design-postinstall/${GITHUB_JOB}/result.json"
 
     - name: '[cache] Tool build closure'
       if: ${{ inputs.cache-tools == 'true' && inputs.save-pnpm-cache == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}

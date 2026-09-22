@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, extname, resolve } from "node:path";
@@ -12,10 +13,74 @@ if (!["all", "dependencies", "build", "describe"].includes(phase)) {
   throw new Error(`Unknown postinstall phase: ${phase}`);
 }
 
+const localConfig = JSON.parse(readFileSync(resolve(scriptDir, "postinstall.config.json"), "utf8"));
+if (
+  localConfig.schemaVersion !== 1 ||
+  !Array.isArray(localConfig.localDevelopment?.targets) ||
+  localConfig.localDevelopment.targets.length === 0 ||
+  localConfig.localDevelopment.targets.some((target) => typeof target !== "string" || target.length === 0) ||
+  new Set(localConfig.localDevelopment.targets).size !== localConfig.localDevelopment.targets.length ||
+  !Number.isInteger(localConfig.localDevelopment.concurrency) ||
+  localConfig.localDevelopment.concurrency < 1
+) {
+  throw new Error("Invalid scripts/postinstall.config.json");
+}
+const buildTargets = localConfig.localDevelopment.targets;
+const externalPlanPath = process.env.OPEN_DESIGN_POSTINSTALL_PLAN_PATH?.trim() ?? "";
+const receiptPath = process.env.OPEN_DESIGN_POSTINSTALL_RECEIPT_PATH?.trim() ?? "";
+const planEntry = process.env.OPEN_DESIGN_POSTINSTALL_ENTRY?.trim() || phase;
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value != null && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+  }
+  return value;
+}
+
+function planDigest(plan) {
+  const { digest: _digest, ...unsigned } = plan;
+  return createHash("sha256").update(JSON.stringify(canonicalValue(unsigned))).digest("hex");
+}
+
+function readExternalPlan() {
+  if (externalPlanPath.length === 0) return null;
+  const path = resolve(repoRoot, externalPlanPath);
+  const plan = JSON.parse(readFileSync(path, "utf8"));
+  if (plan?.schemaVersion !== 1 || typeof plan.id !== "string" || typeof plan.digest !== "string") {
+    throw new Error("External postinstall plan has an invalid schema");
+  }
+  if (plan.digest !== planDigest(plan)) {
+    throw new Error("External postinstall plan digest is invalid");
+  }
+  if (plan.entries == null || typeof plan.entries !== "object" || plan.entries[planEntry] == null) {
+    throw new Error(`External postinstall plan does not define entry: ${planEntry}`);
+  }
+  const entry = plan.entries[planEntry];
+  if (
+    typeof entry !== "object" ||
+    entry == null ||
+    typeof entry.materializeDomToPptx !== "boolean" ||
+    typeof entry.probeNativeDependencies !== "boolean" ||
+    !Array.isArray(entry.resolvedTargets) ||
+    entry.resolvedTargets.some((target) => typeof target !== "string" || !buildTargets.includes(target)) ||
+    new Set(entry.resolvedTargets).size !== entry.resolvedTargets.length ||
+    !Number.isInteger(entry.concurrency) ||
+    entry.concurrency < 1
+  ) {
+    throw new Error(`External postinstall plan entry ${planEntry} is invalid`);
+  }
+  return plan;
+}
+
+const externalPlan = readExternalPlan();
+const externalEntry = externalPlan?.entries[planEntry] ?? null;
 const timingPath = process.env.OPEN_DESIGN_POSTINSTALL_TIMING_PATH?.trim() ?? "";
 const postinstallStartedAt = Date.now();
 const postinstallStarted = performance.now();
 let timingWarningWritten = false;
+const targetStatuses = new Map();
+const receiptOperations = [];
 
 function recordTiming({ durationMs, operation, startedAt, status, target }) {
   if (timingPath.length === 0) return;
@@ -26,6 +91,7 @@ function recordTiming({ durationMs, operation, startedAt, status, target }) {
       resolvedPath,
       `${JSON.stringify({
         schemaVersion: 1,
+        ...(externalPlan == null ? {} : { planId: externalPlan.id, planDigest: externalPlan.digest, entry: planEntry }),
         phase,
         operation,
         ...(target == null ? {} : { target }),
@@ -52,30 +118,32 @@ process.on("exit", (code) => {
     startedAt: postinstallStartedAt,
     status: code === 0 ? "success" : "failure",
   });
+  if (externalPlan != null && receiptPath.length > 0) {
+    try {
+      const resolvedPath = resolve(repoRoot, receiptPath);
+      mkdirSync(dirname(resolvedPath), { recursive: true });
+      appendFileSync(
+        resolvedPath,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          planId: externalPlan.id,
+          planDigest: externalPlan.digest,
+          entry: planEntry,
+          status: code === 0 ? "success" : "failure",
+          startedAt: new Date(postinstallStartedAt).toISOString(),
+          durationMs: Math.max(0, Math.round(performance.now() - postinstallStarted)),
+          executedTargets: externalEntry.resolvedTargets.filter((target) => targetStatuses.get(target) === "success"),
+          operations: receiptOperations,
+        })}\n`,
+        "utf8",
+      );
+    } catch (error) {
+      process.stderr.write(
+        `postinstall: could not write required execution receipt: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
 });
-
-const buildTargets = [
-  "packages/release",
-  "packages/contracts",
-  "packages/standalone",
-  "packages/components",
-  "packages/platform",
-  "packages/download",
-  "packages/host",
-  "packages/registry-protocol",
-  "packages/agui-adapter",
-  "packages/plugin-runtime",
-  "packages/sidecar-proto",
-  "packages/launcher-proto",
-  "packages/sidecar",
-  "packages/diagnostics",
-  "packages/dsh-runtime",
-  "apps/daemon",
-  "tools/dev",
-  "tools/pack",
-  "tools/release",
-  "tools/serve",
-];
 
 const jsExtensions = new Set([".js", ".cjs", ".mjs"]);
 
@@ -107,6 +175,7 @@ function materializeDomToPptxBundle() {
       startedAt,
       status: "skipped",
     });
+    receiptOperations.push({ operation: "materialize-dom-to-pptx", status: "skipped" });
     return;
   }
 
@@ -120,6 +189,7 @@ function materializeDomToPptxBundle() {
       startedAt,
       status: "success",
     });
+    receiptOperations.push({ operation: "materialize-dom-to-pptx", status: "success" });
   } catch (error) {
     recordTiming({
       durationMs: performance.now() - started,
@@ -127,6 +197,7 @@ function materializeDomToPptxBundle() {
       startedAt,
       status: "failure",
     });
+    receiptOperations.push({ operation: "materialize-dom-to-pptx", status: "failure" });
     throw error;
   }
 }
@@ -162,6 +233,7 @@ function runBuildTarget(target) {
         status,
         target,
       });
+      targetStatuses.set(target, status);
     };
     const child = spawn(
       packageManager.command,
@@ -235,8 +307,15 @@ function buildDependencyMap(targets) {
 }
 
 function postinstallConcurrency() {
+  if (externalEntry != null) {
+    const value = externalEntry.concurrency;
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`External postinstall plan entry ${planEntry} has invalid concurrency`);
+    }
+    return value;
+  }
   const raw = process.env.OPEN_DESIGN_POSTINSTALL_CONCURRENCY;
-  if (raw == null || raw.trim() === "") return 1;
+  if (raw == null || raw.trim() === "") return localConfig.localDevelopment.concurrency;
 
   const value = Number.parseInt(raw, 10);
   if (!Number.isFinite(value) || value < 1) {
@@ -283,6 +362,17 @@ async function runBuildTargetsInParallel(targets, concurrency) {
 
 function selectedBuildTargets() {
   const available = availableBuildTargets();
+  if (externalEntry != null) {
+    const requested = externalEntry.resolvedTargets;
+    if (!Array.isArray(requested) || requested.some((target) => typeof target !== "string" || !buildTargets.includes(target))) {
+      throw new Error(`External postinstall plan entry ${planEntry} has invalid resolvedTargets`);
+    }
+    const missing = requested.filter((target) => !available.includes(target));
+    if (missing.length > 0) {
+      throw new Error(`External postinstall plan targets are unavailable in this checkout: ${missing.join(", ")}`);
+    }
+    return requested;
+  }
   const raw = process.env.OPEN_DESIGN_POSTINSTALL_TARGETS;
   let targets = available;
   if (raw != null && raw.trim() !== "") {
@@ -320,6 +410,7 @@ async function runBuildTargets() {
       startedAt,
       status: "success",
     });
+    receiptOperations.push({ operation: "workspace-build-closure", status: "success", targets });
   } catch (error) {
     recordTiming({
       durationMs: performance.now() - started,
@@ -327,6 +418,7 @@ async function runBuildTargets() {
       startedAt,
       status: "failure",
     });
+    receiptOperations.push({ operation: "workspace-build-closure", status: "failure", targets });
     throw error;
   }
 }
@@ -337,15 +429,18 @@ if (phase === "describe") {
   process.stdout.write(`${JSON.stringify(selectedBuildTargets())}\n`);
   process.exit(0);
 }
-if (phase !== "build") materializeDomToPptxBundle();
+const materializeEnabled = externalEntry?.materializeDomToPptx ?? phase !== "build";
+const nativeProbeEnabled = externalEntry?.probeNativeDependencies ?? phase !== "build";
+const buildEnabled = externalEntry != null ? externalEntry.resolvedTargets.length > 0 : phase !== "dependencies";
+if (materializeEnabled) materializeDomToPptxBundle();
 try {
-  if (phase !== "dependencies") await runBuildTargets();
+  if (buildEnabled) await runBuildTargets();
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
 }
 
-if (phase === "build") process.exit(0);
+if (!nativeProbeEnabled) process.exit(0);
 
 // Verify the better-sqlite3 native addon loads under the current Node.js ABI.
 // better-sqlite3 is a dep of apps/daemon (not the workspace root), so resolve
@@ -375,6 +470,7 @@ recordTiming({
   startedAt: nativeProbeStartedAt,
   status: "success",
 });
+receiptOperations.push({ operation: "better-sqlite3-probe", status: "success" });
 
 if (needsRebuild) {
   process.stdout.write(
@@ -391,6 +487,10 @@ if (needsRebuild) {
     durationMs: performance.now() - rebuildStarted,
     operation: "better-sqlite3-rebuild",
     startedAt: rebuildStartedAt,
+    status: rebuild.error == null && rebuild.status === 0 ? "success" : "failure",
+  });
+  receiptOperations.push({
+    operation: "better-sqlite3-rebuild",
     status: rebuild.error == null && rebuild.status === 0 ? "success" : "failure",
   });
   if (rebuild.error != null) throw rebuild.error;

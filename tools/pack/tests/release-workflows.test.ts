@@ -260,10 +260,10 @@ describe("release workflows", () => {
     };
 
     expect(macX64Producer).toContain(
-      "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
+      "postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
     );
     expect(winX64Producer).toContain(
-      "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
+      "postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}",
     );
     expect(winX64Producer).toContain("[build] Release executor");
     expect(winX64Producer).toContain("executor:dev export");
@@ -281,8 +281,8 @@ describe("release workflows", () => {
     expect(beta).toContain("mac runtime-restore");
     expect(beta).toContain('--mac-runtime-product "$RUNNER_TEMP/mac-runtime-product"');
     expect(setupWorkspace).toContain("source-web|release-executor|mac-runtime)");
-    expect(setupWorkspace).toContain("inputs.install-profile == 'release-executor'");
-    expect(setupWorkspace).toContain("inputs.install-profile == 'mac-runtime'");
+    expect(setupWorkspace).toContain("steps.postinstall-plan.outputs.install-profile == 'release-executor'");
+    expect(setupWorkspace).toContain("steps.postinstall-plan.outputs.install-profile == 'mac-runtime'");
     expect(setupWorkspace).toContain("--filter @open-design/tools-pack...");
     expect(setupWorkspace).toContain("--filter @open-design/tools-release...");
     expect(executorPaths).not.toContain("packages/");

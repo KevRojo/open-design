@@ -17,6 +17,7 @@
       "pnpm-lock.yaml",
       "pnpm-workspace.yaml",
       "scripts/postinstall.mjs",
+      "scripts/postinstall.config.json",
       "apps/closure/",
       "packages/download/",
       "packages/platform/",
