@@ -516,6 +516,7 @@ with tempfile.TemporaryDirectory(prefix="source-unit-identity-") as scratch:
                            ("tools/pack/src/workspace/plan-witness.ts", {"packages", "daemon", "web", "shell"}),
                            ("tools/pack/src/mac/report.ts", set()),
                            ("scripts/postinstall.mjs", {"packages", "daemon", "shell"}),
+                           ("scripts/postinstall.config.json", {"packages", "daemon", "shell"}),
                            ("packages/download/src/archive.ts", {"packages", "daemon", "web", "shell"})):
         git("read-tree", "HEAD")
         oid = git("hash-object", "-w", "--stdin", content="// identity witness")

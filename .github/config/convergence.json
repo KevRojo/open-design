@@ -9,9 +9,11 @@
     ],
     "convergence-control": [
       ".github/config/convergence.json",
+      ".github/config/postinstall.json",
       ".github/config/scopes.json",
       ".github/config/runners.json",
       ".github/scripts/convergence.py",
+      ".github/scripts/postinstall.py",
       ".github/scripts/scopes.py",
       ".github/scripts/runners.py",
       ".github/scripts/handoff.py",
@@ -30,6 +32,7 @@
       "pnpm-lock.yaml",
       "pnpm-workspace.yaml",
       "scripts/postinstall.mjs",
+      "scripts/postinstall.config.json",
       ".github/actions/configure-ci-parallelism/",
       ".github/actions/setup-workspace/",
       ".github/workflows/ci.yml"

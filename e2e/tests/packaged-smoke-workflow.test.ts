@@ -2282,7 +2282,6 @@ process.stdin.on("end", () => {
 
   it("[P2] limits beta native install compilation to tools and their dependency closure", async () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
-    const targets = '["tools/pack","tools/release","tools/dev","tools/serve"]';
     const action = await readFile(join(workspaceRoot, ".github/actions/setup-workspace/action.yml"), "utf8");
     expect(action).toContain("run: pnpm install --frozen-lockfile");
     expect(action).toContain("uses: actions/cache/restore");
@@ -2304,7 +2303,7 @@ process.stdin.on("end", () => {
         expect(job).not.toContain("cache-tools: 'true'");
       } else {
         expect(job).toContain("uses: ./.github/actions/setup-workspace");
-        expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '${targets}'`);
+        expect(job).toContain("postinstall-intent: platform-build");
         expect(job).toContain("cache-tools: 'true'");
         expect(job).not.toContain("uses: actions/setup-node");
       }
@@ -2317,7 +2316,10 @@ process.stdin.on("end", () => {
     expect(action).toContain("run: pnpm run postinstall dependencies");
     expect(action).toContain("OPEN_DESIGN_POSTINSTALL_TIMING_PATH");
     expect(action).toContain("postinstall-timings-json:");
-    expect(action).toContain("inputs.install-profile == 'source-web'");
+    expect(action).toContain("steps.postinstall-plan.outputs.install-profile == 'source-web'");
+    expect(action).toContain("python3 .github/scripts/postinstall.py plan");
+    expect(action).toContain("python3 .github/scripts/postinstall.py consume");
+    expect(action).toContain("OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}");
     expect(action).toContain("pnpm install --frozen-lockfile --ignore-scripts");
     expect(action).toContain("--filter @open-design/tools-pack...");
     expect(action).toContain("pnpm --filter '@open-design/download...'");
@@ -2332,7 +2334,8 @@ process.stdin.on("end", () => {
     expect(sectionBetween(action, "    - name: Restore pnpm store", "    - name: Install dependencies")).not.toContain("runner.os != 'Windows'");
     expect(sectionBetween(action, "    - name: '[restore] Tool build closure'", "    - name: '[build] Tool build closure'")).not.toContain("runner.os != 'Windows'");
     expect(action).toContain("run: pnpm exec tools-pack --help");
-    expect(action).not.toContain("Plan");
+    expect(action).toContain("Resolve workflow postinstall plan");
+    expect(action).toContain("[validate] Planned workspace initialization");
   });
 
   it("[P2] records beta timing evidence without gating delivery", async () => {
@@ -2346,6 +2349,9 @@ process.stdin.on("end", () => {
     expect(report).toContain("const thresholdMs = 30_000;");
     expect(report).toContain("MAC_X64_UPLOAD_TIMINGS: ${{ needs.build_mac_x64.outputs.publish_timings }}");
     expect(report).toContain("Uploads at or above 30 seconds");
+    expect(report).toContain("POSTINSTALL_SOURCE_MAC_X64: ${{ needs.source_mac_x64.outputs.postinstall_result }}");
+    expect(report).toContain("Postinstall operations at or above 30 seconds");
+    expect(report).toContain("postinstallObservation(\"[build] mac_x64 workload\", \"SOURCE_MAC_X64\")");
     expect(report).toContain("name: release-beta-timing-${{ github.run_id }}-${{ github.run_attempt }}");
     expect(report.indexOf("name: Collect release timing ledger")).toBeLessThan(
       report.indexOf("name: Publish direct CDN links and validation results"),
@@ -2406,10 +2412,10 @@ process.stdin.on("end", () => {
       const source = workflowJob(workflow, `source_${target}`);
       expect(source).toContain('OD_WEB_BUILD_ID: ${{ env.SOURCE_WEB_BUILD_ID }}');
       expect(source).toContain(target === "mac_x64"
-        ? "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
+        ? "postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
         : target === "win_x64"
-          ? "install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
-          : "install-profile: source-web");
+          ? "postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}"
+          : "postinstall-intent: source-web");
       expect(source).toContain("pnpm --filter @open-design/tools-pack workspace:dev build web");
       expect(source).not.toContain("cache-tools: 'true'");
       expect(source).not.toContain("OPEN_DESIGN_POSTINSTALL_TARGETS");
@@ -2491,7 +2497,7 @@ process.stdin.on("end", () => {
     expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py prepare");
     expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py run");
     expect(workflow).toContain("run: python3 .github/scripts/release/test_unit.py extra");
-    expect(workflow).toContain('OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}');
+    expect(workflow).toContain("postinstall-intent: ${{ format('test-{0}', matrix.kind) }}");
     expect(workflow).toContain("OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}");
     expect(workflow).toContain('test_matrix: ${{ steps.plan.outputs.test_matrix }}');
     expect(workflow).not.toContain('build_matrix: ${{ steps.plan.outputs.build_matrix }}');
@@ -2504,7 +2510,7 @@ process.stdin.on("end", () => {
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const publish = workflowJob(workflow, "publish");
     expect(publish).not.toMatch(/- (test_|smoke_)/);
-    expect(publish).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'`);
+    expect(publish).toContain("postinstall-intent: release-publish");
     const tests = workflowJob(workflow, "test");
     expect(tests).toContain("matrix: ${{ fromJSON(needs.release_prepare.outputs.test_matrix) }}");
     expect(tests).toContain("needs.release_prepare.outputs.test_count != '0'");
@@ -2555,7 +2561,7 @@ process.stdin.on("end", () => {
       expect(job).not.toContain("publish-platform");
       expect(job).toContain("Install and inspect downloaded artifact");
       // fake-agents imports contracts at runtime, independently of the tool dependency graph.
-      expect(job).toContain(`OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'`);
+      expect(job).toContain("postinstall-intent: release-validation");
     }
     expect(workflow).not.toMatch(/release-beta-(tests|smoke)\.yml/);
   });

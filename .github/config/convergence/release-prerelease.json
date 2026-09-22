@@ -69,7 +69,8 @@
     },
     "source-postinstall": {
       "paths": [
-        "scripts/postinstall.mjs"
+        "scripts/postinstall.mjs",
+        "scripts/postinstall.config.json"
       ],
       "exclude": []
     },
@@ -223,7 +224,9 @@
     ],
     "convergence-control": [
       ".github/config/convergence/release-prerelease.json",
+      ".github/config/postinstall.json",
       ".github/scripts/convergence.py",
+      ".github/scripts/postinstall.py",
       ".github/scripts/handoff.py",
       ".github/scripts/lib/",
       ".github/workflows/release-prerelease.yml",

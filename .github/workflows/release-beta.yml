@@ -352,6 +352,8 @@ jobs:
       RELEASE_PUBLIC_ORIGIN: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}
       OPEN_DESIGN_BETA_METADATA_URL: ${{ inputs.release_public_origin != '' && inputs.release_public_origin || vars.CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN }}/beta/latest/metadata.json
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       run: ${{ steps.plan.outputs.run }}
       test_matrix: ${{ steps.plan.outputs.test_matrix }}
       test_count: ${{ steps.plan.outputs.test_count }}
@@ -435,11 +437,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Setup release control
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: release-control
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
       - name: Validate shared beta publisher
         if: ${{ inputs.publish }}
         run: |
@@ -514,13 +516,13 @@ jobs:
   common:
     name: "[build] Shared JavaScript"
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     needs: release_prepare
     if: ${{ needs.release_prepare.outputs.contribution == 'true' && needs.release_prepare.outputs.common_count != '0' }}
     runs-on: ${{ fromJSON(needs.release_prepare.outputs.common_matrix).include[0].runner || 'ubuntu-latest' }}
-    env:
-      OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack"]'
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -534,8 +536,10 @@ jobs:
           SOURCE_REQUESTS: ${{ needs.release_prepare.outputs.requests }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_javascript
       - name: '[prepare] JavaScript build tools'
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: shared-javascript
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: '[build] Source packages'
         id: source_packages
@@ -586,6 +590,8 @@ jobs:
 
   source_mac_arm64:
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_arm64 workload"
@@ -608,10 +614,11 @@ jobs:
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.release_prepare.outputs.common_count != '0' && needs.common.outputs.sources || needs.release_prepare.outputs.common_count == '0' && needs.release_prepare.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_arm64 ${{ (needs.release_prepare.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: source-web
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          install-profile: source-web
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -649,6 +656,8 @@ jobs:
       - common
   build_mac_arm64:
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       manifest_key: ${{ steps.mac_arm64_platform_outputs.outputs.platform_manifest_key }}
       publish_timings: ${{ steps.mac_arm64_platform_outputs.outputs.publish_timings_json }}
       url: ${{ steps.mac_arm64_platform_outputs.outputs.dmg_url }}
@@ -679,12 +688,12 @@ jobs:
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.release_prepare.outputs.common_count != '0' && needs.common.outputs.sources || needs.release_prepare.outputs.common_count == '0' && needs.release_prepare.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_arm64 ${{ (needs.release_prepare.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
           cache-tools: 'true'
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve"]'
+          postinstall-intent: platform-build
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm exec tools-pack workspace ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -872,6 +881,8 @@ jobs:
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
   source_mac_x64:
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] mac_x64 workload"
@@ -900,10 +911,11 @@ jobs:
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.release_prepare.outputs.common_count != '0' && needs.common.outputs.sources || needs.release_prepare.outputs.common_count == '0' && needs.release_prepare.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_mac_x64 ${{ (needs.release_prepare.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.runtime.operation == 'build' && 'mac-runtime' || fromJSON(needs.release_prepare.outputs.requests).source_mac_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -969,6 +981,8 @@ jobs:
       - common
   build_mac_x64:
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       manifest_key: ${{ steps.mac_x64_platform_outputs.outputs.platform_manifest_key }}
       publish_timings: ${{ steps.mac_x64_platform_outputs.outputs.publish_timings_json }}
       url: ${{ steps.mac_x64_platform_outputs.outputs.dmg_url }}
@@ -1129,8 +1143,10 @@ jobs:
           retention-days: 7
       - name: "[prepare] Full smoke dependencies"
         if: ${{ (inputs.mac_x64_smoke_mode == 'full') }}
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: workspace
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: Smoke beta mac_x64 packaged runtime
         id: mac_x64_smoke
@@ -1215,6 +1231,8 @@ jobs:
             for (const [key, value] of Object.entries(outputs)) core.setOutput(key, String(value));
   source_win_x64:
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       requests: ${{ steps.workload_results.outputs.requests }}
       sources: ${{ steps.workload_results.outputs.sources }}
     name: "[build] win_x64 workload"
@@ -1237,10 +1255,11 @@ jobs:
           SHARED_SOURCES: ${{ toJSON(fromJSON(needs.release_prepare.outputs.common_count != '0' && needs.common.outputs.sources || needs.release_prepare.outputs.common_count == '0' && needs.release_prepare.outputs.sources || 'null').source_javascript) }}
         run: python3 .github/scripts/convergence.py resolve-references --batch source_win_x64 ${{ (needs.release_prepare.outputs.contribution == 'true') && '--shared packages,daemon,shell' || '' }}
       - name: "[prepare] Workspace source tools"
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-          install-profile: ${{ fromJSON(needs.release_prepare.outputs.requests).source_win_x64.web.operation == 'build' && 'source-web' || 'release-executor' }}
       - name: "[restore] Shared JavaScript"
         shell: bash
         run: pnpm --filter @open-design/tools-pack workspace:dev ${{ (needs.release_prepare.outputs.contribution == 'true') && 'import' || 'build' }} javascript --sources "$WORKSPACE_SOURCES" --scratch "$RUNNER_TEMP/shared-javascript" --json
@@ -1296,6 +1315,8 @@ jobs:
       - common
   build_win_x64:
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       manifest_key: ${{ steps.win_x64_platform_outputs.outputs.platform_manifest_key }}
       publish_timings: ${{ steps.win_x64_platform_outputs.outputs.publish_timings_json }}
       url: ${{ steps.win_x64_platform_outputs.outputs.installer_url }}
@@ -1416,8 +1437,10 @@ jobs:
           retention-days: 14
       - name: "[prepare] Full smoke dependencies"
         if: ${{ (inputs.win_x64_smoke_mode == 'full') }}
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: workspace
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
       - name: Build beta win_x64 update fixture
         if: ${{ (inputs.win_x64_smoke_mode == 'full' && inputs.win_x64_update_metadata_url == '' && inputs.win_x64_update_target_version == '') }}
@@ -1536,6 +1559,8 @@ jobs:
       }}
     runs-on: ubuntu-latest
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       release_state: ${{ steps.outputs.outputs.release_state }}
       version_metadata_url: ${{ steps.outputs.outputs.version_metadata_url }}
       mac_arm64_url: ${{ steps.outputs.outputs.mac_arm64_dmg_url }}
@@ -1559,11 +1584,11 @@ jobs:
           ref: ${{ needs.release_prepare.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: release-publish
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/release"]'
       - name: Download mac_arm64 platform manifest
         if: ${{ inputs.enable_mac_arm64 && needs.build_mac_arm64.result == 'success' }}
         env:
@@ -1673,7 +1698,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.release_prepare.outputs.test_matrix) }}
     env:
-      OPEN_DESIGN_POSTINSTALL_TARGETS: ${{ matrix.postinstall }}
       OD_WATCHER_TEST_DEBUG: ${{ matrix.debug || '' }}
       TEST_KIND: ${{ matrix.kind }}
       TEST_SHARD: ${{ matrix.shard || '' }}
@@ -1696,8 +1720,10 @@ jobs:
         if: ${{ matrix.kind == 'ui' }}
         uses: ./.github/actions/configure-ci-parallelism
       - name: Setup workspace
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: ${{ format('test-{0}', matrix.kind) }}
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
           runner-labels: ${{ toJSON(matrix.runner) }}
       - name: Setup Playwright
@@ -1786,6 +1812,8 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       smoke_result: ${{ steps.outcome.outputs.result }}
     permissions:
       contents: read
@@ -1803,11 +1831,11 @@ jobs:
           ref: ${{ needs.release_prepare.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: release-validation
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1860,6 +1888,8 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 45
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       smoke_result: ${{ steps.outcome.outputs.result }}
     permissions:
       contents: read
@@ -1877,11 +1907,11 @@ jobs:
           ref: ${{ needs.release_prepare.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: release-validation
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1934,6 +1964,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     outputs:
+      postinstall_result: ${{ steps.workspace_setup.outputs.postinstall-result-json }}
+      postinstall_timings: ${{ steps.workspace_setup.outputs.postinstall-timings-json }}
       smoke_result: ${{ steps.outcome.outputs.result }}
     permissions:
       contents: read
@@ -1951,11 +1983,11 @@ jobs:
           ref: ${{ needs.release_prepare.outputs.commit }}
           fetch-depth: 1
       - name: Setup workspace
+        id: workspace_setup
         uses: ./.github/actions/setup-workspace
         with:
+          postinstall-intent: release-validation
           save-pnpm-cache: ${{ env.BETA_SAVE_PNPM_CACHE }}
-        env:
-          OPEN_DESIGN_POSTINSTALL_TARGETS: '["tools/pack","tools/release","tools/dev","tools/serve","packages/contracts"]'
       - name: Stage published artifact
         if: ${{ inputs.publish }}
         env:
@@ -1999,6 +2031,10 @@ jobs:
     name: "[report] Beta CDN delivery"
     needs:
       - release_prepare
+      - common
+      - source_mac_arm64
+      - source_mac_x64
+      - source_win_x64
       - build_mac_arm64
       - build_mac_x64
       - build_win_x64
@@ -2017,6 +2053,30 @@ jobs:
         env:
           MAC_ARM64_UPLOAD_TIMINGS: ${{ needs.build_mac_arm64.outputs.publish_timings }}
           MAC_X64_UPLOAD_TIMINGS: ${{ needs.build_mac_x64.outputs.publish_timings }}
+          POSTINSTALL_BUILD_MAC_ARM64: ${{ needs.build_mac_arm64.outputs.postinstall_result }}
+          POSTINSTALL_BUILD_MAC_ARM64_TIMINGS: ${{ needs.build_mac_arm64.outputs.postinstall_timings }}
+          POSTINSTALL_BUILD_MAC_X64: ${{ needs.build_mac_x64.outputs.postinstall_result }}
+          POSTINSTALL_BUILD_MAC_X64_TIMINGS: ${{ needs.build_mac_x64.outputs.postinstall_timings }}
+          POSTINSTALL_BUILD_WIN_X64: ${{ needs.build_win_x64.outputs.postinstall_result }}
+          POSTINSTALL_BUILD_WIN_X64_TIMINGS: ${{ needs.build_win_x64.outputs.postinstall_timings }}
+          POSTINSTALL_COMMON: ${{ needs.common.outputs.postinstall_result }}
+          POSTINSTALL_COMMON_TIMINGS: ${{ needs.common.outputs.postinstall_timings }}
+          POSTINSTALL_PUBLISH: ${{ needs.publish.outputs.postinstall_result }}
+          POSTINSTALL_PUBLISH_TIMINGS: ${{ needs.publish.outputs.postinstall_timings }}
+          POSTINSTALL_RELEASE_PREPARE: ${{ needs.release_prepare.outputs.postinstall_result }}
+          POSTINSTALL_RELEASE_PREPARE_TIMINGS: ${{ needs.release_prepare.outputs.postinstall_timings }}
+          POSTINSTALL_SMOKE_MAC_ARM64: ${{ needs.smoke_mac_arm64.outputs.postinstall_result }}
+          POSTINSTALL_SMOKE_MAC_ARM64_TIMINGS: ${{ needs.smoke_mac_arm64.outputs.postinstall_timings }}
+          POSTINSTALL_SMOKE_MAC_X64: ${{ needs.smoke_mac_x64.outputs.postinstall_result }}
+          POSTINSTALL_SMOKE_MAC_X64_TIMINGS: ${{ needs.smoke_mac_x64.outputs.postinstall_timings }}
+          POSTINSTALL_SMOKE_WIN_X64: ${{ needs.smoke_win_x64.outputs.postinstall_result }}
+          POSTINSTALL_SMOKE_WIN_X64_TIMINGS: ${{ needs.smoke_win_x64.outputs.postinstall_timings }}
+          POSTINSTALL_SOURCE_MAC_ARM64: ${{ needs.source_mac_arm64.outputs.postinstall_result }}
+          POSTINSTALL_SOURCE_MAC_ARM64_TIMINGS: ${{ needs.source_mac_arm64.outputs.postinstall_timings }}
+          POSTINSTALL_SOURCE_MAC_X64: ${{ needs.source_mac_x64.outputs.postinstall_result }}
+          POSTINSTALL_SOURCE_MAC_X64_TIMINGS: ${{ needs.source_mac_x64.outputs.postinstall_timings }}
+          POSTINSTALL_SOURCE_WIN_X64: ${{ needs.source_win_x64.outputs.postinstall_result }}
+          POSTINSTALL_SOURCE_WIN_X64_TIMINGS: ${{ needs.source_win_x64.outputs.postinstall_timings }}
           RELEASE_VERSION: ${{ needs.release_prepare.outputs.beta_version }}
           TIMING_LEDGER_PATH: ${{ runner.temp }}/release-timing-ledger.json
           WIN_X64_UPLOAD_TIMINGS: ${{ needs.build_win_x64.outputs.publish_timings }}
@@ -2036,6 +2096,21 @@ jobs:
               } catch (error) {
                 core.warning(`Could not parse ${target} upload timings: ${error.message}`);
                 return [];
+              }
+            };
+            const postinstallObservation = (job, key) => {
+              const resultRaw = process.env[`POSTINSTALL_${key}`];
+              const timingsRaw = process.env[`POSTINSTALL_${key}_TIMINGS`];
+              if (!resultRaw && !timingsRaw) return null;
+              try {
+                return {
+                  job,
+                  result: resultRaw ? JSON.parse(resultRaw) : null,
+                  timings: timingsRaw ? JSON.parse(timingsRaw) : [],
+                };
+              } catch (error) {
+                core.warning(`Could not parse ${job} postinstall observation: ${error.message}`);
+                return null;
               }
             };
             const { data: workflowRun } = await github.rest.actions.getWorkflowRun({
@@ -2091,6 +2166,24 @@ jobs:
               })))
               .filter((step) => step.durationMs != null && step.durationMs >= thresholdMs)
               .sort((left, right) => right.durationMs - left.durationMs);
+            const postinstall = [
+              postinstallObservation("[prepare] Beta release and Plan", "RELEASE_PREPARE"),
+              postinstallObservation("[build] Shared JavaScript", "COMMON"),
+              postinstallObservation("[build] mac_arm64 workload", "SOURCE_MAC_ARM64"),
+              postinstallObservation("[build] mac_arm64 Electron full", "BUILD_MAC_ARM64"),
+              postinstallObservation("[build] mac_x64 workload", "SOURCE_MAC_X64"),
+              postinstallObservation("[build] mac_x64 Electron full", "BUILD_MAC_X64"),
+              postinstallObservation("[build] win_x64 workload", "SOURCE_WIN_X64"),
+              postinstallObservation("[build] win_x64 Electron full", "BUILD_WIN_X64"),
+              postinstallObservation("[publish] Beta distribution", "PUBLISH"),
+              postinstallObservation("[validate] beta mac_arm64 downloaded artifact", "SMOKE_MAC_ARM64"),
+              postinstallObservation("[validate] beta mac_x64 downloaded artifact", "SMOKE_MAC_X64"),
+              postinstallObservation("[validate] beta win_x64 downloaded artifact", "SMOKE_WIN_X64"),
+            ].filter(Boolean);
+            const slowPostinstall = postinstall
+              .flatMap((observation) => observation.timings.map((timing) => ({ job: observation.job, ...timing })))
+              .filter((timing) => timing.durationMs >= thresholdMs)
+              .sort((left, right) => right.durationMs - left.durationMs);
             const ledger = {
               schemaVersion: 1,
               generatedAt: new Date().toISOString(),
@@ -2123,6 +2216,7 @@ jobs:
                 ...uploadTimings("mac_x64", process.env.MAC_X64_UPLOAD_TIMINGS),
                 ...uploadTimings("win_x64", process.env.WIN_X64_UPLOAD_TIMINGS),
               ].sort((left, right) => right.durationMs - left.durationMs),
+              postinstall,
               slowSteps,
               jobs: normalizedJobs,
             };
@@ -2164,6 +2258,24 @@ jobs:
                     entry.target,
                     entry.objectKey,
                     `${(entry.bytes / 1024 / 1024).toFixed(1)} MiB`,
+                    seconds(entry.durationMs),
+                  ]),
+                ]);
+            }
+            if (slowPostinstall.length > 0) {
+              summary
+                .addHeading("Postinstall operations at or above 30 seconds", 3)
+                .addTable([
+                  [
+                    { data: "Job", header: true },
+                    { data: "Entry", header: true },
+                    { data: "Operation", header: true },
+                    { data: "Duration", header: true },
+                  ],
+                  ...slowPostinstall.slice(0, 30).map((entry) => [
+                    entry.job,
+                    entry.entry || "—",
+                    entry.target || entry.operation,
                     seconds(entry.durationMs),
                   ]),
                 ]);
