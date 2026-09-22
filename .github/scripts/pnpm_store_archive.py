@@ -118,10 +118,12 @@ def bootstrap(tool_dir: Path) -> Path:
 
 
 def _reusable_roots(store: Path) -> list[Path]:
+    versions = [store] if re.fullmatch(r"v[0-9]+", store.name) else [
+        path for path in store.glob("v*") if path.is_dir()
+    ]
     roots = sorted(
         path
-        for version in store.glob("v*")
-        if version.is_dir()
+        for version in versions
         for name in ("files", "index")
         if (path := version / name).is_dir()
     )
