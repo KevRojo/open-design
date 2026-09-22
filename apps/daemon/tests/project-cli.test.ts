@@ -75,6 +75,10 @@ async function startProjectStubServer(deleteResponse: unknown = { ok: true }): P
         }));
         return;
       }
+      if (captured.method === 'GET' && captured.url === '/api/projects/project-1/share-state') {
+        res.end(JSON.stringify({ projectId: 'project-1', bindingExists: false, hasEverShared: false, publications: [] }));
+        return;
+      }
       if (captured.method === 'GET' && captured.url === '/api/projects/project-1') {
         res.statusCode = 200;
         res.end(JSON.stringify({
@@ -259,6 +263,14 @@ describe('od project CLI', () => {
     expect(stub.requests).toHaveLength(1);
   });
 
+  it('share status without path reads project binding history through the real CLI process', async () => {
+    stub = await startProjectStubServer();
+    const result = await runCli(['project', 'share', 'status', 'project-1', '--workspace', 'ws-1', '--workspace-member', 'member-1', '--daemon-url', stub.baseUrl, '--json']);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ projectId: 'project-1', bindingExists: false, hasEverShared: false, publications: [] });
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0]).toMatchObject({ method: 'GET', url: '/api/projects/project-1/share-state', headers: { 'x-od-workspace-id': 'ws-1', 'x-od-workspace-member-id': 'member-1' } });
+  });
   it.each(['publish', 'get', 'status', 'stop'])('share %s uses the existing file endpoint and emits raw JSON', async action => {
     stub = await startProjectStubServer();
     const result = await runCli([

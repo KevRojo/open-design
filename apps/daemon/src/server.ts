@@ -1071,6 +1071,7 @@ import { readVelaControlApiContext } from './integrations/vela.js';
 import { createShareAliasReservations } from './collab/share-alias-reservation.js';
 import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
 import { publicShareViewerUrl } from './collab/public-share-viewer-url.js';
+import { createVelaProjectShareState } from './collab/vela-project-share-state.js';
 import { runPinnedVelaCommand } from './collab/vela-pinned-command.js';
 import {
   fetchBillingCheckoutUrl,
@@ -5277,6 +5278,7 @@ export async function startServer({
         })().catch(() => { console.warn('[od] share binding retry unavailable'); });
       },
     },
+    readProjectShareState: createVelaProjectShareState({ dataRoot: RUNTIME_DATA_DIR, configuredEnv: configuredAmrEnv }),
     shareContentFingerprints: createShareContentFingerprints(db, publicFilePublicationStore),
     publicFileMutations,
     verifyWorkspaceRequest: verifiedWorkspaceContextForRequest,
