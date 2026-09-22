@@ -2369,7 +2369,7 @@ process.stdin.on("end", () => {
     expect(action).toContain("run: pnpm run postinstall dependencies");
     expect(action).toContain("OPEN_DESIGN_POSTINSTALL_TIMING_PATH");
     expect(action).toContain("postinstall-timings-json:");
-    expect(action).toContain("steps.postinstall-plan.outputs.install-profile == 'source-web'");
+    expect(action).toContain("steps.postinstall-plan.outputs.install-profile != 'workspace'");
     expect(action).toContain("python3 .github/scripts/postinstall.py plan");
     expect(action).toContain("python3 .github/scripts/postinstall.py consume");
     expect(action).toContain("OPEN_DESIGN_POSTINSTALL_PLAN_PATH: ${{ steps.postinstall-plan.outputs.path }}");

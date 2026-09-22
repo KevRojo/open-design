@@ -280,9 +280,11 @@ describe("release workflows", () => {
     expect(macX64Producer).toContain("mac runtime-export");
     expect(beta).toContain("mac runtime-restore");
     expect(beta).toContain('--mac-runtime-product "$RUNNER_TEMP/mac-runtime-product"');
-    expect(setupWorkspace).toContain("source-web|release-executor|mac-runtime)");
-    expect(setupWorkspace).toContain("steps.postinstall-plan.outputs.install-profile == 'release-executor'");
-    expect(setupWorkspace).toContain("steps.postinstall-plan.outputs.install-profile == 'mac-runtime'");
+    expect(setupWorkspace).toContain("source-web|release-executor|release-tools|release-validation|mac-runtime)");
+    for (const profile of ["release-executor", "mac-runtime", "release-tools", "release-validation"]) {
+      expect(setupWorkspace).toContain(`install-profile || inputs.install-profile) == '${profile}'`);
+    }
+    expect(setupWorkspace).toContain("steps.postinstall-plan.outputs.install-profile != 'workspace'");
     expect(setupWorkspace).toContain("--filter @open-design/tools-pack...");
     expect(setupWorkspace).toContain("--filter @open-design/tools-release...");
     expect(executorPaths).not.toContain("packages/");
@@ -403,9 +405,10 @@ describe("release workflows", () => {
       stableMetadata.indexOf("tools-release prepare"),
     );
     for (const publish of [prereleasePublish, stablePublish]) {
-      expect(publish).toContain("uses: pnpm/action-setup@v5");
-      expect(publish).toContain("run: pnpm install --frozen-lockfile");
-      expect(publish.indexOf("run: pnpm install --frozen-lockfile")).toBeLessThan(
+      expect(publish).toContain("uses: ./.github/actions/setup-workspace");
+      expect(publish).toContain("postinstall-intent: release-publish");
+      expect(publish).not.toContain("run: pnpm install --frozen-lockfile");
+      expect(publish.indexOf("uses: ./.github/actions/setup-workspace")).toBeLessThan(
         publish.indexOf("tools-release publish-metadata"),
       );
     }
