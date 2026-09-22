@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { createPublicFileMutations } from '../src/collab/public-file-mutations.js';
+import { createProjectPublicFileStop } from '../src/collab/project-public-file-stop.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +35,39 @@ it.each([false, true])('preserves original revision across SQLite close/reopen a
     expect(store.listStops()).toHaveLength(replace ? 1 : 0);
     expect(store.get(key)).toEqual(replace ? publication : null);
     expect(db.prepare('SELECT comment_id FROM comment_relay_outbox').all()).toEqual(replace ? [{ comment_id: 'old' }] : []);
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('recovers a new failed deletion intent after an exhausted same-slug task across restart', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'od-stop-new-intent-'));
+  const file = join(dir, 'store.sqlite');
+  let db = new Database(file);
+  try {
+    migratePublicFilePublications(db); migrateCommentRelayOutbox(db);
+    let store = createSqlitePublicFilePublicationStore(db);
+    store.set(key, publication); store.enqueueStop(key);
+    for (let i = 0; i < 4; i++) store.recordStopFailure(key);
+    const oldRevision = store.getRevision(key)!;
+    const foreign = { ...key, ownerMemberId: 'another-owner' };
+    store.set(foreign, publication);
+    store.set(key, publication);
+    const current = store.getRevision(key)!;
+    expect(current.token).not.toBe(oldRevision.token);
+    const offlineStop = vi.fn(async () => { throw new Error('offline'); });
+    await expect(createProjectPublicFileStop(store, async () => ({ ...key, stop: offlineStop }))(key)).rejects.toThrow('PUBLIC_FILE_STOP_PENDING');
+    expect(offlineStop).toHaveBeenCalledTimes(1);
+    db.close(); db = new Database(file);
+    store = createSqlitePublicFilePublicationStore(db);
+    expect(store.get(key)).toEqual(publication);
+    expect(store.listRetryableStops()).toEqual([{ ...key, publicationRevision: current.token, failureCount: 1 }]);
+    const stop = vi.fn(async () => {});
+    const prepare = vi.fn(async (task) => { expect(task).toEqual(key); return { ...key, stop }; });
+    expect(await createPublicFileStopStartup(store, prepare, createPublicFileMutations())()).toEqual({ stopped: 1, failed: 0, deferred: 0, persistenceFailures: 0 });
+    expect(stop).toHaveBeenCalledTimes(1); expect(prepare).toHaveBeenCalledTimes(1);
+    db.close(); db = new Database(file);
+    store = createSqlitePublicFilePublicationStore(db);
+    expect(store.listStops()).toEqual([]); expect(store.get(key)).toBeNull();
+    expect(store.get(foreign)).toEqual(publication);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
