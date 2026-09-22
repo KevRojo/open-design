@@ -5420,6 +5420,7 @@ export const ptBR: Dict = {
   'comment.authorRole.admin': 'Administrador',
   'comment.authorRole.member': 'Membro',
   'comment.authorRole.sharePage': 'Página compartilhada',
+  'comment.sharePageCommentReadOnly': 'Comentários da página de compartilhamento não podem ser editados.',
   'comment.anchorState.reanchored': 'com base em uma versão anterior',
   'comment.anchorState.stale': 'a âncora pode ter sido movida',
   'comment.anchorState.lost': 'âncora perdida',

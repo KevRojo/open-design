@@ -803,6 +803,7 @@ export const fa: Dict = {
   'comment.authorRole.admin': 'مدیر',
   'comment.authorRole.member': 'عضو',
   'comment.authorRole.sharePage': 'صفحه اشتراک‌گذاری',
+  'comment.sharePageCommentReadOnly': 'نظرات صفحه اشتراک‌گذاری قابل ویرایش نیستند.',
   'comment.anchorState.reanchored': 'بر اساس نسخه قدیمی‌تر',
   'comment.anchorState.stale': 'ممکن است لنگر جابه‌جا شده باشد',
   'comment.anchorState.lost': 'لنگر گم شده است',

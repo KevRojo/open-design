@@ -803,6 +803,7 @@ export const de: Dict = {
   'comment.authorRole.admin': 'Administrator',
   'comment.authorRole.member': 'Mitglied',
   'comment.authorRole.sharePage': 'Freigabeseite',
+  'comment.sharePageCommentReadOnly': 'Kommentare von der Freigabeseite können nicht bearbeitet werden.',
   'comment.anchorState.reanchored': 'basierend auf einer älteren Version',
   'comment.anchorState.stale': 'Anker könnte verschoben worden sein',
   'comment.anchorState.lost': 'Anker verloren',

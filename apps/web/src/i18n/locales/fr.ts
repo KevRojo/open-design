@@ -5420,6 +5420,7 @@ export const fr: Dict = {
   'comment.authorRole.admin': 'Administrateur',
   'comment.authorRole.member': 'Membre',
   'comment.authorRole.sharePage': 'Page partagée',
+  'comment.sharePageCommentReadOnly': 'Les commentaires de la page de partage ne peuvent pas être modifiés.',
   'comment.anchorState.reanchored': 'basé sur une version antérieure',
   'comment.anchorState.stale': 'l’ancre a peut-être été déplacée',
   'comment.anchorState.lost': 'ancre perdue',

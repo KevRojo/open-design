@@ -5420,6 +5420,7 @@ export const ru: Dict = {
   'comment.authorRole.admin': 'Администратор',
   'comment.authorRole.member': 'Участник',
   'comment.authorRole.sharePage': 'Страница общего доступа',
+  'comment.sharePageCommentReadOnly': 'Комментарии со страницы доступа по ссылке нельзя редактировать.',
   'comment.anchorState.reanchored': 'на основе более ранней версии',
   'comment.anchorState.stale': 'привязка могла переместиться',
   'comment.anchorState.lost': 'привязка потеряна',

@@ -1155,6 +1155,7 @@ export interface Dict {
   'comment.authorRole.admin': string;
   'comment.authorRole.member': string;
   'comment.authorRole.sharePage': string;
+  'comment.sharePageCommentReadOnly': string;
   'comment.anchorState.reanchored': string;
   'comment.anchorState.stale': string;
   'comment.anchorState.lost': string;

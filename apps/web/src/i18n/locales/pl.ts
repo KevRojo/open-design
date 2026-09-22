@@ -5420,6 +5420,7 @@ export const pl: Dict = {
   'comment.authorRole.admin': 'Administrator',
   'comment.authorRole.member': 'Członek',
   'comment.authorRole.sharePage': 'Udostępniona strona',
+  'comment.sharePageCommentReadOnly': 'Komentarzy ze strony udostępniania nie można edytować.',
   'comment.anchorState.reanchored': 'na podstawie starszej wersji',
   'comment.anchorState.stale': 'kotwica mogła zostać przeniesiona',
   'comment.anchorState.lost': 'kotwica utracona',

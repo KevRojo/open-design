@@ -803,6 +803,7 @@ export const en: Dict = {
   'comment.authorRole.admin': 'Admin',
   'comment.authorRole.member': 'Member',
   'comment.authorRole.sharePage': 'Share page',
+  'comment.sharePageCommentReadOnly': 'Comments from the share page can\'t be edited.',
   'comment.anchorState.reanchored': 'based on an older version',
   'comment.anchorState.stale': 'anchor may have moved',
   'comment.anchorState.lost': 'anchor lost',

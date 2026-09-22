@@ -5420,6 +5420,7 @@ export const hu: Dict = {
   'comment.authorRole.admin': 'Rendszergazda',
   'comment.authorRole.member': 'Tag',
   'comment.authorRole.sharePage': 'Megosztási oldal',
+  'comment.sharePageCommentReadOnly': 'A megosztási oldal megjegyzései nem szerkeszthetők.',
   'comment.anchorState.reanchored': 'egy korábbi verzió alapján',
   'comment.anchorState.stale': 'a horgony elmozdulhatott',
   'comment.anchorState.lost': 'a horgony elveszett',
