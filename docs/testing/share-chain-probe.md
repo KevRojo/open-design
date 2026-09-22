@@ -43,6 +43,14 @@ The local recorder unit tests are not browser/privacy/SSO acceptance. Actual ano
 6. **Before republishing**, create the step7 local comment via Owner UI; capture its actual POST ID. Edit actual rendered content. Enter a real unsent visitor draft. Owner publishes, copies UI link again; verify stable URL and fresh page loads changed Owner output. Original page/draft must remain. If real toast is visible, its actual refresh button is exercised with native confirm: cancel preserves draft/document, accept reloads the same URL into new content and clears draft. No window.confirm replacement, page.reload shortcut, clock acceleration, or injected version event.
 7. Only the captured pre-update local comment ID may satisfy public-read and visitor-list checks. Failure branch is not fault-injected. Missing delivery is UNKNOWN until a real terminal/backfill status distinguishes it from latency; it is never marked successful by note text alone.
 
+## Rechecking an observed endpoint
+
+Evidence URLs are **not replay inputs**. Every HTTP record labels its URL `urlPurpose: diagnostic-only`; userinfo/fragments and unrelated query values may have been removed or redacted. The recorder preserves `projectId`, `filePath` and `shareAlias` to explain routing, not to promise transport equivalence.
+
+A permitted read-only recheck must reuse the actual live product request's full URL, including its complete query string, unchanged in memory. Never strip query parameters, build a URL from the pathname, or send a redacted report URL. Do not export credential-bearing URLs or copy auth headers/cookies into evidence. If the live request is no longer available, observe a fresh authorized product request instead of guessing missing values.
+
+For stable-alias discovery, the actual metadata request carries `projectId` and `shareAlias=1`; the observed comment read carries `projectId` and `filePath`. Missing pairing context can correctly return not-found to prevent probing. A404 from an incomplete reconstructed request does not establish that the original artifact/comments were deleted. Preserve such a failed measurement with its correction; do not rewrite it into successful evidence.
+
 ## Human login handoff
 
 Do not open a headed window until the human is ready and the browser seat has been checked using exact executable names. Use an isolated ephemeral context and follow the real share-page comment entry to login; never construct a replacement authentication URL. The human alone operates authentication fields, including email. Do not inspect field values, record the credential-entry process, take login screenshots, export cookies/storageState, or use capture/registration intermediate sessions as an authentication shortcut. No traces, HAR or video during authentication.

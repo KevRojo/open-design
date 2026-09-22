@@ -12,19 +12,20 @@ export interface HttpResponseSource {
 function parseEvidenceUrl(value: string): URL | null {
   try { return new URL(value); } catch { return null; }
 }
-/** Never persist URL userinfo, fragments, or arbitrary query parameters. */
+/** Diagnostic output only, never a transport URL. Rechecks must use the live
+ * request URL unchanged, not a path reconstructed from this redacted record. */
 export function evidenceUrl(value: string): string {
   const url = parseEvidenceUrl(value);
   if (!url) return 'invalid:<REDACTED>';
   if (!['http:', 'https:'].includes(url.protocol)) return `${url.protocol}<REDACTED>`;
   url.username = ''; url.password = ''; url.hash = '';
   for (const key of [...url.searchParams.keys()]) {
-    if (!['projectId', 'filePath'].includes(key)) url.searchParams.set(key, '<REDACTED>');
+    if (!['projectId', 'filePath', 'shareAlias'].includes(key)) url.searchParams.set(key, '<REDACTED>');
   }
   return url.href;
 }
 export function captureHttpRequest(request: HttpRequestSource, page: string) {
-  return { page, at: Date.now(), method: request.method(), type: request.resourceType(), url: evidenceUrl(request.url()) };
+  return { page, at: Date.now(), method: request.method(), type: request.resourceType(), url: evidenceUrl(request.url()), urlPurpose: 'diagnostic-only' as const };
 }
 /** Only business bodies needed by the probe are read. Identity/directory/auth bodies are not evidence inputs. */
 export function mayReadEvidenceBody(pathname: string): boolean {

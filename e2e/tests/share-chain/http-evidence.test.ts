@@ -32,6 +32,22 @@ describe('share probe evidence (local helper tests, not live acceptance)', () =>
     expect(await captureHttpResponse(response('not a URL secret', json), 'visitor')).toMatchObject({ url: 'invalid:<REDACTED>', bodyRead: 'not-requested' });
     expect(json).not.toHaveBeenCalled();
   });
+  it.each([
+    'https://console.invalid/api/v1/public/snapshots/alias?projectId=p&shareAlias=1',
+    'https://console.invalid/api/v1/collab/share/alias/comments?projectId=p&filePath=slides%2Findex.html',
+  ])('preserves routing context but labels evidence as non-transport: %s', original => {
+    const recorded = captureHttpRequest(request(original), 'visitor');
+    expect(recorded.url).toBe(original);
+    expect(recorded).toHaveProperty('urlPurpose', 'diagnostic-only');
+  });
+  it('retains pairing parameters while redacting unrelated credentials', () => {
+    const recorded = captureHttpRequest(request('https://console.invalid/api/v1/public/snapshots/alias?projectId=p&shareAlias=1&token=secret'), 'visitor');
+    const url = new URL(recorded.url);
+    expect(url.searchParams.get('projectId')).toBe('p');
+    expect(url.searchParams.get('shareAlias')).toBe('1');
+    expect(url.searchParams.get('token')).toBe('<REDACTED>');
+    expect(recorded.url).not.toContain('secret');
+  });
   it('redacts credentials and arbitrary query values', () => {
     const url = new URL(evidenceUrl('https://u:secret@console.invalid/api/x?token=secret&projectId=p#secret'));
     expect(evidenceUrl('data:text/plain,secret')).toBe('data:<REDACTED>');
