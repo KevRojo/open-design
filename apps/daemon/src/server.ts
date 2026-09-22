@@ -1070,7 +1070,7 @@ import {
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createShareAliasReservations } from './collab/share-alias-reservation.js';
 import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
-import { publicShareViewerUrl } from './collab/public-share-viewer-url.js';
+import { resolvePublicShareViewerUrl } from './collab/public-share-viewer-url.js';
 import { createVelaProjectShareState } from './collab/vela-project-share-state.js';
 import { registerPublicFileStopRetryRoutes } from './routes/public-file-stop-retry.js';
 import { runPinnedVelaCommand } from './collab/vela-pinned-command.js';
@@ -5254,6 +5254,7 @@ export async function startServer({
     // (slug + revision token read back after the write), so a half-written
     // publication cannot enqueue work that later resolves against nothing.
     recordPublicFilePublication,
+    resolvePublicShareLink: (projectId, slug) => resolvePublicShareViewerUrl(projectId, slug, process.env, configuredAmrEnv()),
     sharePublishing: {
       reservations: createShareAliasReservations(db),
       outbox: shareBindingOutbox,
@@ -5264,7 +5265,7 @@ export async function startServer({
         const currentSession = readVelaControlApiContext(process.env, configuredEnv);
         if (!currentSession?.controlKey || !currentSession.apiUrl) throw new Error('PUBLIC_SHARE_SESSION_UNAVAILABLE');
         const session = Object.freeze({ ...currentSession });
-        const url = publicShareViewerUrl(identity.projectId, slug, process.env, configuredEnv);
+        const url = resolvePublicShareViewerUrl(identity.projectId, slug, process.env, configuredEnv);
         const directory = await fetchVelaWorkspaceDirectory({ readSession: () => session });
         if (!directory.ok || !directory.items.some(item => item.workspaceId === identity.resourceTeamId
           && item.workspaceMemberId === identity.ownerMemberId && item.memberStatus === 'active'

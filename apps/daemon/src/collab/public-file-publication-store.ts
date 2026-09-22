@@ -13,7 +13,8 @@ export interface PublicFilePublicationScope {
 }
 
 export interface PublicFilePublication {
-  url: string;
+  /** Content may be published while its deployment Web origin is unknown. */
+  url: string | null;
   slug: string;
   fileName: string;
 }
@@ -95,7 +96,7 @@ export function migratePublicFilePublications(db: SqliteDb): void {
       owner_member_id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       file_path TEXT NOT NULL,
-      url TEXT NOT NULL,
+      url TEXT,
       slug TEXT NOT NULL,
       file_name TEXT NOT NULL,
       created_at INTEGER NOT NULL,
@@ -118,9 +119,29 @@ export function migratePublicFilePublications(db: SqliteDb): void {
   if (!stopColumns.some(column => column.name === 'publication_revision')) {
     db.exec('ALTER TABLE public_file_stop_queue ADD COLUMN publication_revision TEXT');
   }
-  const columns = db.prepare('PRAGMA table_info(public_file_publications)').all() as Array<{ name: string }>;
+  const columns = db.prepare('PRAGMA table_info(public_file_publications)').all() as Array<{ name: string; notnull: number }>;
   if (!columns.some(column => column.name === 'revision')) {
     db.exec("ALTER TABLE public_file_publications ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
+  }
+  // Legacy rows required a display URL to exist before retaining a publication
+  // witness. Preserve every identity/revision while allowing a real SQL NULL;
+  // an empty or guessed URL would leak a false copy target to callers.
+  if (columns.find(column => column.name === 'url')?.notnull) {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE public_file_publications_nullable (
+        resource_team_id TEXT NOT NULL, owner_member_id TEXT NOT NULL,
+        project_id TEXT NOT NULL, file_path TEXT NOT NULL, url TEXT,
+        slug TEXT NOT NULL, file_name TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        revision TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path)
+      );
+      INSERT INTO public_file_publications_nullable
+        SELECT resource_team_id, owner_member_id, project_id, file_path, url,
+          slug, file_name, created_at, updated_at, revision FROM public_file_publications;
+      DROP TABLE public_file_publications;
+      ALTER TABLE public_file_publications_nullable RENAME TO public_file_publications;`);
+    })();
   }
 }
 
@@ -343,7 +364,7 @@ export function createSqlitePublicFilePublicationStore(
       ) as { url?: unknown; slug?: unknown; fileName?: unknown } | undefined;
       if (
         !row
-        || typeof row.url !== 'string'
+        || (row.url !== null && typeof row.url !== 'string')
         || typeof row.slug !== 'string'
         || typeof row.fileName !== 'string'
       ) {

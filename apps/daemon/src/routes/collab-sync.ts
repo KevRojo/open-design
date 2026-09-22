@@ -18,7 +18,6 @@ import {
   SHARE_MAX_TOTAL_BYTES,
   type SharePlanSummary,
   workspaceContextHasWorkspaceIdentity,
-  type PublicProjectFilePublication,
   type ProjectContentTransferState,
   type ProjectMetadata,
   type ProjectSyncIntentEvent,
@@ -63,6 +62,7 @@ import {
 } from '../collab/vela-cli-resource-adapter.js';
 import {
   createInMemoryPublicFilePublicationStore,
+  type PublicFilePublication,
   type PublicFilePublicationScope,
   type PublicFilePublicationStore,
 } from '../collab/public-file-publication-store.js';
@@ -233,12 +233,14 @@ export interface RegisterCollabSyncRoutesDeps {
   publicFilePublicationStore?: PublicFilePublicationStore;
   shareContentFingerprints?: ShareContentFingerprints;
   readProjectShareState?: ReadProjectShareState;
+  /** Reconstruct a previously unavailable presentation link without republishing. */
+  resolvePublicShareLink?: (projectId: string, slug: string) => string | null;
   recordPublicFilePublication?: RecordPublicFilePublication;
   sharePublishing?: {
     reservations: ReturnType<typeof createShareAliasReservations>;
     outbox: ShareBindingOutbox;
     complete: ReturnType<typeof createSharePublicationCompletion>;
-    prepare(scope: PublicFilePublicationScope, slug: string): Promise<{ run: typeof runVelaCommand; url: string }>;
+    prepare(scope: PublicFilePublicationScope, slug: string): Promise<{ run: typeof runVelaCommand; url: string | null }>;
     retry(): void;
   };
   publicFileMutations?: PublicFileMutations;
@@ -1361,14 +1363,17 @@ export function registerCollabSyncRoutes(
         scope, resourceId, versionId, entryPath: sharePlan.entryPath,
         name: path.basename(filePath),
       }, publisher.reservations, prepared.run);
-      const publication: PublicProjectFilePublication = {
+      const publication: PublicFilePublication = {
         url: prepared.url, slug: result.receipt.slug, fileName: filePath,
       };
       const outcome = publisher.complete({ scope, resourceId, publication,
         mapping: sharePlan.mapping, result });
       const response: SharePublishResponse = outcome.status === 'published'
-        ? { status: 'published', receipt: outcome.receipt, url: prepared.url }
-        : { status: 'binding_pending', receipt: outcome.receipt, binding: outcome.binding };
+        ? prepared.url !== null
+          ? { status: 'published', receipt: outcome.receipt, url: prepared.url }
+          : { status: 'published', receipt: outcome.receipt, link: { status: 'unavailable', code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' } }
+        : { status: 'binding_pending', receipt: outcome.receipt, binding: outcome.binding,
+          ...(prepared.url === null ? { link: { status: 'unavailable' as const, code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' as const } } : {}) };
       if (response.status === 'binding_pending' && response.binding.retrying) {
         try { publisher.retry(); }
         catch { response.binding = { retrying: false, code: 'SHARE_BINDING_RETRY_UNAVAILABLE' }; }
@@ -1523,8 +1528,10 @@ export function registerCollabSyncRoutes(
       const history = await deps.readProjectShareState(scope);
       const remote = history.publications.find(item => item.sourceFilePath === filePath);
       const local = publicFilePublicationStore.get(scope);
+      const localUrl = local?.url ?? (local && deps.resolvePublicShareLink?.(projectId, local.slug)) ?? null;
       const response: import('@open-design/contracts').ProjectFilePublicShareResponse = {
-        publication: local && local.slug === remote?.slug ? local : null,
+        publication: local && localUrl !== null && local.slug === remote?.slug ? { ...local, url: localUrl } : null,
+        ...(local && localUrl === null && local.slug === remote?.slug ? { link: { status: 'unavailable' as const, code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' as const } } : {}),
         status: remote?.status ?? 'none',
         freshness,
       };

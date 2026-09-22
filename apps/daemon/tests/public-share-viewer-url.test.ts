@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { publicShareViewerUrl } from '../src/collab/public-share-viewer-url.js';
+import { publicShareViewerUrl, resolvePublicShareViewerUrl } from '../src/collab/public-share-viewer-url.js';
 
 const slug = 'a863b8d7-cc55-465a-a359-435bd3ef4919';
 
 describe('public share Viewer Web base', () => {
+  it('presentation lookup can be unavailable without fabricating a different deployment', () => {
+    expect(resolvePublicShareViewerUrl('p', slug, {})).toBeNull();
+    expect(resolvePublicShareViewerUrl('p', slug, { OPEN_DESIGN_AMR_PROFILE: 'prod', OD_VELA_WEB_URL: 'https://prod.example.test/cloud' }, { OPEN_DESIGN_AMR_PROFILE: 'feature-test' })).toBeNull();
+    expect(() => resolvePublicShareViewerUrl('p', 'invalid', {})).toThrow('PUBLIC_SHARE_IDENTITY_INVALID');
+  });
   it('preserves the deployment prefix and encodes the actual project ID', () => {
     expect(publicShareViewerUrl('project /中文', slug, { OD_VELA_WEB_URL: 'https://web.example.test/cloud/' }))
       .toBe(`https://web.example.test/cloud/artifact/project%20%2F%E4%B8%AD%E6%96%87/${slug}`);
