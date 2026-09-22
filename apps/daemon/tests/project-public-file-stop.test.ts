@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createInMemoryPublicFilePublicationStore, type PreparePublicFileStop } from '../src/collab/public-file-publication-store.js';
-import { createProjectPublicFileStop } from '../src/collab/project-public-file-stop.js';
+import { createProjectPublicFileStop, ProjectPublicFileStopPendingError } from '../src/collab/project-public-file-stop.js';
 const scope = { resourceTeamId: 'workspace', ownerMemberId: 'member', projectId: 'project' };
 const publication = (slug: string) => ({ slug, url: `https://example.test/${slug}`, fileName: 'index.html' });
 function setup() {
@@ -58,6 +58,30 @@ it('queues the current failed deletion intent after the same slug was republishe
   f.stop.mockRejectedValue(new Error('offline'));
   await expect(f.run(scope)).rejects.toThrow('PUBLIC_FILE_STOP_PENDING');
   expect(f.store.listRetryableStops()).toEqual([{ ...target, publicationRevision: current.token, failureCount: 1 }]);
+});
+
+it('reports each remaining file with its own retry fate, excluding successful stops and other owners', async () => {
+  const f = setup();
+  for (const filePath of ['success.html', 'retry.html', 'terminal.html']) f.store.set({ ...scope, filePath }, publication(filePath));
+  const terminal = { ...scope, filePath: 'terminal.html', slug: 'terminal.html' };
+  f.store.enqueueStop(terminal);
+  for (let i = 0; i < 4; i++) f.store.recordStopFailure(terminal);
+  f.store.set({ ...scope, ownerMemberId: 'other', filePath: 'other.html' }, publication('other'));
+  f.prepare.mockImplementation(async key => ({ ...scope, stop: async () => { if (key.filePath !== 'success.html') throw new Error('offline'); } }));
+  const pending = f.run(scope);
+  await expect(pending).rejects.toBeInstanceOf(ProjectPublicFileStopPendingError);
+  await expect(pending).rejects.toMatchObject({ message: 'PUBLIC_FILE_STOP_PENDING', shareResiduals: [
+    { filePath: 'retry.html', slug: 'retry.html', retrying: true },
+    { filePath: 'terminal.html', slug: 'terminal.html', retrying: false },
+  ] });
+  expect(f.store.get({ ...scope, filePath: 'success.html' })).toBeNull();
+  expect(f.store.listRetryableStops()).toHaveLength(1);
+});
+it('does not report an old generation queue as retrying for its replacement', async () => {
+  const f = setup(); const target = { ...scope, filePath: 'index.html', slug: 'a' };
+  f.store.set(target, publication('a')); f.store.enqueueStop(target);
+  f.stop.mockImplementation(async () => { f.store.set(target, publication('a')); throw new Error('old attempt'); });
+  await expect(f.run(scope)).rejects.toMatchObject({ shareResiduals: [{ filePath: 'index.html', slug: 'a', retrying: false }] });
 });
 
 it('does nothing for a project without publications', async () => {
