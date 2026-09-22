@@ -665,13 +665,13 @@ describe('App AMR polling', () => {
     expect(mockedFetchAmrModels).toHaveBeenCalledTimes(2);
   });
 
-  it('stops polling after the preset retry budget is exhausted when remote never arrives', async () => {
+  it.each([false, true])('stops polling after the preset retry budget is exhausted (empty: %s)', async (empty) => {
     vi.useFakeTimers();
     mockedFetchAmrModels.mockReset();
     mockedFetchAmrModels.mockImplementation(async () => ({
       source: 'preset',
       refreshing: true,
-      models: [{ id: 'preset-a', label: 'preset-a' }],
+      models: empty ? [] : [{ id: 'preset-a', label: 'preset-a' }],
     }));
 
     render(<App />);
@@ -681,7 +681,7 @@ describe('App AMR polling', () => {
     await advanceTestClock(10_000);
 
     expect(mockedFetchAmrModels).toHaveBeenCalledTimes(11);
-    expect(screen.getByTestId('amr-model').textContent).toBe('preset-a');
+    expect(screen.getByTestId('amr-model').textContent).toBe(empty ? 'none' : 'preset-a');
 
     await advanceTestClock(1_500);
     expect(mockedFetchAmrModels).toHaveBeenCalledTimes(11);
@@ -786,6 +786,24 @@ describe('App AMR polling', () => {
     await waitFor(() => {
       expect(mockedFetchAmrModels.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
+  });
+
+  it('polls an empty refreshing preset until the scoped remote catalog is ready', async () => {
+    mockedFetchAmrModels.mockReset();
+    mockedFetchAmrModels
+      .mockResolvedValueOnce({ source: 'preset', refreshing: true, models: [] })
+      .mockResolvedValue({
+        source: 'remote', refreshing: false,
+        models: [{ id: 'recovered-remote', label: 'recovered-remote' }],
+      });
+    render(<App />);
+    await waitFor(() => expect(mockedFetchAmrModels).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('amr-model').textContent).toBe('none');
+    await waitFor(
+      () => expect(screen.getByTestId('amr-model').textContent).toBe('recovered-remote'),
+      { timeout: 3_000 },
+    );
+    expect(mockedFetchAmrModels).toHaveBeenCalledTimes(2);
   });
 
   it('resumes polling when a Settings retry recovers a refreshing preset', async () => {

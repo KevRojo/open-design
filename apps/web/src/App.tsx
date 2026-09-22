@@ -4793,12 +4793,13 @@ function AppInner() {
         // concurrent fetchAgentsStream upsert while amrModelsRef was null).
         amrModelsRef.current = null;
         setAgents((current) => clearAmrLiveModelsFromAgents(current));
-        return;
+      } else {
+        amrModelsRef.current = result;
+        setAgents((current) => mergeAmrModelsIntoAgents(current, result));
       }
-      amrModelsRef.current = result;
-      setAgents((current) => mergeAmrModelsIntoAgents(current, result));
       const shouldPollPreset =
-        result.source === 'preset' &&
+        result &&
+        (result.source === 'preset' || result.refreshing) &&
         !result.remoteError &&
         presetPolls < maxPresetPolls;
       if (shouldPollPreset) {
