@@ -17,6 +17,7 @@ import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.
 import { commentRelayScope } from '../src/collab/comment-relay-scope.js';
 import { runVelaResourceCommand } from '../src/collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../src/integrations/vela.js';
+import { createPublicSharePublishingFixture, fixtureShareSlug } from './public-share-publishing-fixture.js';
 
 vi.mock('../src/collab/vela-cli-resource-adapter.js', async importOriginal => ({
   ...await importOriginal<typeof import('../src/collab/vela-cli-resource-adapter.js')>(), runVelaResourceCommand: vi.fn(),
@@ -55,11 +56,13 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
     vi.mocked(runVelaResourceCommand).mockImplementation(async args => JSON.stringify(args[0] === 'snapshot'
       ? { slug: 'stable-alias', name: 'local.html', kind: 'project', versionId: 'v1', createdAt: new Date(1).toISOString() }
       : { id: 'v1', version: 1 }));
+    const publicationCommands: string[][] = [];
     registerCollabSyncRoutes(app, {
       collab: runtime, publicFilePublicationStore: store,
+      ...createPublicSharePublishingFixture(db, store, runVelaResourceCommand, enqueuePublishedFileComments, { commands: publicationCommands }),
       recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, enqueuePublishedFileComments),
       verifyWorkspaceRequest: async req => req.get('x-od-workspace-id') === 'w' && req.get('x-od-workspace-member-id') === 'owner' ? context : null,
-      resolveSharedProject: async () => null, resolveSharedProjectOwner: async () => null,
+      resolveSharedProject: async projectId => ({ projectId, ownerMemberId: 'owner', sharedAt: new Date(1).toISOString() }), resolveSharedProjectOwner: async () => 'owner',
       resolveProjectDir: () => root,
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -72,7 +75,10 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
     expect(response.status).toBe(fail ? 502 : 200);
     expect(db.inTransaction).toBe(false);
     const commands = vi.mocked(runVelaResourceCommand).mock.calls;
-    expect(commands.map(call => call[0][0])).toEqual(fail ? ['push', 'snapshot', 'snapshot-redact'] : ['push', 'snapshot']);
+    expect(commands.map(call => call[0][0])).toEqual(['push']);
+    expect(publicationCommands.map(args => args.slice(0, 2))).toEqual(fail
+      ? [['resource', 'push'], ['share', 'publish'], ['share', 'stop']]
+      : [['resource', 'push'], ['share', 'publish']]);
     expect(commands.every(call => call[1] === 'w')).toBe(true);
     const scope = { resourceTeamId: 'w', ownerMemberId: 'owner', projectId: 'p', filePath: 'pages/local.html' };
     if (fail) {
@@ -80,7 +86,7 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
       expect(store.get(scope)).toBeNull(); expect(queue.count()).toBe(0);
       expect(db.prepare('SELECT * FROM comment_relay_publication_mappings').all()).toEqual([]);
     } else {
-      expect(body).toMatchObject({ slug: 'stable-alias' });
+      expect(body).toMatchObject({ status: 'published', receipt: { slug: fixtureShareSlug } });
       const rows = queue.listDue(Date.now());
       expect(rows.map(row => row.comment.id)).toEqual(['first', 'second']);
       for (const row of rows) {

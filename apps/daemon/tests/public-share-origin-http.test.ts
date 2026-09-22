@@ -40,12 +40,13 @@ for (const scenario of cases) it.each([false, true])(`${scenario.name}: HTTP pub
   const runtime = createCollabRuntime({ workspaceContext: { current: async () => context } });
   const app = express(); app.use(express.json());
   let uploads = 0;
+  const commands: string[][] = [];
   let recoveredUrl: string | null = null;
   const fixture = createPublicSharePublishingFixture(db, store, async args => {
     expect(args[0]).toBe('push'); uploads++; return JSON.stringify({ id: 'version-1', version: 1 });
-  }, undefined, { ...scenario, pending });
+  }, undefined, { ...scenario, pending, commands });
   registerCollabSyncRoutes(app, { collab: runtime, publicFilePublicationStore: store, ...fixture,
-    verifyWorkspaceRequest: async () => context, resolveSharedProject: async () => null,
+    verifyWorkspaceRequest: async () => context, resolveSharedProject: async projectId => ({ projectId, ownerMemberId: 'owner', sharedAt: new Date(1).toISOString() }),
     resolveProjectDir: () => root, resolvePublicShareLink: () => recoveredUrl,
     readProjectShareState: async () => ({ projectId: 'p', bindingExists: true, hasEverShared: true, publications: [{ sourceFilePath: 'index.html', slug: fixtureShareSlug, status: 'active' }] }),
   });
@@ -65,7 +66,7 @@ for (const scenario of cases) it.each([false, true])(`${scenario.name}: HTTP pub
     expect(body.receipt).toEqual({ filePath: 'index.html', slug: fixtureShareSlug, publishedAt: 1, version: 1, versionId: 'version-1', entryPath: 'index.html' });
     if (!scenario.available) expect(body.link).toEqual({ status: 'unavailable', code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' });
     else expect(body).not.toHaveProperty('link');
-    if (scenario.available && !pending) expect(body.url).toBe(`https://viewer.example.test/cloud/artifact/p/${fixtureShareSlug}`);
+    if (scenario.available) expect(body.url).toBe(`https://viewer.example.test/cloud/artifact/p/${fixtureShareSlug}`);
     else expect(body).not.toHaveProperty('url');
     expect(body).not.toHaveProperty('error');
     expect(createShareBindingOutbox(db).list()).toHaveLength(pending ? 1 : 0);
@@ -87,6 +88,16 @@ for (const scenario of cases) it.each([false, true])(`${scenario.name}: HTTP pub
     const reopened = new Database(dbPath);
     try { const recovered = createSqlitePublicFilePublicationStore(reopened); expect(recovered.getRevision(scope)).toEqual(revision); expect(recovered.get(scope)).toEqual(store.get(scope)); }
     finally { reopened.close(); }
+    if (pending) {
+      const commandCount = commands.length;
+      const resumed = await fetch(url, { method: 'POST' });
+      expect(resumed.status).toBe(200);
+      expect(await resumed.json()).toMatchObject({ status: 'published', receipt: body.receipt });
+      expect(commands.slice(commandCount).map(args => args.slice(0, 2))).toEqual([['share', 'bind']]);
+      expect(uploads).toBe(1);
+      expect(store.getRevision(scope)).toEqual(revision);
+      expect(createShareBindingOutbox(db).list()).toEqual([]);
+    }
     const stopped = await fetch(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slug: fixtureShareSlug }) });
     expect(stopped.status).toBe(200); expect(store.getRevision(scope)).toBeNull();
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); runtime.dispose(); db.close(); await rm(root, { recursive: true, force: true }); }

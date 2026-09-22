@@ -1517,8 +1517,8 @@ export interface SharePublishedLink {
  * Composing them here rather than adding `url` to
  * {@link SharePublishReceipt} keeps the receipt what it is: facts the server
  * confirmed about the upload. The URL is not one of those. It is derived from
- * the web origin plus ids, it exists only in the serving case, and mixing it
- * into the receipt would make `binding_pending` carry a field it must not.
+ * the web origin plus ids. It is presentation metadata, not part of the
+ * immutable receipt; its presence does not imply binding has completed.
  */
 /** Presentation availability is independent of upload/binding success. A missing
  * deployment Web origin must neither abort publication nor guess a hostname in
@@ -1536,7 +1536,8 @@ export interface SharePublishLinkUnavailable {
 export type SharePublishResponse =
   | ({ status: 'published'; receipt: SharePublishReceipt; link?: never } & SharePublishedLink)
   | { status: 'published'; receipt: SharePublishReceipt; url?: never; link: SharePublishLinkUnavailable }
-  | { status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending; link?: SharePublishLinkUnavailable };
+  | ({ status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending }
+      & ({ url: string; link?: never } | { url?: never; link?: SharePublishLinkUnavailable }));
 
 /**
  * Has this project ever been shared — as opposed to being shared right now?
