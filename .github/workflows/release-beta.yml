@@ -310,7 +310,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' }}
+  BETA_SAVE_PNPM_CACHE: ${{ github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && contains(fromJSON('["refs/heads/feat/plan-foundation","refs/heads/feat/release-timing-ledger"]'), github.ref) }}
   OPEN_DESIGN_TELEMETRY_RELAY_URL: ${{ vars.OPEN_DESIGN_TELEMETRY_RELAY_URL }}
   POSTHOG_KEY: ${{ inputs.publish && secrets.POSTHOG_KEY || '' }}
   POSTHOG_HOST: ${{ inputs.publish && vars.POSTHOG_HOST || '' }}
@@ -404,7 +404,7 @@ jobs:
       - name: "[resolve] Authorized result consumption"
         id: mode
         env:
-          AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/plan-foundation' && steps.identity.outputs.commit == github.sha }}
+          AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && contains(fromJSON('["refs/heads/feat/plan-foundation","refs/heads/feat/release-timing-ledger"]'), github.ref) && steps.identity.outputs.commit == github.sha }}
         run: |
           echo "contribution=$AUTHORIZED" >> "$GITHUB_OUTPUT"
           if [ "$AUTHORIZED" = true ]; then
@@ -446,9 +446,12 @@ jobs:
           set -euo pipefail
           built_sha="$(git rev-parse HEAD)"
           # Task-scoped authorization; arbitrary feature refs remain build-only.
+          case "${GITHUB_REF:-}" in
+            refs/heads/feat/plan-foundation|refs/heads/feat/release-timing-ledger) task_ref=true ;;
+            *) task_ref=false ;;
+          esac
           if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] &&
-             [ "${GITHUB_REF:-}" = "refs/heads/feat/plan-foundation" ] &&
-             [ "$built_sha" = "${GITHUB_SHA:-}" ]; then
+             [ "$task_ref" = true ] && [ "$built_sha" = "${GITHUB_SHA:-}" ]; then
             echo "Authorized Plan task beta publication at $built_sha"
             exit 0
           fi
