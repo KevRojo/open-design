@@ -3112,6 +3112,59 @@ test('[P1] S12 more sharing opens the existing deployment dialog from the share 
   await test.info().attach('s12-toolbar-sharing', { body: await page.screenshot(), contentType: 'image/png' });
 });
 
+test('[P1] S10 failed stop preserves the share link and retries without republishing', async ({ page }) => {
+  await mockWritablePersonalProjectScope(page);
+  const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
+  const publicationPath = `/api/projects/${projectId}/files/index.html/publish-public`;
+  const slug = 's10-stable-alias';
+  const url = `https://example.test/artifact/${projectId}/${slug}`;
+  let stopAttempts = 0;
+  let publishAttempts = 0;
+  await page.route(`**${publicationPath}`, async route => {
+    const method = route.request().method();
+    if (method === 'GET') {
+      await route.fulfill({ json: { publication: { url, slug, fileName: 'index.html', publishedAt: 1 } } });
+    } else if (method === 'DELETE') {
+      stopAttempts += 1;
+      await route.fulfill(stopAttempts === 1
+        ? { status: 500, json: { error: 's10_fixture_stop_failure' } }
+        : { json: { ok: true, slug, fileName: 'index.html' } });
+    } else {
+      publishAttempts += 1;
+      await route.fulfill({ status: 500, json: { error: 'unexpected publish' } });
+    }
+  });
+  await page.goto(`/projects/${projectId}/conversations/${conversationId}`);
+  await expectWorkspaceReady(page);
+  await page.getByTestId('artifact-card-publish-index.html').last().click();
+  const menu = page.locator('.share-menu-popover[role="menu"]');
+  const link = menu.locator('.chrome-publish-url');
+  const stop = menu.getByRole('button', { name: 'Stop sharing', exact: true });
+  const copy = menu.getByRole('button', { name: 'Copy share link', exact: true });
+  await expect(link).toHaveText(url);
+  const response = () => page.waitForResponse(r => r.request().method() === 'DELETE'
+    && new URL(r.url()).pathname === publicationPath);
+  const failure = response();
+  await stop.click();
+  expect((await failure).status()).toBe(500);
+  await expect(menu.getByRole('status')).toHaveText('Could not turn off the link. Please try again.');
+  await expect(link).toHaveText(url);
+  await expect(stop).toBeEnabled();
+  await expect(copy).toBeEnabled();
+  await expect(menu).not.toContainText('Please manually copy');
+  expect(stopAttempts).toBe(1);
+  expect(publishAttempts).toBe(0);
+  await test.info().attach('s10-stop-failed', { body: await page.screenshot(), contentType: 'image/png' });
+  const retry = response();
+  await stop.click();
+  expect((await retry).ok()).toBe(true);
+  await expect(menu.getByRole('menuitem', { name: 'Generate and copy link', exact: true })).toBeEnabled();
+  await expect(link).toHaveCount(0);
+  await expect(menu.getByRole('status')).toHaveCount(0);
+  expect(stopAttempts).toBe(2);
+  expect(publishAttempts).toBe(0);
+});
+
 test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the card menu focused', async ({ page }) => {
   await mockWritablePersonalProjectScope(page);
   const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
