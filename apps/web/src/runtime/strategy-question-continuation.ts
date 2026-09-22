@@ -55,12 +55,10 @@ export function strategyBlockedMessageFields(
 /**
  * Message fields persisting ANY terminal strategy-task verdict.
  *
- * `blocked` terminates the turn's question form (above). `completed` is the
- * other verdict a surface has to remember: the daemon reached it by verifying
- * the canonical deliverable on disk, which outranks a TodoWrite snapshot the
- * agent left with stale pending items. Without the stamp the chat keeps
- * offering to "continue remaining tasks" on finished work, and accepting opens
- * a second task that can only block.
+ * `blocked` terminates the turn's question form (above). A marker-based task
+ * may complete without a usable deliverable, so only stamp delivery when the
+ * host's file check did not fail. Historical projections omit this flag and
+ * retain their existing completed-means-delivered interpretation.
  *
  * Every surface observing a task projection (run-status probe, SSE settle,
  * reattach) derives its message stamp here, so the three cannot drift. Returns
@@ -74,7 +72,7 @@ export function strategySettledMessageFields(
   | null {
   const blocked = strategyBlockedMessageFields(strategyTask);
   if (blocked) return blocked;
-  if (strategyTask?.terminal && strategyTask.outcome === 'completed') {
+  if (strategyTask?.terminal && strategyTask.outcome === 'completed' && strategyTask.deliverableValid !== false) {
     return { strategyTaskDelivered: true };
   }
   return null;

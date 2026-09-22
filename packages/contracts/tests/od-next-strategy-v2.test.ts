@@ -294,12 +294,12 @@ describe('OD Next V2 runtime state and transitions', () => {
     })).toMatchObject(state);
   });
 
-  it.each(['request', 'clarification'] as const)('accepts an explicit planning completion on %s only', (inputStage) => {
+  it.each(['request', 'clarification'] as const)('accepts a settled answer on %s without requiring production', (inputStage) => {
     const state = { schema: OD_NEXT_RUNTIME_STATE_SCHEMA, route: 'full_plan', inputStage,
       outcome: 'completed', executionMode: null, reasonCodes: [], executionIntent: 'plan_only' };
     expect(StrategyRuntimeStateV2Schema.parse(state).outcome).toBe('completed');
-    expect(StrategyRuntimeStateV2Schema.safeParse({ ...state, executionIntent: 'produce' }).success).toBe(false);
-    expect(StrategyRuntimeStateV2Schema.safeParse({ ...state, executionIntent: undefined }).success).toBe(false);
+    expect(StrategyRuntimeStateV2Schema.safeParse({ ...state, executionIntent: 'produce' }).success).toBe(true);
+    expect(StrategyRuntimeStateV2Schema.safeParse({ ...state, executionIntent: undefined }).success).toBe(true);
   });
 
   it.each(['production', 'contract_repair'] as const)('never admits planning-only intent on %s', (inputStage) => {
@@ -317,7 +317,7 @@ describe('OD Next V2 runtime state and transitions', () => {
       outcome: 'completed',
       executionMode: 'simple',
       reasonCodes: [],
-    })).toThrow(/cannot complete before Production/);
+    })).not.toThrow();
 
     expect(() => StrategyRuntimeTransitionV2Schema.parse({
       from: { route: 'direct_edit', inputStage: 'request', executionMode: 'simple' },

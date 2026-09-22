@@ -1,3 +1,6 @@
+import { usesOdNextProductionMarker } from '@open-design/contracts';
+import { prepareMarkerContinuation } from './marker-continuation.js';
+import { settleMarkerTurn } from './marker-settlement.js';
 import {
   composeOdNextStrategyContinuationV2,
   type StrategyTaskProjectionV2,
@@ -80,6 +83,7 @@ export function projectStrategyTask(
       snapshotId: task.snapshotId,
     },
     inputStage: task.inputStage,
+    ...(task.deliverableValid === undefined ? {} : { deliverableValid: task.deliverableValid }),
     outcome: task.outcome,
     route: task.route,
     executionMode: task.executionMode,
@@ -336,6 +340,7 @@ export function prepareAutomaticStrategyContinuation<
   locale?: string | undefined;
   updatedAt?: number;
 }): PreparedAutomaticStrategyContinuation<TRun> {
+  if (input.parsed.productionReady !== undefined) return prepareMarkerContinuation(input);
   if (isStrategyIntentResolutionRun(input.task) && input.resultSourceRunId === undefined) {
     const rawReply: IntentResolutionResult = {
       runId: input.task.latestRunId, parsed: input.parsed, toolUseCount: input.toolUseCount ?? 0,
@@ -656,6 +661,14 @@ export function completeAutomaticSimpleProduction(db: SqliteDb, input: {
   if (!current) return null;
   if (current.latestRunId !== input.runId || current.outcome !== 'running') {
     return current;
+  }
+  if (usesOdNextProductionMarker(current.promptBundle.text)) {
+    return settleMarkerTurn(db, {
+      taskExecutionId: current.taskExecutionId, runId: input.runId,
+      parsed: { visibleText: '', productionReady: false, issues: [], normalizations: [] },
+      completionEvidence: input,
+      ...(input.updatedAt === undefined ? {} : { updatedAt: input.updatedAt }),
+    }).task;
   }
   const outcome = input.physicalStatus === 'canceled'
     ? 'canceled'

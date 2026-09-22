@@ -6,6 +6,7 @@ import {
   type OpenDesignPlanContractV2,
   type StrategyRuntimeStateV2,
 } from '@open-design/contracts';
+import { ProductionMarkerStream } from './production-marker.js';
 
 export type OdNextProtocolReasonCode =
   | 'od_next_protocol_machine_block_malformed'
@@ -25,6 +26,8 @@ export interface OdNextProtocolIssue {
 
 export interface OdNextMachineProtocolResult {
   visibleText: string;
+  /** Present only for the marker protocol; old fields are read compatibility, not gates. */
+  productionReady?: boolean;
   planContract?: OpenDesignPlanContractV2;
   runtimeState?: StrategyRuntimeStateV2;
   /**
@@ -492,19 +495,31 @@ export function passThroughOrdinaryAssistantText(
  * every byte for validation, but its answer belongs only to its durable reply.
  * Ordinary runs retain both streamed text and the parser's close-time tail.
  */
-export function createOdNextRunProtocol(mapping: { purpose?: 'intent_resolution' } | null) {
+export function createOdNextRunProtocol(mapping: { purpose?: 'intent_resolution' } | null, productionKey?: string) {
   const protocol = new OdNextMachineProtocolStream();
+  const marker = productionKey === undefined ? null : new ProductionMarkerStream(productionKey);
   const internalReply = mapping?.purpose === 'intent_resolution';
   let visibleEmitted = 0;
   return {
-    push(delta: string): string {
-      const visible = protocol.push(delta);
+    push(delta: string, assistantText = true): string {
+      const visible = protocol.push(marker ? marker.push(delta, false, assistantText) : delta);
       if (internalReply) return '';
       visibleEmitted += visible.length;
       return visible;
     },
     finish(): { parsed: OdNextMachineProtocolResult; visibleTail: string } {
+      if (marker) protocol.push(marker.push('', true));
       const parsed = protocol.finish();
+      if (marker) {
+        // Suppress legacy blocks for old session context, but their schema and
+        // spelling no longer decide whether this reply can finish.
+        const result: OdNextMachineProtocolResult = {
+          visibleText: parsed.visibleText,
+          productionReady: marker.ready && Boolean(parsed.visibleText.trim()),
+          issues: [], normalizations: [],
+        };
+        return { parsed: result, visibleTail: internalReply ? '' : result.visibleText.slice(visibleEmitted) };
+      }
       return { parsed, visibleTail: internalReply ? '' : parsed.visibleText.slice(visibleEmitted) };
     },
   };

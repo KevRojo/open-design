@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { usesOdNextProductionMarker } from '@open-design/contracts';
 import { startEvidenceDelivery } from './services/evidence-delivery.js';
 import type {
   DesktopExportArtifactInput,
@@ -10850,7 +10851,7 @@ export async function startServer({
       'currentPrompt',
     );
     const strategyProtocol = strategyTaskAtStart
-      ? createOdNextRunProtocol(strategyRunMapping)
+      ? createOdNextRunProtocol(strategyRunMapping, usesOdNextProductionMarker(strategyTaskAtStart.promptBundle.text) ? run.doneKey : undefined)
       : null;
     let strategyProtocolResult = null;
     let strategyToolUseCount = 0;
@@ -12482,7 +12483,7 @@ export async function startServer({
         && event === 'stdout'
         && typeof data?.chunk === 'string'
       ) {
-        const chunk = strategyProtocol.push(data.chunk);
+        const chunk = strategyProtocol.push(data.chunk, false);
         if (!chunk) return;
         data = { ...data, chunk };
       }
@@ -16746,7 +16747,8 @@ export async function startServer({
           strategyTaskAtStart
           && !strategyPlanningOnly
           && (
-            strategyProtocolResult?.runtimeState?.outcome === 'completed'
+            strategyProtocolResult?.productionReady !== undefined
+            || strategyProtocolResult?.runtimeState?.outcome === 'completed'
             || mayInferDirectEditCompletion
           ),
         );
@@ -16760,6 +16762,8 @@ export async function startServer({
         }
         await resolveRunArtifactOutcomeBeforeFinishAsync();
         const deliverableFinalization = await finalizeSuccessfulRunDeliverable({
+          allowIndependentOutput: Boolean(strategyTaskAtStart?.promptBundle
+            && usesOdNextProductionMarker(strategyTaskAtStart.promptBundle.text)),
           ...(run.artifactOutcome?.diff && baselineEntryFile ? { baselineEntryFile } : {}),
           projectsRoot: PROJECTS_DIR,
           projectId: run.projectId ?? null,
@@ -16957,7 +16961,7 @@ export async function startServer({
             const effectiveParsed = resolution?.parsed ?? strategyProtocolResult;
             const planningOnly = resolution ? resolution.executionIntent === 'plan_only' : strategyPlanningOnly;
             const intentPending = requiresStrategyIntentResolution(strategyTaskAtStart, effectiveParsed);
-            if (!planningOnly && !intentPending) {
+            if (effectiveParsed.productionReady === undefined && !planningOnly && !intentPending) {
               const lockedPlan = effectiveParsed.planContract ?? effectiveParsed.repairPlanContract ?? strategyTaskAtStart.planContract;
               const evidence = await resolveAutomaticContinuationEvidence({
                 plan: lockedPlan,
@@ -17005,7 +17009,8 @@ export async function startServer({
               ...(executionPreflight ? { executionPreflight } : {}),
               ...(complexRuntimeEvidence ? { complexRuntimeEvidence } : {}),
               ...(
-                strategyTaskAtStart.intentResolution
+                strategyProtocolResult.productionReady !== undefined
+                || strategyTaskAtStart.intentResolution
                 || strategyProtocolResult.runtimeState?.outcome === 'completed'
                 || strategyPlanningOnly
                 || mayInferDirectEditCompletion

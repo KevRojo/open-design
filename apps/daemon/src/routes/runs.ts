@@ -1,3 +1,4 @@
+import { usesOdNextProductionMarker } from '@open-design/contracts';
 import type { Express, Request, Response } from 'express';
 import type Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -1190,6 +1191,12 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         code: 'STRATEGY_TASK_SCOPE_MISMATCH',
         message: 'strategy continuation must use the task\'s locked project and conversation',
       };
+    }
+    // Marker tasks settle question turns normally. An answer opens a new task
+    // in the same conversation, even when an older client includes the handle.
+    if (task.outcome === 'completed' && usesOdNextProductionMarker(task.promptBundle.text)) {
+      delete requestBody.taskExecutionId;
+      return { kind: 'ordinary' };
     }
     if (
       typeof requestBody.agentId === 'string'

@@ -115,6 +115,17 @@ describe('strategySettledMessageFields', () => {
     }))).toEqual({ strategyTaskDelivered: true });
   });
 
+  it('does not claim delivery merely because a marker task ended', () => {
+    expect(strategySettledMessageFields(blockedProjection({
+      outcome: 'completed', terminal: true, blockedContext: undefined,
+      deliverableValid: false,
+    }))).toBeNull();
+    expect(strategySettledMessageFields(blockedProjection({
+      outcome: 'completed', terminal: true, blockedContext: undefined,
+      deliverableValid: true,
+    }))).toEqual({ strategyTaskDelivered: true });
+  });
+
   it('keeps the blocked stamp taking precedence', () => {
     expect(strategySettledMessageFields(blockedProjection())).toMatchObject({
       strategyTaskBlocked: true,

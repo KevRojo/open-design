@@ -498,6 +498,10 @@ export const StrategyRuntimeStateV2Schema = z.object({
     return;
   }
 
+  // Host settlement may finish an ordinary answer or a question on any turn.
+  // Completion of a turn is separate from deliverable validation.
+  if (value.outcome === 'completed' && value.inputStage !== 'production') return;
+
   if (value.inputStage === 'production') {
     if (value.executionMode === null) {
       context.addIssue({
@@ -742,6 +746,8 @@ export const StrategyTaskProjectionV2Schema = z.object({
     runId: z.string().min(1),
     taskRunIndex: z.number().int().nonnegative(),
   }).strict()).max(3).optional(),
+  /** Host file observation, independent of terminal turn status. Absent on old tasks. */
+  deliverableValid: z.boolean().optional(),
   terminal: z.boolean(),
   blockedContext: StrategyTaskBlockedContextV2Schema.optional(),
 }).strict().superRefine((value, context) => {

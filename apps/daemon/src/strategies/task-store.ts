@@ -1,3 +1,4 @@
+import { usesOdNextProductionMarker } from '@open-design/contracts';
 import { createHash } from 'node:crypto';
 
 import {
@@ -130,6 +131,7 @@ export interface StrategyTaskExecutionRecord {
   executionMode: StrategyExecutionModeV2 | null;
   executionIntent?: StrategyExecutionIntentV2;
   intentResolution: StrategyIntentResolution | null;
+  deliverableValid?: boolean;
   blockedContext?: StrategyTaskBlockedContext;
   planContract?: OpenDesignPlanContractV2;
   planContractHash?: string;
@@ -194,6 +196,7 @@ export interface CompareAndTransitionStrategyTaskInput {
     visibleText?: string | null;
   };
   updatedAt?: number;
+  deliverableValid?: boolean;
 }
 
 export class InvalidStrategyTaskRecordError extends Error {
@@ -288,6 +291,7 @@ export function migrateStrategyTaskStore(db: SqliteDb): void {
   `);
   addColumnIfMissing(db, 'strategy_task_executions', "execution_intent TEXT NOT NULL DEFAULT 'produce'");
   addColumnIfMissing(db, 'strategy_task_executions', 'intent_resolution_version INTEGER');
+  addColumnIfMissing(db, 'strategy_task_executions', 'deliverable_valid INTEGER');
   migrateIntentResolutionStore(db);
   addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_schema TEXT');
   addColumnIfMissing(db, 'strategy_task_executions', 'prompt_bundle_text TEXT');
@@ -507,6 +511,7 @@ export function strategyTaskTurnsForRunIds(
                r.task_execution_id AS taskExecutionId,
                r.task_run_index AS taskRunIndex,
                t.outcome AS outcome,
+               t.deliverable_valid AS deliverableValid,
                t.blocked_visible_text AS blockedVisibleText
           FROM strategy_task_runs r
           -- LEFT so a mapping whose task row is gone still yields its turn
@@ -527,7 +532,7 @@ export function strategyTaskTurnsForRunIds(
         turns.set(row['runId'], {
           taskExecutionId: row['taskExecutionId'],
           taskRunIndex: row['taskRunIndex'],
-          delivered: row['outcome'] === 'completed',
+          delivered: row['outcome'] === 'completed' && row['deliverableValid'] !== 0,
           blocked: row['outcome'] === 'blocked',
           blockedText: row['outcome'] === 'blocked'
             && typeof row['blockedVisibleText'] === 'string'
@@ -669,7 +674,7 @@ export function compareAndTransitionStrategyTaskExecution(
       );
     }
 
-    if (input.to.outcome === 'completed' && (input.to.executionIntent === 'plan_only' || current.executionIntent === 'plan_only')
+    if (!usesOdNextProductionMarker(current.promptBundle.text) && input.to.outcome === 'completed' && (input.to.executionIntent === 'plan_only' || current.executionIntent === 'plan_only')
       && current.intentResolution && readStrategyTaskWriteEvidence(db, current.taskExecutionId).some(evidence => evidence.unknown || evidence.filesWritten !== 0)) {
       throw new InvalidStrategyTaskTransitionError('Illegal strategy task outcome.');
     }
@@ -714,6 +719,7 @@ export function compareAndTransitionStrategyTaskExecution(
          SET revision = revision + 1,
              route = ?, input_stage = ?, outcome = ?, execution_mode = ?, execution_intent = ?,
              plan_contract_json = ?, plan_contract_hash = ?,
+             deliverable_valid = COALESCE(?, deliverable_valid),
              blocked_reason_codes_json = ?, blocked_visible_text = ?,
              clarification_count = ?, plan_contract_repair_attempts = ?,
              latest_run_id = ?, updated_at = ?
@@ -726,6 +732,7 @@ export function compareAndTransitionStrategyTaskExecution(
       next.executionIntent,
       plan.json,
       plan.hash,
+      input.deliverableValid === undefined ? null : Number(input.deliverableValid),
       blockedContext ? JSON.stringify(blockedContext.reasonCodes) : null,
       blockedContext ? blockedContext.visibleText : null,
       clarificationCount,
@@ -934,6 +941,13 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
     );
   }
 
+  const promptBundle = parseStoredFinalText({
+    kind: 'bundle',
+    schema: row['prompt_bundle_schema'],
+    text: row['prompt_bundle_text'],
+    utf8Bytes: row['prompt_bundle_utf8_bytes'],
+    sha256: row['prompt_bundle_sha256'],
+  });
   const route = parseNullableRoute(row['route']);
   const inputStage = parseStage(row['input_stage']);
   const outcome = parseOutcome(row['outcome']);
@@ -953,6 +967,7 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
   const plan = parseStoredPlanContract(row['plan_contract_json'], row['plan_contract_hash']);
   if (
     (inputStage === 'production' || outcome === 'plan_ready')
+    && !usesOdNextProductionMarker(promptBundle.text)
     && (!plan.contract || !plan.hash)
   ) {
     throw new InvalidStrategyTaskRecordError(
@@ -1071,13 +1086,7 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
     planContractRepairAttempts,
   );
   const frozenSkillPackage = getFrozenSkillPackage(db, taskExecutionId);
-  const promptBundle = parseStoredFinalText({
-    kind: 'bundle',
-    schema: row['prompt_bundle_schema'],
-    text: row['prompt_bundle_text'],
-    utf8Bytes: row['prompt_bundle_utf8_bytes'],
-    sha256: row['prompt_bundle_sha256'],
-  });
+
   parseStoredPromptBundle(promptBundle);
   if (!sameFinalTextIdentity(promptBundle, mappings[0]!.finalText)) {
     throw new InvalidStrategyTaskRecordError(
@@ -1119,6 +1128,7 @@ function rowToTask(db: SqliteDb, row: DbRow): StrategyTaskExecutionRecord {
     executionMode,
     ...(executionIntent ? { executionIntent } : {}),
     intentResolution,
+    ...(row['deliverable_valid'] == null ? {} : { deliverableValid: row['deliverable_valid'] === 1 }),
     ...(blockedContext ? { blockedContext } : {}),
     ...(plan.contract ? { planContract: plan.contract } : {}),
     ...(plan.hash ? { planContractHash: plan.hash } : {}),
@@ -1684,12 +1694,12 @@ function resolvePlanContract(
     contract = parsed.data;
     hash = candidateHash;
   }
-  if (next.inputStage === 'production' && (!contract || !hash)) {
+  if (!usesOdNextProductionMarker(current.promptBundle.text) && next.inputStage === 'production' && (!contract || !hash)) {
     throw new InvalidStrategyTaskTransitionError(
       'Production requires a versioned, hash-bound Plan Contract.',
     );
   }
-  if (next.outcome === 'plan_ready' && (!contract || !hash)) {
+  if (!usesOdNextProductionMarker(current.promptBundle.text) && next.outcome === 'plan_ready' && (!contract || !hash)) {
     throw new InvalidStrategyTaskTransitionError(
       'A plan-ready task requires a versioned, hash-bound Plan Contract.',
     );

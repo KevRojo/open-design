@@ -22,6 +22,7 @@ import {
   type StrategyTaskOutcome,
 } from '../task-store.js';
 import type { OdNextMachineProtocolStream } from './protocol.js';
+import { settleMarkerTurn } from './marker-settlement.js';
 import { recordStrategyRunWriteEvidence, readStrategyTaskWriteEvidence } from './intent-resolution-store.js';
 import {
   decideStrategyRequestRoute,
@@ -392,6 +393,7 @@ export function finalizeStrategyPlanningResult(db: SqliteDb, input: {
   productionEnforcementReasonCodes?: readonly string[];
   updatedAt?: number;
 }): OdNextCoordinatorResult {
+  if (input.parsed.productionReady !== undefined) return settleMarkerTurn(db, input);
   const current = requireTask(db, input.taskExecutionId);
   if (current.outcome !== 'running') {
     throw new OdNextCoordinatorError(

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Agent, fetch as undiciFetch } from 'undici';
+import * as contracts from '@open-design/contracts';
 import type {
   AppliedStrategyBindingV2,
   OdNextRuntimeCapabilitySnapshotV1,
@@ -21,6 +22,10 @@ import {
   parseOdNextPromptBundleV2,
   parseOdNextIntentResolutionTurnV1,
 } from '@open-design/contracts';
+
+// Legacy-chain tests replay tasks carrying the previous frozen output contract.
+// Only the prompt slot differs; parsers, persistence, claims and real server stay real.
+const frozenProtocolFixture = vi.hoisted(() => ({ legacy: false }));
 
 const codexArchiveBoundary = vi.hoisted(() => ({
   home: '', activeParentPath: '', cleanupStarted: false,
@@ -224,6 +229,14 @@ describe('OD Next automatic production through the real server', () => {
   let previousCodexTransport: string | undefined;
 
   beforeEach(() => {
+    frozenProtocolFixture.legacy = false;
+    const composeHead = contracts.composeOdNextStrategyBundleHeadV2;
+    vi.spyOn(contracts, 'composeOdNextStrategyBundleHeadV2').mockImplementation(input => {
+      const head = composeHead(input);
+      if (frozenProtocolFixture.legacy) head.coreSystemPrompt.outputContract =
+        'Historical V2 output: emit open-design-plan-contract and open-design-runtime-state blocks. Emit exactly one Runtime State block on every response.';
+      return head;
+    });
     previousDetectionEnv = Object.fromEntries(['PATH', 'OD_AGENT_HOME', ...fixtureAgentBinEnvKeys]
       .map(key => [key, process.env[key]]));
     previousCodexTransport = process.env.OD_CODEX_TRANSPORT;
@@ -231,6 +244,7 @@ describe('OD Next automatic production through the real server', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (previousCodexTransport == null) delete process.env.OD_CODEX_TRANSPORT;
     else process.env.OD_CODEX_TRANSPORT = previousCodexTransport;
     delete process.env.OD_NEXT_STRATEGY_ROLLOUT;
@@ -762,6 +776,78 @@ process.exit(127);
   // variable — that is what "configure it and it takes effect" has to mean for
   // a packaged install, where the saved mode is the only control a user has:
   // the packaged child environment allowlist carries no `OD_NEXT_*` key.
+  it('marker protocol automatically resumes Codex once and preserves files despite a missing canonical entry', async () => {
+    const fixture = await createPublicRolloutFixture('marker-production', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const created = await postRun(started.url, publicRunRequest(fixture, 'Create a landing page and a presentation.', 'marker-production'));
+    const request = await waitForRunTerminal(started.url, created.runId as string);
+    expect(request.status, JSON.stringify(request)).toBe('succeeded');
+    const task = await waitForTask(created.strategyTask!.taskExecutionId, 'completed');
+    expect(task.runs).toHaveLength(2);
+    expect(task.planContract).toBeUndefined();
+    const production = await waitForRunTerminal(started.url, task.latestRunId);
+    expect(production.status).toBe('succeeded');
+    expect(production.strategyTask).toMatchObject({ outcome: 'completed', terminal: true, deliverableValid: false });
+    const invocations = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(invocations).toHaveLength(2);
+    expect(invocations[1]!.argv).toContain('resume');
+    expect(invocations[1]!.stdin).toContain('This is the production turn');
+    expect(invocations[1]!.stdin).not.toContain('planContractHash=');
+    expect(await readFile(path.join(invocations[1]!.cwd, 'landing.html'), 'utf8')).toContain('Landing');
+    expect(await readFile(path.join(invocations[1]!.cwd, 'deck.html'), 'utf8')).toContain('Deck');
+    const response = await fetch(`${started.url}/api/projects/${fixture.projectId}/conversations/${fixture.conversationId}/messages`);
+    const history = await response.json() as { messages: Array<{ content: string; strategyTaskDelivered?: boolean }> };
+    expect(JSON.stringify(history)).not.toContain('od-production-ready');
+    expect(history.messages.some(message => message.strategyTaskDelivered)).toBe(false);
+  });
+
+  it('marker protocol delivers an independent image while preserving an existing prototype page', async () => {
+    const fixture = await createPublicRolloutFixture('marker-image', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const projectRoot = path.join(process.env.OD_DATA_DIR!, 'projects', fixture.projectId);
+    await mkdir(projectRoot, { recursive: true });
+    const existingPage = '<!doctype html><html><body>Existing page</body></html>';
+    await writeFile(path.join(projectRoot, 'index.html'), existingPage);
+    const created = await postRun(started.url, publicRunRequest(fixture, '帮我生成一个狗狗大作战的图片，只出图片。', 'marker-image'));
+    await waitForRunTerminal(started.url, created.runId as string);
+    const task = await waitForTask(created.strategyTask!.taskExecutionId, 'completed');
+    expect(task.runs).toHaveLength(2);
+    const production = await waitForRunTerminal(started.url, task.latestRunId);
+    expect(production.status).toBe('succeeded');
+    expect(production.strategyTask).toMatchObject({ outcome: 'completed', deliverableValid: true });
+    const invocations = await readProjectInvocations(fixture.logPath, fixture.projectId);
+    expect(invocations).toHaveLength(2);
+    expect(invocations[0]!.stdin).not.toContain('allowedProductionRoutes');
+    expect(invocations[0]!.stdin).not.toContain('supportedOutputKinds');
+    expect(invocations[1]!.stdin).toContain('Drop any unrequested wrapper');
+    expect(invocations[1]!.argv).toContain('resume');
+    expect(await readFile(path.join(projectRoot, 'index.html'), 'utf8')).toBe(existingPage);
+    expect((await readFile(path.join(projectRoot, 'dog.png'))).length).toBeGreaterThan(0);
+    const response = await fetch(`${started.url}/api/projects/${fixture.projectId}/conversations/${fixture.conversationId}/messages`);
+    const history = await response.json() as { messages: Array<{ strategyTaskDelivered?: boolean }> };
+    expect(history.messages.some(message => message.strategyTaskDelivered)).toBe(true);
+  });
+
+  it('marker protocol accepts repeated form answers as new tasks without the one-question gate', async () => {
+    const fixture = await createPublicRolloutFixture('marker-question', 'design');
+    started = fixture.started; binDir = fixture.binDir;
+    process.env.OD_NEXT_STRATEGY_LOCAL_SYNTHETIC_CANARY = '1';
+    const first = await postRun(started.url, publicRunRequest(fixture, 'Make a design.', 'marker-question-first'));
+    await waitForRunTerminal(started.url, first.runId as string);
+    const settled = await waitForTask(first.strategyTask!.taskExecutionId, 'completed');
+    const second = await postRun(started.url, {
+      ...publicRunRequest(fixture, 'Here is the requested context.', 'marker-question-second'),
+      taskExecutionId: settled.taskExecutionId,
+    });
+    expect(second.runId).toBeTruthy();
+    expect(second.strategyTask!.taskExecutionId).not.toBe(settled.taskExecutionId);
+    expect((await waitForRunTerminal(started.url, second.runId as string)).status).toBe('succeeded');
+    const next = await waitForTask(second.strategyTask!.taskExecutionId, 'completed');
+    expect(next.runs).toHaveLength(1);
+  });
+
   it('runs OD Next by default and leaves it on the next run once the installation opts out', async () => {
     const fixture = await createPublicRolloutFixture('app-config-opt-out', 'design');
     started = fixture.started;
@@ -1459,11 +1545,11 @@ process.exit(127);
       });
     expect(activeTask?.runs[0]?.finalText).toEqual(activeTask?.promptBundle);
     const promptBundleText = activeTask?.promptBundle.text ?? '';
-    const doneKey = /<od-done key="([a-f0-9]{16})"\/>/.exec(promptBundleText)?.[1];
+    const doneKey = /<od-production-ready key="([a-f0-9]{16})" \/>/.exec(promptBundleText)?.[1];
     expect(doneKey).toMatch(/^[a-f0-9]{16}$/);
-    expect(promptBundleText).toContain('route=direct_edit');
-    expect(promptBundleText).toContain(`<od-next key="${doneKey}" value="Add an orders list page"/>`);
-    expect(promptBundleText).toContain(`<od-focus key="${doneKey}"`);
+    expect(promptBundleText).toContain('production automatically');
+    expect(promptBundleText).not.toContain('<od-done key=');
+    expect(promptBundleText).not.toContain('<od-focus key=');
     expect(promptBundleText.slice(
       promptBundleText.indexOf('<open_design_core_system_prompt>'),
       promptBundleText.indexOf('</open_design_core_system_prompt>'),
@@ -2976,6 +3062,7 @@ process.exit(127);
       probeLogPath?: string;
     } = {},
   ) {
+    frozenProtocolFixture.legacy = true;
     const suffix = `${mode}-${Date.now()}-${++sequence}`;
     if (mode !== 'direct') {
       const publicFixture = await createPublicRolloutFixture(`chain-${suffix}`, 'design', undefined, 'codex-cli 0.147.0', preflightResolver);
@@ -3358,15 +3445,37 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => { stdin += chunk; });
 process.stdin.on('end', () => {
   fs.appendFileSync(logPath, JSON.stringify({ argv, stdin, cwd: process.cwd(), startedAt: Date.now() }) + '\\n');
-  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'public-rollout-session' }));
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: ${JSON.stringify(label.startsWith('marker-') ? THREAD_ID : 'public-rollout-session')} }));
   console.log(JSON.stringify({ type: 'turn.started' }));
   if (stdin.includes('Hold the public rollout run open until canceled.')) {
     setInterval(() => {}, 1 << 30);
     return;
   }
+  let text = 'Ordinary public run completed.';
+  if (${JSON.stringify(label)} === 'marker-image') {
+    if (stdin.includes('This is the production turn')) {
+      fs.writeFileSync('dog.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5X8AAAAASUVORK5CYII=', 'base64'));
+      text = 'Delivered dog.png.';
+    } else {
+      const key = /<od-production-ready key="([a-f0-9]+)"/.exec(stdin)?.[1];
+      if (!key) throw new Error('Current host marker key was not injected');
+      text = 'Plan: deliver a standalone dog image only.\\n<od-production-ready key="' + key + '" />';
+    }
+  } else if (${JSON.stringify(label)} === 'marker-production') {
+    if (stdin.includes('This is the production turn')) {
+      fs.writeFileSync('landing.html', '<!doctype html><html><body>Landing</body></html>');
+      fs.writeFileSync('deck.html', '<!doctype html><html><body>Deck</body></html>');
+      text = 'Wrote landing.html and deck.html.\\n<open-design-runtime-state>\\n{broken}\\n</open-design-runtime-state>';
+    } else {
+      const key = /<od-production-ready key="([a-f0-9]+)"/.exec(stdin)?.[1];
+      if (!key) throw new Error('Current host marker key was not injected');
+      text = 'Plan: create a landing page and a matching deck.\\n<od-production-ready key="' + key + '" />';
+    }
+  } else if (${JSON.stringify(label)} === 'marker-question') {
+    text = '<question-form id="scope">{"questions":[{"id":"audience","label":"Who is this for?"}]}</question-form>';
+  }
   console.log(JSON.stringify({
-    type: 'item.completed',
-    item: { id: 'answer', type: 'agent_message', text: 'Ordinary public run completed.' },
+    type: 'item.completed', item: { id: 'answer', type: 'agent_message', text },
   }));
   console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
   setTimeout(() => process.exit(0), 5);
