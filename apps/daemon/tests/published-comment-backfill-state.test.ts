@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCollabContext } from '@open-design/contracts';
-import type { CollabCloudClient } from '../src/integrations/collab-cloud.js';
+import { CollabCloudError, type CollabCloudClient } from '../src/integrations/collab-cloud.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +29,7 @@ function setup() {
   return { db, scope, publications, revision, subject };
 }
 
-it('derives success from the actual relay flush receipt, never from dequeuing alone', async () => {
+it.each(['delivered', 'stopped'] as const)('uses actual relay receipt %s, never dequeuing alone', async outcome => {
   const { db, scope, revision, subject } = setup();
   const outbox = createCommentRelayOutboxStore(db, () => 1);
   db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: revision, commentIds: ['a'] }))();
@@ -39,7 +39,7 @@ it('derives success from the actual relay flush receipt, never from dequeuing al
     seatSummary: buildWorkspaceSeatSummary({ seatLimit: 1, usedSeats: 1 }), permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }) };
   let offline = true; let pushes = 0;
   const service = createCollabCloudService({ commentOutbox: outbox,
-    client: { pushComment: async () => { pushes++; if (offline) throw new Error('transport secret omitted'); return { seq: 1 }; } } as unknown as CollabCloudClient,
+    client: { pushComment: async () => { pushes++; if (offline) throw new Error('transport secret omitted'); if (outcome === 'stopped') throw new CollabCloudError(410, 'SHARE_STOPPED'); return { seq: 1 }; } } as unknown as CollabCloudClient,
     resolveLocalProjectRelayBinding: () => ({ workspaceId: scope.resourceTeamId, ownerMemberId: scope.ownerMemberId }),
     resolveProjectWorkspaceContext: async () => context, resolveRemoteProjectOwnerMemberId: async () => scope.ownerMemberId,
     listProjectIds: () => [], resolveLocalConversationId: () => 'local', mergeComment: () => 'unchanged', now: () => 1, retryDelayMs: () => 0 });
@@ -49,8 +49,28 @@ it('derives success from the actual relay flush receipt, never from dequeuing al
     expect(outbox.count()).toBe(1);
     offline = false; await service.flushPendingComments();
     expect(pushes).toBe(2); expect(outbox.count()).toBe(0);
-    expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: 'succeeded', retryable: false });
+    expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: outcome === 'delivered' ? 'succeeded' : 'failed', retryable: false });
   } finally { service.dispose(); }
+});
+
+it('fences older in-flight ACK/defer from a newer publication and isolates subjects', () => {
+  const { db, scope, publications, revision, subject } = setup();
+  const outbox = createCommentRelayOutboxStore(db, () => 1);
+  const enqueue = (publication: typeof revision) => outbox.enqueue({ workspaceId: scope.resourceTeamId, workspaceMemberId: scope.ownerMemberId, teamId: scope.resourceTeamId, relayScope: 'team', projectId: scope.projectId, expectedOwnerMemberId: scope.ownerMemberId, comment: { id: 'a', filePath: scope.filePath } as never, publication: { ...publication, publicFilePath: 'index.html' } });
+  db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: revision, commentIds: ['a'] }))();
+  enqueue(revision); const old = outbox.listDue(1)[0]!;
+  publications.set(scope, { slug: revision.slug, url: 'https://example.test/a', fileName: scope.filePath });
+  const current = publications.getRevision(scope)!;
+  db.transaction(() => recordPublishedCommentBackfill(db, { scope, publicationRevision: current, commentIds: ['a'] }))();
+  enqueue(current);
+  expect(outbox.acknowledge(old, 'delivered')).toBe(false);
+  expect(outbox.defer(old, { nextAttemptAt: 9, error: 'stale failure' })).toBe(false);
+  expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: 'pending', publicationRevision: current.token });
+  expect(readPublishedCommentBackfill(db, { ...subject, workspaceMemberId: 'other' })).toBeUndefined();
+  expect(readPublishedCommentBackfill(db, { ...subject, workspaceId: 'other' })).toBeUndefined();
+  expect(readPublishedCommentBackfill(db, { ...subject, filePath: 'other.html' })).toBeUndefined();
+  expect(outbox.acknowledge(outbox.listDue(1)[0]!, 'delivered')).toBe(true);
+  expect(readPublishedCommentBackfill(db, subject)?.state).toBe('succeeded');
 });
 
 it('persists the exact initial batch and exposes empty and pending current states only', () => {
