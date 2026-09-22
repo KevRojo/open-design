@@ -444,6 +444,7 @@ function printCommentHelp() {
   od comment status <projectId> <conversationId> <commentId> --status <open|attached|applying|needs_review|resolved|failed> [--json]
   od comment delete <projectId> <conversationId> <commentId> [--json]
   od comment read <projectId> [--read-at <epoch-ms>] [--json]
+  od comment align <projectId> [--json]
 
 Manage comments through the same daemon HTTP API as the workspace UI.
 
@@ -495,14 +496,30 @@ async function runComment(args) {
   }
   const positional = positionalArgs(rest, COMMENT_STRING_FLAGS);
   const [projectId, conversationId, commentId] = positional;
-  if (!['list', 'create', 'update', 'status', 'delete', 'read'].includes(sub)) {
+  if (!['list', 'create', 'update', 'status', 'delete', 'read', 'align'].includes(sub)) {
     commentUsageError(`unknown subcommand: od comment ${sub}`);
   }
-  if (!projectId || (sub !== 'read' && (!conversationId || ((sub === 'update' || sub === 'status' || sub === 'delete') && !commentId)))) {
+  if (!projectId || (sub !== 'read' && sub !== 'align' && (!conversationId || ((sub === 'update' || sub === 'status' || sub === 'delete') && !commentId)))) {
     commentUsageError(`od comment ${sub} requires projectId, conversationId${sub === 'update' || sub === 'status' || sub === 'delete' ? ', and commentId' : ''}`);
   }
   const workspaceHeaders = workspaceHeadersFromExplicitFlags(flags) ?? {};
   const base = await cliDaemonBaseUrl(flags);
+  if (sub === 'align') {
+    let response;
+    try {
+      response = await fetch(`${base}/api/projects/${encodeURIComponent(projectId)}/comments/align`, {
+        method: 'POST', headers: workspaceHeaders,
+      });
+    } catch (error) {
+      surfaceFetchError(error, base);
+      process.exit(3);
+    }
+    if (!response.ok) return structuredHttpFailure(response);
+    const payload = await response.json();
+    if (flags.json) return process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    console.log(`[comment] align ${payload.state}${payload.reason ? ` (${payload.reason})` : ''}`);
+    return;
+  }
   if (sub === 'read') {
     const readAt = flags['read-at'] === undefined ? Date.now() : Number(flags['read-at']);
     if (!Number.isFinite(readAt)) commentUsageError('--read-at must be a finite epoch milliseconds value');

@@ -271,6 +271,9 @@ export interface CollabCloudService {
     projectId: string,
     context: WorkspaceCollabContext,
   ): Promise<boolean>;
+  /** Last successfully merged cursor for this exact publication/principal scope.
+   * Null after restart/before pull; never manufacture cursor zero for align. */
+  readMergedCommentCursor(projectId: string, context: WorkspaceCollabContext): number | null;
   /** Start the background poller. */
   start(): void;
   /** Stop the poller. */
@@ -977,6 +980,11 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     resolveMember,
     pollOnce,
     pullProject,
+    readMergedCommentCursor(projectId, context) {
+      const identity = pullIdentity(projectId, context);
+      if (!identity) return null;
+      return cursors.get(pullCursorKey(`${context.workspaceId}:${identity.memberId}`, projectId, identity)) ?? null;
+    },
     start() {
       if (timer) return;
       started = true;

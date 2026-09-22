@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { CommentSyncState } from '@open-design/contracts';
+import type { CommentSyncState, CommentAlignResult } from '@open-design/contracts';
 import { migrateCommentRelayOutbox } from './comment-relay-outbox.js';
 
 export interface CommentSyncScope { projectId: string; workspaceId: string; workspaceMemberId: string }
@@ -13,6 +13,7 @@ export interface CommentSyncStateService {
  */
 export function createCommentSyncStateService(db: Database.Database,
   sessionAvailable: (scope: CommentSyncScope) => Promise<boolean | null>,
+  diagnostics?: { readAlign: (scope: CommentSyncScope) => CommentAlignResult | undefined },
 ): CommentSyncStateService {
   migrateCommentRelayOutbox(db);
   const args = (scope: CommentSyncScope) => {
@@ -27,7 +28,8 @@ export function createCommentSyncStateService(db: Database.Database,
     // Query after the session await, not a stale count from before a send finished.
     const rows = db.prepare(`SELECT last_error FROM comment_relay_outbox
       WHERE project_id=? AND workspace_id=? AND workspace_member_id=? ORDER BY updated_at DESC`).all(...identity) as Array<{ last_error: string | null }>;
-    return { pending: rows.length,
+    const align = diagnostics?.readAlign(scope);
+    return { ...(align ? { align } : {}), pending: rows.length,
       // Arbitrary transport messages can contain credentials or other private data.
       lastError: (rows.some(row => Boolean(row.last_error)) || db.prepare('SELECT 1 FROM comment_relay_sync_failures WHERE project_id=? AND workspace_id=? AND workspace_member_id=?').get(...identity)) ? 'COMMENT_SYNC_DELIVERY_FAILED' : null,
       sessionMissing: rows.length > 0 && !available, shareStopped: null };

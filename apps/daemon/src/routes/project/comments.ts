@@ -11,6 +11,7 @@ import type { RouteDeps } from '../../server-context.js';
 import type { BoundWorkspaceResourceMutationGate } from '../../collab/workspace-resource-mutation.js';
 import {
   getProject,
+  getWorkspaceProjectByProjectId,
   getProjectCommentReadState,
   isProjectCommentAnchorConversationId,
   markProjectCommentsRead,
@@ -159,6 +160,44 @@ export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'proj
 function hasExternalCommentAuthor(comment: PreviewComment): boolean {
   return comment.authorKind === 'user'
     || (typeof comment.authorAppUserId === 'string' && comment.authorAppUserId.trim().length > 0);
+}
+
+/** Independent read-only diagnostic. This is not the K8 outbox retry action. */
+export function registerCommentAlignmentRoutes(app: Express, deps: {
+  db: RegisterProjectCommentRoutesDeps['db'];
+  alignment: { check: (projectId: string, context: WorkspaceCollabContext) => Promise<import('@open-design/contracts').CommentAlignResult> };
+  authorize: (req: Request, projectId: string) => Promise<ProjectCommentWorkspaceContextResolution>;
+}): void {
+  app.post('/api/projects/:id/comments/align', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const projectId = req.params.id;
+      if (!getProject(deps.db, projectId)) return res.status(404).json({ error: 'project not found' });
+      const resolution = await deps.authorize(req, projectId);
+      if (!resolution.ok) return res.status(resolution.status).json({ error: resolution.code });
+      const context = resolution.context;
+      const binding = getWorkspaceProjectByProjectId(deps.db, projectId);
+      if (!context || !binding || binding.resourceState === 'deleted'
+        || binding.workspaceId !== context.workspaceId
+        || binding.createdByWorkspaceMemberId !== context.workspaceMemberId
+        || context.memberStatus !== 'active' || context.lifecycleState !== 'active') {
+        return res.status(403).json({ error: 'COMMENT_ALIGN_OWNER_REQUIRED' });
+      }
+      const result = await deps.alignment.check(projectId, context);
+      const current = await deps.authorize(req, projectId);
+      const currentBinding = getWorkspaceProjectByProjectId(deps.db, projectId);
+      if (!current.ok || current.context?.workspaceId !== context.workspaceId
+        || current.context.workspaceMemberId !== context.workspaceMemberId
+        || current.context.memberStatus !== 'active' || current.context.lifecycleState !== 'active'
+        || currentBinding?.workspaceId !== context.workspaceId || currentBinding.resourceState === 'deleted'
+        || currentBinding.createdByWorkspaceMemberId !== context.workspaceMemberId) {
+        return res.status(403).json({ error: 'COMMENT_ALIGN_AUTHORITY_CHANGED' });
+      }
+      return res.json(result);
+    } catch {
+      return res.json({ state: 'unknown', reason: 'unavailable' });
+    }
+  });
 }
 
 /** K8 supply only: null body means not determined, never default false.
