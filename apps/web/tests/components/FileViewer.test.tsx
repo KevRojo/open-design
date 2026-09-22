@@ -253,22 +253,6 @@ function deferredResponse() {
   return { promise, resolve };
 }
 
-function srcDocActivationMessages(calls: readonly (readonly unknown[])[]) {
-  return calls
-    .map(([message]) => message)
-    .filter((message): message is {
-      type: 'od:srcdoc-transport-activate';
-      html: string;
-      generation: string;
-    } => {
-      if (typeof message !== 'object' || message === null) return false;
-      const data = message as { type?: unknown; html?: unknown; generation?: unknown };
-      return data.type === 'od:srcdoc-transport-activate'
-        && typeof data.html === 'string'
-        && typeof data.generation === 'string';
-    });
-}
-
 function testRect(left: number, top: number, width: number, height: number): DOMRect {
   return {
     x: left,
@@ -301,7 +285,6 @@ function installSandboxedPreviewWindow(frame: HTMLIFrameElement): Window {
 }
 
 function latestPreviewContentSizeRequest(source: Window) {
-  const postMessage = source.postMessage as ReturnType<typeof vi.fn>;
   const request = previewContentSizeRequests(source)
     .reverse()
     .find((data) => data.type === 'od:preview-content-size-request');
@@ -5366,7 +5349,7 @@ describe('FileViewer SVG artifacts', () => {
 
     // The module points at its HTML entry instead of rendering the React
     // runtime (which would throw "No React component export found").
-    const link = await screen.findByRole('button', { name: /backups\.html/ });
+    await screen.findByRole('button', { name: /backups\.html/ });
     expect(screen.queryByTestId('react-component-preview-frame')).toBeNull();
 
     // The toolbar still offers a way to read the raw code: clicking the Code
@@ -11066,6 +11049,7 @@ describe('FileViewer tweaks toolbar', () => {
     await waitFor(() => expect(readRequests).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: /hide comments/i }));
     await screen.findByTestId('comment-side-collapsed-rail');
+    expect(screen.queryByTestId('comment-rail-unread-dot')).toBeNull();
 
     rerender(
       <CollabProvider value={projectWorkspaceCollabValue(workspace)}>
@@ -11090,7 +11074,10 @@ describe('FileViewer tweaks toolbar', () => {
     );
 
     await waitFor(() => expect(readRequests).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('comment-rail-unread-dot')).toBeVisible();
+    expect(screen.getByTestId('comment-side-collapsed-rail')).toContainElement(screen.getByTestId('comment-rail-unread-dot'));
     fireEvent.click(screen.getByTestId('comment-side-collapsed-rail'));
+    expect(screen.queryByTestId('comment-rail-unread-dot')).toBeNull();
     await waitFor(() => expect(readRequests).toHaveBeenCalledTimes(2));
   });
 

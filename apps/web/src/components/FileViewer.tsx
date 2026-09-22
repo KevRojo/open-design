@@ -4,6 +4,7 @@ import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from '.
 import { useShareScopeKeyboard } from './share/useShareScopeKeyboard';
 import { AfterExportShareGuide } from './share/AfterExportShareGuide';
 import { CommentSyncBanner } from './share/CommentSyncBanner';
+import commentPanelStyles from './CommentSidePanel.module.css';
 import { useAfterExportShareGuide } from './share/useAfterExportShareGuide';
 import { useShareGuideAppUserId } from './share/useShareGuideAppUserId';
 import { useProjectShareHistory } from './share/useProjectShareHistory';
@@ -4580,6 +4581,7 @@ export function CommentSidePanel({
   selectedIds,
   activeCommentId,
   collapsed,
+  hasUnread = false,
   onCollapsedChange,
   onDismiss,
   onToggleSelect,
@@ -4606,6 +4608,7 @@ export function CommentSidePanel({
   selectedIds: Set<string>;
   activeCommentId: string | null;
   collapsed: boolean;
+  hasUnread?: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   /** Closes the panel outright. The floating card uses this so its collapse
    *  control hides the card instead of parking a full-height rail on the
@@ -4761,6 +4764,7 @@ export function CommentSidePanel({
         <RemixIcon name="message-3-line" size={15} />
         <span>{commentsLabel}</span>
         {comments.length > 0 ? <strong>{comments.length}</strong> : null}
+        {hasUnread ? <span className={commentPanelStyles.unreadDot} data-testid="comment-rail-unread-dot" aria-hidden /> : null}
       </button>
     );
   }
@@ -5068,6 +5072,7 @@ function CommentSideDock({
   selectedIds,
   activeCommentId,
   collapsed,
+  hasUnread = false,
   onCollapsedChange,
   onDismiss,
   onToggleSelect,
@@ -5094,6 +5099,7 @@ function CommentSideDock({
   selectedIds: Set<string>;
   activeCommentId: string | null;
   collapsed: boolean;
+  hasUnread?: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   onDismiss?: () => void;
   onToggleSelect: (commentId: string) => void;
@@ -5129,6 +5135,7 @@ function CommentSideDock({
         selectedIds={selectedIds}
         activeCommentId={activeCommentId}
         collapsed={collapsed}
+        hasUnread={hasUnread}
         onCollapsedChange={onCollapsedChange}
         onDismiss={onDismiss}
         onToggleSelect={onToggleSelect}
@@ -16516,6 +16523,7 @@ function HtmlViewer({
       // now always floats as a card, so its collapse control has to actually
       // collapse — forcing `false` here made every click a no-op.
       collapsed={commentSidePanelCollapsed}
+      hasUnread={hasUnreadSideComments}
       onCollapsedChange={setCommentSidePanelCollapsed}
       // Escape remains the explicit floating-card close path. The header
       // disclosure always preserves this mounted dock as a reversible rail.
