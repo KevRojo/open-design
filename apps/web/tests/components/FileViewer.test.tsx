@@ -10850,7 +10850,7 @@ describe('FileViewer tweaks toolbar', () => {
     expect(container.querySelector('.comment-preview-layer > .comment-side-panel')).toBeNull();
   });
 
-  it('closes a floating comment card in one action and restores focus for button and Escape dismissals', async () => {
+  it('closes a floating comment card on Escape and restores focus', async () => {
     const portalId = 'project-comments-float';
     render(
       <>
@@ -10868,26 +10868,40 @@ describe('FileViewer tweaks toolbar', () => {
     const trigger = screen.getByTestId('comment-panel-toggle');
     fireEvent.click(trigger);
 
-    const firstDismiss = await screen.findByRole('button', { name: /hide comments/i });
-    firstDismiss.focus();
-    fireEvent.click(firstDismiss);
+    const dismiss = await screen.findByRole('button', { name: /hide comments/i });
+    dismiss.focus();
+    fireEvent.keyDown(dismiss, { key: 'Escape' });
 
     await waitFor(() => {
       expect(screen.queryByTestId('comment-side-panel')).toBeNull();
       expect(document.activeElement).toBe(trigger);
     });
+  });
 
-    // The close path must also clear create/board mode: one click reopens the
-    // floating card instead of being consumed by a stale pressed state.
-    fireEvent.click(trigger);
-    const secondDismiss = await screen.findByRole('button', { name: /hide comments/i });
-    secondDismiss.focus();
-    fireEvent.keyDown(secondDismiss, { key: 'Escape' });
+  it('collapses a floating comment card to a reversible rail instead of closing it', async () => {
+    const portalId = 'project-comments-collapse-rail';
+    render(
+      <>
+        <div id={portalId} data-testid="comment-float-host" />
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={htmlPreviewFile()}
+          liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+          commentPortalId={portalId}
+        />
+      </>,
+    );
 
-    await waitFor(() => {
-      expect(screen.queryByTestId('comment-side-panel')).toBeNull();
-      expect(document.activeElement).toBe(trigger);
-    });
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    fireEvent.click(await screen.findByRole('button', { name: /hide comments/i }));
+
+    const rail = await screen.findByTestId('comment-side-collapsed-rail');
+    expect(screen.getByTestId('comment-float-host')).toContainElement(rail);
+    expect(screen.queryByTestId('comment-side-panel')).toBeNull();
+
+    fireEvent.click(rail);
+    expect(await screen.findByTestId('comment-side-panel')).toBeTruthy();
   });
 
   it('keeps the comment popover open and restores focus when View all comments closes', async () => {
@@ -10929,6 +10943,13 @@ describe('FileViewer tweaks toolbar', () => {
     dismiss.focus();
     fireEvent.click(dismiss);
 
+    const rail = await screen.findByTestId('comment-side-collapsed-rail');
+    expect(screen.getByTestId('comment-popover')).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(rail));
+
+    fireEvent.click(rail);
+    const reopened = await screen.findByTestId('comment-side-panel');
+    fireEvent.keyDown(reopened, { key: 'Escape' });
     await waitFor(() => {
       expect(screen.queryByTestId('comment-side-panel')).toBeNull();
       expect(screen.getByTestId('comment-popover')).toBeTruthy();
@@ -11012,6 +11033,66 @@ describe('FileViewer tweaks toolbar', () => {
     await waitFor(() => expect(screen.queryByTestId('comment-unread-dot')).toBeNull());
     expect(screen.getByTestId('comment-panel-toggle').getAttribute('aria-label')).toBe('Comments (3)');
   });
+
+  it('does not mark folded arrivals read until the floating rail is expanded', async () => {
+    const comment = (id: string, createdAt: number, overrides: Partial<PreviewComment> = {}): PreviewComment => ({
+      id, projectId: 'project-1', conversationId: 'conversation-1', filePath: 'preview.html',
+      elementId: id, selector: `[data-od-id="${id}"]`, label: id, text: '', htmlHint: '',
+      position: { x: 0, y: 0, width: 1, height: 1 }, note: id, status: 'open', createdAt, updatedAt: createdAt,
+      ...overrides,
+    });
+    const readRequests = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith('/comments/read')) return new Response('{}');
+      if (init?.method === 'PUT') readRequests();
+      return new Response(JSON.stringify({ projectId: 'project-1', lastReadAt: init?.method === 'PUT' ? 200 : 100 }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+    const portalId = 'project-comments-read-rail';
+    const initial = [comment('backfill', 99)];
+    const workspace = teamWorkspaceContext();
+    const { rerender } = render(
+      <CollabProvider value={projectWorkspaceCollabValue(workspace)}>
+        <>
+          <div id={portalId} />
+          <FileViewer projectId="project-1" projectKind="prototype" file={htmlPreviewFile()} liveHtml="<html><body /></html>" previewComments={initial} commentPortalId={portalId} />
+        </>
+      </CollabProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    await waitFor(() => expect(readRequests).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /hide comments/i }));
+    await screen.findByTestId('comment-side-collapsed-rail');
+
+    rerender(
+      <CollabProvider value={projectWorkspaceCollabValue(workspace)}>
+        <>
+          <div id={portalId} />
+          <FileViewer
+            projectId="project-1"
+            projectKind="prototype"
+            file={htmlPreviewFile()}
+            liveHtml="<html><body /></html>"
+            commentPortalId={portalId}
+            previewComments={[
+              comment('external-new', 201),
+              comment('own', 300, { authorMemberId: 'wm-1' }),
+              comment('backfill', 99),
+              comment('other-file', 400, { filePath: 'other.html' }),
+              comment('sent', 500, { status: 'attached' }),
+            ]}
+          />
+        </>
+      </CollabProvider>,
+    );
+
+    await waitFor(() => expect(readRequests).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId('comment-side-collapsed-rail'));
+    await waitFor(() => expect(readRequests).toHaveBeenCalledTimes(2));
+  });
+
 
   it('does not light the dot for a trusted member self comment or timestamp boundary', async () => {
     const own: PreviewComment = {
@@ -13436,6 +13517,43 @@ describe('FileViewer tweaks toolbar', () => {
     expect(avatar?.style.color).toBe(expectedColor.style.color);
     expect(item.querySelector('.comment-side-author-copy small')).toBeNull();
     expect(document.querySelector('.comment-side-title')?.textContent).toBe(`${t('chat.tabComments')} 1`);
+  });
+
+  it('renders an empty external author as a key-colored question-mark avatar without a name line', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(
+      JSON.stringify({ members: [] }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const emptyNameComment = (id: string, authorDisplayName?: string): PreviewComment => ({
+      id, projectId: 'project-1', conversationId: 'conversation-1',
+      filePath: 'preview.html', elementId: id, selector: '[data-od-id="hero-copy"]',
+      label: 'Hero copy', text: 'Hero copy', htmlHint: '<p data-od-id="hero-copy">',
+      position: { x: 16, y: 24, width: 320, height: 48 }, note: 'External feedback.', status: 'open',
+      authorKind: 'user', authorDisplayName, authorAppUserId: 'user-1', authorKey: 'same-author-key',
+      createdAt: Date.now(), updatedAt: Date.now(),
+    });
+
+    renderWithProjectWorkspace(
+      <CommentSidePanel
+        comments={[
+          emptyNameComment('empty', ''), emptyNameComment('whitespace', '   '), emptyNameComment('missing'),
+        ]}
+        selectedIds={new Set()} activeCommentId={null} collapsed={false}
+        onCollapsedChange={() => {}} onToggleSelect={() => {}} onSelectAll={() => {}}
+        onClearSelection={() => {}} onReply={() => {}} onSendSelected={() => {}}
+        sending={false} t={t}
+      />,
+      teamWorkspaceContext(),
+    );
+
+    const items = await screen.findAllByTestId('comment-side-item');
+    const avatars = items.map((item) => item.querySelector<HTMLElement>('.comment-side-avatar'));
+    expect(avatars.map((avatar) => avatar?.textContent)).toEqual(['?', '?', '?']);
+    expect(avatars[0]?.style.background).toBe(avatars[1]?.style.background);
+    expect(avatars[1]?.style.background).toBe(avatars[2]?.style.background);
+    for (const item of items) expect(item.querySelector('.comment-side-author-copy small')).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/workspace/members'))).toBe(false);
   });
 
   it('keeps relative comment-time boundaries stable across clock boundaries', () => {

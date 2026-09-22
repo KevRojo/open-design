@@ -183,6 +183,204 @@ describe('previewCommentToCloud', () => {
 // —— mergeSyncedPreviewComment idempotency (real db) ——————————————————————————
 
 describe('mergeSyncedPreviewComment', () => {
+  it('persists an inbound user comment without a wire label in real SQLite', () => {
+    const db = seededDb();
+    // Synthetic missing-field probe, not a captured Vela payload.
+    const wire = cloudComment('web-without-label', {
+      memberId: '', authorKind: 'user', authorAppUserId: 'web-account',
+      seq: 1, elementId: 'hero',
+    });
+    Reflect.deleteProperty(wire, 'label');
+    const outcome: { returned?: ReturnType<typeof mergeSyncedPreviewComment>; error?: unknown } = {};
+    try {
+      outcome.returned = mergeSyncedPreviewComment(db, 'p1', 'conv-local', wire);
+    } catch (error) {
+      outcome.error = error;
+    }
+    console.info('missing-label SQLite outcome', outcome);
+    expect(outcome.error).toBeUndefined();
+    const stored = listPreviewComments(db, 'p1', 'conv-local');
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      id: wire.id, label: 'hero', note: wire.note,
+      authorKind: 'user', authorAppUserId: 'web-account', selector: wire.selector,
+    });
+  });
+  it.each([undefined, null, '', '  ', 42, { title: 'not a label' }])('normalizes invalid display labels (%j) without changing comment identity', (label) => {
+    const db = seededDb();
+    const wire = cloudComment('label-fallback', { elementId: 'path-0-1' });
+    Reflect.set(wire, 'label', label);
+    mergeSyncedPreviewComment(db, 'p1', 'conv-local', wire);
+    expect(listPreviewComments(db, 'p1', 'conv-local')[0]).toMatchObject({
+      label: 'Annotation', note: wire.note, elementId: wire.elementId,
+      selector: wire.selector, authorMemberId: wire.memberId,
+    });
+    mergeSyncedPreviewComment(db, 'p1', 'conv-local', { ...wire, label: 'Original title', updatedAt: 200 });
+    mergeSyncedPreviewComment(db, 'p1', 'conv-local', { ...wire, updatedAt: 300 });
+    expect(listPreviewComments(db, 'p1', 'conv-local')[0]?.label).toBe('Original title');
+    mergeSyncedPreviewComment(db, 'p1', 'conv-local', { ...wire, label: 'Replacement', updatedAt: 400 });
+    expect(listPreviewComments(db, 'p1', 'conv-local')[0]?.label).toBe('Replacement');
+    mergeSyncedPreviewComment(db, 'p1', 'conv-local', { ...wire, deleted: true });
+    expect(listPreviewComments(db, 'p1', 'conv-local')).toEqual([]);
+  });
+
+  it.each(['missing-selector', 'foreign-conversation', 'cross-project-id'] as const)(
+    'does not acknowledge a non-idempotent SQLite failure: %s', (failure) => {
+      const db = seededDb();
+      const wire = cloudComment('invalid-row');
+      let conversationId = 'conv-local';
+      if (failure === 'missing-selector') Reflect.deleteProperty(wire, 'selector');
+      if (failure === 'foreign-conversation') conversationId = 'missing-conversation';
+      if (failure === 'cross-project-id') {
+        insertProject(db, { id: 'p2', name: 'Other', createdAt: 1, updatedAt: 1 });
+        insertConversation(db, { id: 'conv-other', projectId: 'p2', title: 'Other', createdAt: 1, updatedAt: 1 });
+        mergeSyncedPreviewComment(db, 'p2', 'conv-other', { ...wire, projectId: 'p2' });
+      }
+      const outcome: { returned?: ReturnType<typeof mergeSyncedPreviewComment>; error?: unknown } = {};
+      try {
+        outcome.returned = mergeSyncedPreviewComment(db, 'p1', conversationId, wire);
+      } catch (error) {
+        outcome.error = error;
+      }
+      console.info('SQLite constraint outcome', failure, outcome);
+      expect(outcome.error).toBeInstanceOf(Error);
+      expect(listPreviewComments(db, 'p1', 'conv-local')).toEqual([]);
+      if (failure === 'cross-project-id') expect(listPreviewComments(db, 'p2', 'conv-other')).toHaveLength(1);
+    },
+  );
+
+  it('retains the prior cursor and etag after a partial SQLite batch failure and retries idempotently', async () => {
+    const db = seededDb();
+    const first = cloudComment('first', { seq: 1 });
+    const second = cloudComment('second', { seq: 2 });
+    const third = cloudComment('third', { seq: 3 });
+    const brokenThird = { ...third };
+    Reflect.deleteProperty(brokenThird, 'selector');
+    const requests: Array<{ sinceSeq: number; etag: string | null | undefined }> = [];
+    const errors: unknown[] = [];
+    const client = {
+      pullComments: async (_teamId: string, _projectId: string, sinceSeq: number, etag?: string | null) => {
+        requests.push({ sinceSeq, etag });
+        const batch = requests.length === 1 ? [first]
+          : requests.length === 2 ? [second, brokenThird] : [second, third];
+        return {
+          comments: batch.filter((comment) => comment.seq > sinceSeq),
+          latestSeq: requests.length === 1 ? 1 : 3,
+          etag: requests.length === 1 ? 'etag-1' : 'etag-3',
+          notModified: false,
+        };
+      },
+    } as unknown as CollabCloudClient;
+    const service = createCollabCloudService({
+      client, listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local',
+      mergeComment: ({ projectId, conversationId, comment }) =>
+        mergeSyncedPreviewComment(db, projectId, conversationId, comment),
+      onError: (error) => errors.push(error),
+    });
+    try {
+      await service.pullProject('p1', teamContext());
+      const failed = await service.pullProject('p1', teamContext());
+      const partial = listPreviewComments(db, 'p1', 'conv-local').map((comment) => comment.id);
+      await service.pullProject('p1', teamContext());
+      await service.pullProject('p1', teamContext());
+      expect(requests).toEqual([
+        { sinceSeq: 0, etag: undefined },
+        { sinceSeq: 1, etag: 'etag-1' },
+        { sinceSeq: 1, etag: 'etag-1' },
+        { sinceSeq: 3, etag: 'etag-3' },
+      ]);
+      expect(failed).toBe(false);
+      expect(errors).toHaveLength(1);
+      expect(partial.sort()).toEqual(['first', 'second']);
+      expect(listPreviewComments(db, 'p1', 'conv-local').map((comment) => comment.id).sort())
+        .toEqual(['first', 'second', 'third']);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it.each([false, true, undefined, null, 0, 'stored'])(
+    'does not advance a pull on an invalid persistence acknowledgement: %s', async (invalid) => {
+      const db = seededDb();
+      const records = [cloudComment('first', { seq: 1 }), cloudComment('second', { seq: 2 })];
+      const requests: Array<{ sinceSeq: number; etag: string | null | undefined }> = [];
+      const errors: unknown[] = [];
+      const onMerged = vi.fn();
+      let merges = 0;
+      const service = createCollabCloudService({
+        client: {
+          pullComments: async (_team: string, _project: string, sinceSeq: number, etag?: string | null) => {
+            requests.push({ sinceSeq, etag });
+            const latestSeq = requests.length === 1 ? 1 : 2;
+            return {
+              comments: records.filter((comment) => comment.seq > sinceSeq && comment.seq <= latestSeq),
+              latestSeq, etag: `etag-${latestSeq}`, notModified: false,
+            };
+          },
+        } as unknown as CollabCloudClient,
+        listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local',
+        mergeComment: ({ projectId, conversationId, comment }) => {
+          // Deliberately violate the typed seam to model an old/incorrect adapter.
+          if (++merges === 2) return invalid as unknown as ReturnType<typeof mergeSyncedPreviewComment>;
+          return mergeSyncedPreviewComment(db, projectId, conversationId, comment);
+        },
+        onMerged, onError: (error) => errors.push(error),
+      });
+      try {
+        expect(await service.pullProject('p1', teamContext())).toBe(true);
+        expect(await service.pullProject('p1', teamContext())).toBe(false);
+        expect(errors).toHaveLength(1);
+        expect(onMerged).toHaveBeenCalledTimes(1);
+        expect(listPreviewComments(db, 'p1', 'conv-local').map((comment) => comment.id)).toEqual(['first']);
+        expect(await service.pullProject('p1', teamContext())).toBe(true);
+        expect(await service.pullProject('p1', teamContext())).toBe(true);
+        expect(requests).toEqual([
+          { sinceSeq: 0, etag: undefined },
+          { sinceSeq: 1, etag: 'etag-1' },
+          { sinceSeq: 1, etag: 'etag-1' },
+          { sinceSeq: 2, etag: 'etag-2' },
+        ]);
+        expect(listPreviewComments(db, 'p1', 'conv-local').map((comment) => comment.id)).toEqual(['first', 'second']);
+        expect(onMerged.mock.calls).toEqual([[{ projectId: 'p1', inserted: 1 }], [{ projectId: 'p1', inserted: 1 }]]);
+      } finally { service.dispose(); }
+    },
+  );
+
+  it('replays skipped external authors on a fresh service without resetting stored comments', async () => {
+    const db = seededDb();
+    const member = cloudComment('existing-member', { seq: 2, authorKind: 'member' });
+    const external = cloudComment('previously-filtered-user', {
+      seq: 1, authorKind: 'user', authorAppUserId: 'web-account', memberId: '',
+    });
+    const requests: number[] = [];
+    const makeService = (includeExternal: boolean) => createCollabCloudService({
+      client: {
+        pullComments: async (_team: string, _project: string, sinceSeq: number) => {
+          requests.push(sinceSeq);
+          return {
+            comments: (includeExternal ? [external, member] : [member]).filter((comment) => comment.seq > sinceSeq),
+            latestSeq: 2, etag: 'etag-2', notModified: false,
+          };
+        },
+      } as unknown as CollabCloudClient,
+      listProjectIds: () => [], resolveLocalConversationId: () => 'conv-local',
+      mergeComment: ({ projectId, conversationId, comment }) =>
+        mergeSyncedPreviewComment(db, projectId, conversationId, comment),
+    });
+    const previous = makeService(false);
+    try { await previous.pullProject('p1', teamContext()); } finally { previous.dispose(); }
+    expect(listPreviewComments(db, 'p1', 'conv-local')).toHaveLength(1);
+    const restarted = makeService(true);
+    try {
+      await restarted.pullProject('p1', teamContext());
+      await restarted.pullProject('p1', teamContext());
+      expect(requests).toEqual([0, 0, 2]);
+      expect(listPreviewComments(db, 'p1', 'conv-local')).toHaveLength(2);
+      expect(listPreviewComments(db, 'p1', 'conv-local').find((comment) => comment.id === external.id))
+        .toMatchObject({ authorKind: 'user', authorAppUserId: 'web-account', authorMemberId: undefined });
+    } finally { restarted.dispose(); }
+  });
+
   it('inserts once and is a no-op on re-merge of the same id', () => {
     const db = seededDb();
     const comment = cloudComment('c1', {
@@ -190,9 +388,9 @@ describe('mergeSyncedPreviewComment', () => {
       anchorState: 'anchored',
       anchoredVersion: 3,
     });
-    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', comment)).toBe(true);
+    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', comment)).toBe('changed');
     // Re-pull of the same cloud comment (same id) must not double-insert.
-    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', comment)).toBe(false);
+    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', comment)).toBe('unchanged');
 
     const stored = listPreviewComments(db, 'p1', 'conv-local');
     expect(stored).toHaveLength(1);
@@ -213,7 +411,7 @@ describe('mergeSyncedPreviewComment', () => {
       authorDisplayName: 'Ada',
       authorKey: 'a'.repeat(64),
     });
-    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', initial)).toBe(true);
+    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', initial)).toBe('changed');
 
     const updated = {
       ...initial,
@@ -221,7 +419,7 @@ describe('mergeSyncedPreviewComment', () => {
       authorDisplayName: 'Ada Lovelace',
       authorKey: 'b'.repeat(64),
     };
-    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', updated)).toBe(true);
+    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', updated)).toBe('changed');
     expect(listPreviewComments(db, 'p1', 'conv-local')[0]).toMatchObject({
       authorKind: 'user',
       authorAppUserId: 'app-user-1',
@@ -237,7 +435,7 @@ describe('mergeSyncedPreviewComment', () => {
       ...legacyUpdate
     } = updated;
     legacyUpdate.updatedAt = 300;
-    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', legacyUpdate)).toBe(true);
+    expect(mergeSyncedPreviewComment(db, 'p1', 'conv-local', legacyUpdate)).toBe('changed');
     expect(listPreviewComments(db, 'p1', 'conv-local')[0]).toMatchObject({
       authorKind: 'user',
       authorAppUserId: 'app-user-1',
@@ -287,11 +485,11 @@ describe('mergeSyncedPreviewComment', () => {
     const db = seededDb();
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('cA', { memberId: 'm-a' })),
-    ).toBe(true);
+    ).toBe('changed');
     // Same element, different author + different id → a new distinct row (not IGNOREd).
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('cB', { memberId: 'm-b' })),
-    ).toBe(true);
+    ).toBe('changed');
     expect(listPreviewComments(db, 'p1', 'conv-local')).toHaveLength(2);
   });
 
@@ -303,17 +501,17 @@ describe('mergeSyncedPreviewComment', () => {
     // Newer updatedAt → update in place.
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('c1', { note: 'v2', updatedAt: 200 })),
-    ).toBe(true);
+    ).toBe('changed');
     expect(listPreviewComments(db, 'p1', 'conv-local')[0]!.note).toBe('v2');
     // Stale updatedAt → no-op, the fresher local content wins.
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('c1', { note: 'v0', updatedAt: 150 })),
-    ).toBe(false);
+    ).toBe('unchanged');
     expect(listPreviewComments(db, 'p1', 'conv-local')[0]!.note).toBe('v2');
     // A re-pull at the same updatedAt is also a no-op (still one row).
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('c1', { note: 'v2', updatedAt: 200 })),
-    ).toBe(false);
+    ).toBe('unchanged');
     expect(listPreviewComments(db, 'p1', 'conv-local')).toHaveLength(1);
   });
 
@@ -326,12 +524,12 @@ describe('mergeSyncedPreviewComment', () => {
     // Tombstone removes it (delete wins regardless of updatedAt).
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('c1', { deleted: true, updatedAt: 1 })),
-    ).toBe(true);
+    ).toBe('changed');
     expect(listPreviewComments(db, 'p1', 'conv-local')).toHaveLength(0);
     // A repeated tombstone is a no-op.
     expect(
       mergeSyncedPreviewComment(db, 'p1', 'conv-local', cloudComment('c1', { deleted: true })),
-    ).toBe(false);
+    ).toBe('unchanged');
   });
 
   it('deleteSyncedPreviewComment removes by id, scoped to the project', () => {
@@ -587,9 +785,9 @@ describe('createCollabCloudService', () => {
       resolveLocalConversationId: () => 'conv-local',
       mergeComment: ({ comment }) => {
         mergeCalls += 1;
-        if (merged.has(comment.id)) return false;
+        if (merged.has(comment.id)) return 'unchanged';
         merged.set(comment.id, comment);
-        return true;
+        return 'changed';
       },
     });
 
@@ -631,7 +829,7 @@ describe('createCollabCloudService', () => {
       listProjectIds: () => ['p1'],
       resolveProjectWorkspaceContext: async () => personal,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
     await service.pollOnce();
     await service.pollOnce();
@@ -649,7 +847,7 @@ describe('createCollabCloudService', () => {
       resolveProjectWorkspaceContext: async () =>
         teamContext({ displayName: '琼羽', role: 'owner' }),
       resolveLocalConversationId: () => null,
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
     // The identity is stable across cycles, so we must register exactly once
     // instead of spawning a `vela member register` process on every 5s tick.
@@ -672,7 +870,7 @@ describe('createCollabCloudService', () => {
       listProjectIds: () => ['p1'],
       resolveProjectWorkspaceContext: async () => teamContext(),
       resolveLocalConversationId: () => null, // member pulled the project, no chat yet
-      mergeComment: () => { mergeCalls += 1; return true; },
+      mergeComment: () => { mergeCalls += 1; return 'changed'; },
     });
     await service.pollOnce();
     expect(mergeCalls).toBe(0);
@@ -686,7 +884,7 @@ describe('createCollabCloudService', () => {
       workspaceContext: fixedContextProvider(teamContext()),
       listProjectIds: () => ['p1'],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
     await service.pushCommentDeletion({
       id: 'c1',
@@ -720,7 +918,7 @@ describe('createCollabCloudService', () => {
       listProjectIds: () => ['p1'],
       resolveProjectWorkspaceContext: async () => null,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => { mergeCalls += 1; return true; },
+      mergeComment: () => { mergeCalls += 1; return 'changed'; },
     });
     await service.pollOnce();
     expect(registered).toHaveLength(0);
@@ -748,7 +946,7 @@ describe('createCollabCloudService', () => {
       ),
       listProjectIds: () => [],
       resolveLocalConversationId: () => null,
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
 
     await service.listMembers(
@@ -774,7 +972,7 @@ describe('createCollabCloudService', () => {
       workspaceContext: fixedContextProvider(teamContext()),
       listProjectIds: () => [],
       resolveLocalConversationId: () => null,
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
       onError: (error) => errors.push(error),
     });
 
@@ -820,7 +1018,7 @@ describe('createCollabCloudService', () => {
       ),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
     const projectContext = teamContext({
       workspaceId: 'workspace-a',
@@ -886,7 +1084,7 @@ describe('createCollabCloudService', () => {
       client,
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
     const workspaceA = teamContext({
       workspaceId: 'workspace-a',
@@ -932,7 +1130,7 @@ describe('createCollabCloudService', () => {
       client,
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
     const context = teamContext({
       workspaceId: 'workspace-a',
@@ -988,7 +1186,7 @@ describe('createCollabCloudService', () => {
       listProjectIds: () => ['same-project'],
       resolveProjectWorkspaceContext: async () => context,
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => false,
+      mergeComment: () => 'unchanged',
     });
 
     const targeted = service.pullProject('same-project', context);
@@ -1025,7 +1223,7 @@ describe('createCollabCloudService', () => {
       workspaceContext: fixedContextProvider(teamContext()),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: ({ comment }) => { merged.push(comment.id); return true; },
+      mergeComment: ({ comment }) => { merged.push(comment.id); return 'changed'; },
     });
     await expect(service.pullProject('p1', teamContext())).resolves.toBe(true);
     expect(merged).toEqual(['c1']);
@@ -1042,7 +1240,7 @@ describe('createCollabCloudService', () => {
       workspaceContext: fixedContextProvider(teamContext()),
       listProjectIds: () => [],
       resolveLocalConversationId: () => null,
-      mergeComment: () => true,
+      mergeComment: () => 'changed',
     });
     await expect(service.pullProject('p1', teamContext())).resolves.toBe(false);
     service.dispose();
@@ -1059,7 +1257,7 @@ describe('createCollabCloudService', () => {
       workspaceContext: fixedContextProvider(teamContext()),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => true,
+      mergeComment: () => 'changed',
       onError: (error) => errors.push(error),
     });
     await expect(service.pullProject('p1', teamContext())).resolves.toBe(false);
@@ -1074,7 +1272,7 @@ describe('createCollabCloudService', () => {
       workspaceContext: fixedContextProvider(null),
       listProjectIds: () => [],
       resolveLocalConversationId: () => 'conv-local',
-      mergeComment: () => true,
+      mergeComment: () => 'changed',
     });
     await expect(
       service.pullProject(
@@ -1216,7 +1414,7 @@ describe('VelaCliCollabClient', () => {
     expect(calls[1]?.slice(0, 3)).toEqual(['comment', 'push', 'p1']);
     expect(calls[1]?.slice(3)).toEqual(['--comment-file', '-']);
     expect(JSON.parse(String(inputs[1]))).toMatchObject({ id: 'c1' });
-    expect(calls[2]).toEqual(['comment', 'pull', 'p1', '--since-seq', '0']);
+    expect(calls[2]).toEqual(['comment', 'pull', 'p1', '--since-seq', '0', '--author-kinds', 'member,user']);
     expect(calls[3]).toEqual([
       'presence',
       'heartbeat',

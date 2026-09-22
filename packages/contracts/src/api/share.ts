@@ -17,6 +17,7 @@
  */
 
 import type { PublicProjectFilePublication } from './collab.js';
+import type { PreviewCommentSelectionKind, PreviewCommentStatus } from './comments.js';
 
 /* ------------------------------------------------------------------ *
  * Share addressing
@@ -620,19 +621,37 @@ export const PUBLIC_SNAPSHOT_PATH_PREFIX = '/api/v1/public/snapshots';
  * snapshot.
  *
  * So a share URL keeps working across updates, and a viewer who reloads gets
- * the current version. What P0 does not build is the transport that would let
- * a page ALREADY OPEN notice the change on its own — no version poll, no
- * second request to compare versions, no push.
+ * the current version.
  *
- * The distinction is easy to collapse and expensive to get wrong in either
- * direction: read it as "one link, one version forever" and the update flow
- * looks impossible; read it as "the page keeps itself current" and every
- * share page grows a polling loop nobody asked for.
+ * An open page DOES learn that a new version exists: the share page's poll
+ * (see {@link SHARE_SYNC_INTERVALS_MS.sharePagePoll}) carries the share
+ * version alongside comments, and a version increase raises a toast — the
+ * owner deployed something new. See {@link SHARE_PAGE_ANNOUNCES_NEW_VERSION}.
  *
- * This constant exists so the absence stays a recorded decision rather than a
- * gap someone fills in with that loop.
+ * ⚠️ This constant previously read `false` with a docblock asserting "no
+ * version poll, no second request, no push". That was wrong against D113 Q2
+ * (product-set, 09-20), which had already decided the share page polls
+ * comments AND share version every 30s. Corrected 2026-09-22.
  */
-export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = false;
+export const SHARE_SNAPSHOT_DISCOVERY_IN_P0 = true;
+
+/**
+ * A new deployment announces itself; it does not take over the page.
+ *
+ * When the polled share version increases, the viewer gets a toast saying a
+ * new version has been deployed, with reloading left to them.
+ *
+ * ## Why it must not reload on its own
+ *
+ * The viewer may be part-way through writing a comment. Reloading discards
+ * that draft to show them something they did not ask for at a moment they did
+ * not choose — the page would be punishing them for the owner's timing. The
+ * whole point of the stable alias is that the link keeps working; nothing
+ * about a new version is urgent enough to interrupt someone mid-sentence.
+ *
+ * So: announce, and let them pick the moment.
+ */
+export const SHARE_PAGE_ANNOUNCES_NEW_VERSION = true;
 
 /* ------------------------------------------------------------------ *
  * Comment read state
@@ -1210,3 +1229,672 @@ export const SHARE_BRIDGE_LIMITS = {
  * its own. The frame proposes a target; a person decides to comment.
  */
 export const SHARE_BRIDGE_ORDERING_AND_REVOCATION_REQUIRED = true;
+
+/* ------------------------------------------------------------------ *
+ * Opening a share: the alias resolves, then the content loads
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the share page needs to open a link, resolved from the stable alias.
+ *
+ * A NEW shape rather than a change to the existing immutable-snapshot DTO,
+ * because the two describe different things and are read by different
+ * callers. The snapshot DTO is about one immutable set of bytes; this is
+ * about the alias that currently points at one.
+ *
+ * ## Two identities, and they are not interchangeable
+ *
+ * - `slug` is the STABLE alias — the thing in the link a person was sent. It
+ *   survives updates by design.
+ * - `snapshotSlug` is the immutable snapshot it points at RIGHT NOW. It
+ *   changes on every update.
+ *
+ * The existing reader was only ever missing the second one. Adding it here
+ * rather than overloading `slug` is what lets the next step say which bytes
+ * it believes it is loading.
+ */
+export interface StableAliasViewerMetadata {
+  /** Stable alias; the link the viewer holds. */
+  slug: string;
+  /** The immutable snapshot this alias points at now. */
+  snapshotSlug: string;
+  /** Entry file inside that snapshot. */
+  entryPath: string;
+  /** Human-facing name for the shared artifact. */
+  displayName: string;
+  /** Epoch ms of the publish this snapshot came from. */
+  publishedAt: number;
+  /** Alias generation. */
+  version: number;
+}
+
+/**
+ * Opening a share is two requests, and the second must prove it is still
+ * talking about the first one's answer.
+ *
+ * ```
+ * 1. GET /api/v1/public/snapshots/:stableSlug?projectId=…&shareAlias=1
+ *      → StableAliasViewerMetadata
+ * 2. GET /api/v1/public/snapshots/:snapshotSlug/files/:entryPath
+ *        ?projectId=…&shareSlug=…&commentBridge=1
+ *      → the document
+ * ```
+ *
+ * ## The window between them is the whole problem
+ *
+ * An update can land in that gap. If step 2 resolved the alias again, it
+ * would serve the NEW bytes while the page around it — the comment anchors,
+ * the pins, the version it thinks it is showing — still describes the old
+ * ones. Comments would point at elements that no longer exist, or worse, at
+ * different elements that happen to match.
+ *
+ * So step 2 names the `snapshotSlug` step 1 returned, and the server serves
+ * it only when that is still the current one. A moved alias is `409`, and
+ * the page refreshes deliberately instead of silently drifting.
+ *
+ * ## A query parameter is not authorization
+ *
+ * `projectId`, `shareSlug` and the `commentBridge` / `shareAlias` flags are
+ * all supplied by the caller. They say which pairing is being ASKED about;
+ * they cannot say it is allowed. Both steps authorize against the binding —
+ * active, and belonging to the team and resource the catalog records — before
+ * anything is served. Treating the flag as the gate would make the whole
+ * surface openable by adding a parameter.
+ */
+export const SHARE_VIEWER_ENTRY_STATUS = {
+  /** No such alias/snapshot, or the pair does not match. The two are not distinguished. */
+  missingOrMismatched: 404,
+  /** The share was stopped. */
+  stopped: 410,
+  /** The alias has moved on; the snapshot named is no longer current. */
+  generationAdvanced: 409,
+} as const;
+
+/**
+ * `404` covers both "not there" and "does not match" on purpose.
+ *
+ * Separating them would let a caller probe which halves of a pair exist by
+ * watching the status change. The viewer has nothing to do differently in
+ * the two cases, so there is nothing to buy with the distinction.
+ */
+export const SHARE_VIEWER_MISSING_AND_MISMATCH_SHARE_ONE_STATUS = true;
+
+/**
+ * Deleting the source makes the link stop serving. This is not best-effort.
+ *
+ * Product ruling: once the file or project is gone, its public link must
+ * become inaccessible and say so. The residual on
+ * {@link ProjectDeleteShareResidual} describes the window before that is
+ * true, not a state the system is allowed to settle in — a residual with
+ * `retrying: false` is an unmet obligation someone has to clear, not a
+ * tolerated outcome.
+ *
+ * The consequence for the viewer: a stop caused by deletion is `410`, the
+ * same as any other stop, but it is not the same event to the person
+ * holding the link. "The owner stopped sharing this" invites them to ask for
+ * it back; "the original file was deleted" tells them there is nothing to ask
+ * for. {@link SHARE_VIEWER_STOP_REASONS} carries that difference so the two
+ * do not collapse into one sentence.
+ */
+export const SHARE_LINK_MUST_DIE_WITH_ITS_SOURCE = true;
+
+/**
+ * Why a stop carries a reason at all.
+ *
+ * A single `410` can only produce a single sentence, and the only sentence
+ * true for every `410` is the vaguest one. Naming the cause lets the viewer
+ * say the accurate thing without the server leaking anything the holder of a
+ * dead link could not already infer: they know the link existed, and they now
+ * know it does not work.
+ *
+ * `unspecified` is deliberate and is NOT a synonym for `stopped_by_owner`.
+ * A reason the server did not record must not be rendered as a cause it did.
+ */
+export const SHARE_VIEWER_STOP_REASONS = [
+  'stopped_by_owner',
+  'source_deleted',
+  'unspecified',
+] as const;
+export type ShareViewerStopReason = (typeof SHARE_VIEWER_STOP_REASONS)[number];
+
+
+/**
+ * The shared document is never cached and never revalidated.
+ *
+ * `no-store`, no `ETag`, no `Last-Modified`, and no `304` path. The alias is
+ * stable across updates, so a cached response keyed by URL would serve the
+ * previous version under a link that now points elsewhere — and a validator
+ * would let a `304` confirm exactly that stale body.
+ *
+ * The CSP sandbox is unchanged by any of this: the document still loads with
+ * `allow-scripts` and the existing sandbox flags.
+ */
+export const SHARE_VIEWER_DOCUMENT_IS_UNCACHEABLE = true;
+
+/**
+ * What the host does with `409`.
+ *
+ * It tells the person the share moved on and offers to reload. It does NOT
+ * re-POST anything, and it does not start a SECOND polling loop of its own —
+ * the share page already polls the version on its normal cadence (see
+ * {@link SHARE_SYNC_INTERVALS_MS.sharePagePoll}).
+ *
+ * `409` and the new-version toast are different moments and must stay that
+ * way. The toast says "there is something newer, whenever you want it"; a
+ * `409` says "the request you just made cannot be served" — the page asked
+ * for a snapshot that is no longer current, so that one is not optional.
+ */
+export const SHARE_VIEWER_409_PROMPTS_RELOAD_WITHOUT_POLLING = true;
+
+/* ------------------------------------------------------------------ *
+ * Which publication a public comment belongs to
+ * ------------------------------------------------------------------ */
+
+/**
+ * The publication a public comment was written against, asserted by the
+ * server that accepted it.
+ *
+ * ## `filePath` cannot answer this
+ *
+ * Publishing rewrites the entry to `index.html`, so the stored path of a
+ * comment on project A's share and one on project B's share are the same
+ * string. With only the path, a comment that arrives late — after A was
+ * stopped — matches B's live publication and is filed there. The comment
+ * lands under someone else's share, and nothing in the record says it is in
+ * the wrong place.
+ *
+ * Carrying the slug removes the ambiguity at the source instead of asking
+ * every consumer to guess from what is currently live.
+ *
+ * ## The server asserts it; the client never reports it
+ *
+ * `publicationSlug` is filled in by the API that accepted the comment, from
+ * the binding it already authorized the write against. A client-supplied
+ * value would let a caller file a comment into a publication it had no part
+ * in, which is the same class of hole as trusting a query parameter for
+ * authorization.
+ *
+ * ## Resolving it back is allowed to fail
+ *
+ * A consumer mapping this to a local file resolves by the full identity —
+ * team, creator, project, slug and published path — against the CURRENT
+ * publication record. Two rules make that safe:
+ *
+ * - **Ambiguity throws.** If the identity matches more than one record,
+ *   something is wrong with the data, and picking one would silently attach
+ *   the comment to an arbitrary share.
+ * - **Unknown or expired answers null.** There is no fallback to "whatever is
+ *   published now" — that fallback is exactly how a stopped share's late
+ *   comment ends up on a live one.
+ */
+export interface PublicCommentPublicationIdentity {
+  /** The stable alias of the publication this comment was written against. */
+  publicationSlug: string;
+}
+
+/**
+ * Set on the downstream comment payload by the accepting server, never by a
+ * client, and never inferred by a consumer from what is currently live.
+ */
+export const PUBLIC_COMMENT_PUBLICATION_SLUG_IS_SERVER_ASSERTED = true;
+
+/* ------------------------------------------------------------------ *
+ * Sync cadence
+ * ------------------------------------------------------------------ */
+
+/**
+ * Three different intervals, for three different operations.
+ *
+ * They were repeatedly read as one contested number. They are not: two are
+ * downstream pulls on different surfaces, and the third is the upstream relay
+ * going the other way.
+ */
+export const SHARE_SYNC_INTERVALS_MS = {
+  /**
+   * Share page → server, for comments and share version. 30s (D113 Q2,
+   * product-set; the earlier 5s and D80's 10s are both void). Polling STOPS
+   * while the page is hidden.
+   */
+  sharePagePoll: 30_000,
+  /**
+   * OD client fallback poll while SSE is connected. SSE carries the change in
+   * practice; this is the floor when it does not. (D80, unaffected by D113.)
+   */
+  clientFallbackWithSse: 30_000,
+  /** OD client poll when SSE is disconnected — the only path left, so faster. */
+  clientFallbackWithoutSse: 5_000,
+} as const;
+
+/**
+ * Sending a comment UP to the cloud may be faster than any of those.
+ *
+ * Ruled 2026-09-22: the 30s figure is the PAGE REFRESH, and the upward relay
+ * is a separate question that may be quicker.
+ *
+ * No number is frozen here, deliberately. The downstream intervals are
+ * budgets — each poll is a request from every open page, so the cost of
+ * shortening them scales with viewers. The upward relay fires on an action a
+ * person just took: it is bounded by how often people write comments, not by
+ * how many pages are open, so the same reasoning does not apply and the
+ * ceiling that produced 30s is not the ceiling here.
+ *
+ * Pick the value from the relay's own constraints — batching, backoff,
+ * retry pressure on the API — not by copying a poll interval.
+ */
+export const SHARE_COMMENT_UPSTREAM_MAY_BE_FASTER_THAN_POLL = true;
+
+/**
+ * The link to hand the person, present only when the share actually serves.
+ *
+ * This is the share PAGE address — `/artifact/{projectId}/{slug}` on the web
+ * origin — not the resource API path that loads the file's bytes. Those are
+ * different addresses for different purposes, and handing out the second one
+ * bypasses the share page entirely: comments, sign-in, error states and the
+ * badge all live on the page, and the raw file renders without any of them.
+ * It looks like it works, which is why the substitution survives review.
+ *
+ * ## Absent on `binding_pending`, and that is the point
+ *
+ * A `binding_pending` publish has content uploaded and the alias advanced,
+ * but the binding that makes the link serve was not registered. Returning a
+ * URL there would hand the person something to copy and send that answers
+ * with nothing. The union carries no `url` in that branch so a caller cannot
+ * offer a copy affordance for a link that does not work yet — the retry fills
+ * the binding in, and the URL becomes available with it.
+ */
+export interface SharePublishedLink {
+  /** Share page address on the web origin, e.g. `/artifact/{projectId}/{slug}`. */
+  url: string;
+}
+
+/**
+ * The publish HTTP response: the outcome, the receipt, and — only when it
+ * serves — the link.
+ *
+ * Composing them here rather than adding `url` to
+ * {@link SharePublishReceipt} keeps the receipt what it is: facts the server
+ * confirmed about the upload. The URL is not one of those. It is derived from
+ * the web origin plus ids, it exists only in the serving case, and mixing it
+ * into the receipt would make `binding_pending` carry a field it must not.
+ */
+export type SharePublishResponse =
+  | ({ status: 'published'; receipt: SharePublishReceipt } & SharePublishedLink)
+  | { status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending };
+
+/**
+ * Has this project ever been shared — as opposed to being shared right now?
+ *
+ * Derived from the BINDING, not from the local publication row.
+ *
+ * ## Why the local row cannot answer it
+ *
+ * Stopping a share deletes the daemon's publication record: that row is a
+ * cache of "what we last published", and once the share is stopped there is
+ * nothing being served for it to describe. So locally, `stopped` and
+ * `never shared` look identical — both are an absent row.
+ *
+ * The binding is the opposite: stop sets it to `stopped` rather than removing
+ * it, precisely so the same slug can resume. A binding that exists in ANY
+ * status is therefore proof the project was shared at some point, and that is
+ * the only place that proof lives.
+ *
+ * ## What must not stand in for it
+ *
+ * - **An empty publication list** — that is the stopped case as well as the
+ *   never case.
+ * - **An absent or empty share URL** — same collapse, one layer up.
+ * - **`status === 'none'`** — `none` means "no share is active", which is
+ *   true of a stopped share too.
+ *
+ * Each of those reads "stopped" as "never", and every feature built on that
+ * reading will re-offer a first-time experience to someone who already shared
+ * this project and deliberately stopped.
+ *
+ * ## No new field
+ *
+ * This is a question answered by data that already exists. A separate
+ * `hasEverShared` column would be a second truth to keep in sync with the
+ * binding, and the two would disagree the first time one of them was written
+ * without the other.
+ */
+export function hasEverShared(input: { bindingExists: boolean }): boolean {
+  return input.bindingExists;
+}
+
+/* ------------------------------------------------------------------ *
+ * Comment sync state
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the client can say about comment syncing, so the banners have an input.
+ *
+ * Today the outbox is daemon-internal — `CommentRelayOutboxStore.count()` has
+ * no way out — so the UI has nothing to render K8/K3/K5/K2 from. That is why
+ * those states are unbuildable rather than merely unbuilt: nobody can draw a
+ * condition the system never computes.
+ *
+ * Shape follows the Lane-4 board's S-4 draft. The invariants below are the
+ * part that is easy to get wrong.
+ */
+export interface CommentSyncState {
+  /** Outbox entries not yet sent. */
+  pending: number;
+  /** Last failure, sanitized for display. See the rules below. */
+  lastError: string | null;
+  /** K8. A CONJUNCTION — see below. */
+  sessionMissing: boolean;
+  /**
+   * K3. Distinct from never-shared, and `null` when it could not be read.
+   *
+   * This field was a required boolean and that was wrong: the authoritative
+   * answer lives on the cloud binding, and a 404, an auth failure, a network
+   * error or an unusable projection each leave the client with no answer at
+   * all. A boolean forces one of those to be spelled `false` — "the share is
+   * not stopped" — which is a confident claim about something that was never
+   * read, and the banner it drives would be absent for a share that really
+   * had been stopped.
+   *
+   * So `null` means undeterminable, and it is not `false`.
+   */
+  shareStopped: boolean | null;
+  /**
+   * Last align result, when one was run.
+   *
+   * ABSENT MEANS NOT CHECKED — not aligned. See
+   * {@link COMMENT_ALIGN_UNKNOWN_AND_ABSENT_ARE_NOT_ALIGNED}.
+   */
+  align?: CommentAlignResult;
+}
+
+/**
+ * `sessionMissing` is "needs to sync AND has no session", not "logged out".
+ *
+ * Someone signed out of a project with nothing to sync is not in a paused
+ * state — there is nothing being held back, and telling them sync is paused
+ * describes a problem they do not have. The banner exists to explain why
+ * something they wrote is not reaching anyone, which is only true when both
+ * halves hold.
+ *
+ * Neither half may be inferred from the other, and neither from a proxy:
+ * being logged out, having an empty publication list, or holding no share URL
+ * each answer a different question.
+ */
+export const COMMENT_SYNC_SESSION_MISSING_IS_A_CONJUNCTION = true;
+
+/**
+ * `pending > 0` is not a failure, and `lastError` is not a current state.
+ *
+ * - Entries are pending for a moment on every normal send. A count above zero
+ *   means work is queued, not that anything went wrong.
+ * - `lastError` records the most recent failure. A later attempt may have
+ *   succeeded and left it in place, so it must never be read as "syncing is
+ *   broken right now". It is context for a state established by the other
+ *   fields, not a state itself.
+ *
+ * Reading either as failure produces a banner that appears during healthy
+ * operation, which trains people to ignore the one that matters.
+ */
+export const COMMENT_SYNC_PENDING_AND_LAST_ERROR_ARE_NOT_FAILURE_STATES = true;
+
+/**
+ * `shareStopped` means a share existed and was stopped — never the absence of
+ * one.
+ *
+ * Same distinction as {@link hasEverShared}: a project that was never shared
+ * has no stopped state to report, and rendering K3 for it tells someone their
+ * sharing was stopped when they never started.
+ */
+export const COMMENT_SYNC_STOPPED_IS_NOT_NEVER_SHARED = true;
+
+/**
+ * `pending` counts THIS project's queue for THIS principal — never a global
+ * total.
+ *
+ * The outbox holds work for every project the person has open and, on a
+ * shared machine, potentially more than one identity. Reporting its raw
+ * `count()` would put another project's backlog on this project's banner, and
+ * would tell a viewer how much unsent work exists outside what they can see.
+ *
+ * Scope it the same way every other answer here is scoped, and when the scope
+ * cannot be established, report nothing rather than a number that belongs to
+ * someone else.
+ */
+export const COMMENT_SYNC_PENDING_IS_SCOPED_NOT_GLOBAL = true;
+
+/* ------------------------------------------------------------------ *
+ * Pushing comments in one request
+ * ------------------------------------------------------------------ */
+
+/** `POST /api/v1/collab/projects/:projectId/comments/batch` */
+export interface CommentBatchPushRequest {
+  /** 1..{@link COMMENT_BATCH_MAX_ITEMS}. */
+  comments: ReadonlyArray<{
+    /** Caller's handle for this entry, echoed back so results can be matched. */
+    key: string;
+    comment: unknown;
+    idempotencyKey: string;
+  }>;
+}
+
+export interface CommentBatchPushResponse {
+  results: ReadonlyArray<{
+    key: string;
+    ok: boolean;
+    /** Human-readable; never on its own the thing a caller branches on. */
+    error?: string;
+    errorCode?: string;
+    /** HTTP status this entry failed with, completing the failure envelope. */
+    status?: number;
+  }>;
+}
+
+export const COMMENT_BATCH_MAX_ITEMS = 500;
+
+/**
+ * Idempotency is per ENTRY, and a partial failure keeps its successes.
+ *
+ * A batch is a transport convenience, not a unit of work. Rolling the whole
+ * thing back because entry 400 failed would discard 399 comments that were
+ * accepted, and the retry would re-send all 400 — so the failure rate would
+ * have to reach zero before anything landed at all.
+ *
+ * So each entry carries its own idempotency key and commits on its own. A
+ * retry re-sends the batch; entries that already landed are recognised by
+ * their key and not duplicated; only the ones that failed are attempted
+ * again. The response reports every entry by the caller's `key`, because
+ * position is not a reliable identity once retries reorder anything.
+ *
+ * The call still exits nonzero on partial failure — the caller has work left
+ * to do — but the successful results are in the response and must be read
+ * rather than discarded with the exit code.
+ */
+export const COMMENT_BATCH_IS_PER_ITEM_NOT_ATOMIC = true;
+
+/* ------------------------------------------------------------------ *
+ * Align: is what we merged still what the cloud has?
+ * ------------------------------------------------------------------ */
+
+export const COMMENT_ALIGN_STATES = ['aligned', 'diverged', 'unknown'] as const;
+export type CommentAlignState = (typeof COMMENT_ALIGN_STATES)[number];
+
+export const COMMENT_ALIGN_REASONS = [
+  /** Events the comparison needed are gone — retention, not disagreement. */
+  'history_incomplete',
+  /** The cloud's consistency snapshot moved while comparing. */
+  'snapshot_changed',
+  /** The comparison could not be performed at all. */
+  'unavailable',
+] as const;
+export type CommentAlignReason = (typeof COMMENT_ALIGN_REASONS)[number];
+
+export interface CommentAlignResult {
+  state: CommentAlignState;
+  /** Required when `state` is `unknown`; explains which way it failed. */
+  reason?: CommentAlignReason;
+  latestSeq?: number;
+}
+
+/**
+ * Equal cursors are not equal content.
+ *
+ * A cursor says how far we have read. It says nothing about whether what we
+ * merged matches what is there — a comment can be edited, removed, or have
+ * arrived under a filter that skipped it, all without moving the cursor.
+ * Comparing cursors and calling the result "aligned" is the cheapest possible
+ * check and it answers a different question.
+ *
+ * Align compares the locally merged projection of cloud comments against the
+ * cloud's own consistency snapshot. Anything less is `unknown`.
+ */
+export const COMMENT_ALIGN_COMPARES_CONTENT_NOT_CURSORS = true;
+
+/**
+ * `unknown` is never `aligned`, and an absent align result is never `aligned`
+ * either.
+ *
+ * Retention is the case that makes this concrete: if the events a comparison
+ * needed have aged out, the honest answer is `unknown` with
+ * `history_incomplete` — not `aligned` (we did not check) and not `diverged`
+ * (we found no disagreement). Both substitutions are confident statements
+ * about something nobody looked at.
+ *
+ * On {@link CommentSyncState}, `align` being absent means NOT CHECKED. A
+ * consumer that treats missing as aligned turns every un-run comparison into
+ * a clean bill of health.
+ */
+export const COMMENT_ALIGN_UNKNOWN_AND_ABSENT_ARE_NOT_ALIGNED = true;
+
+/**
+ * The fields align compares, and nothing else.
+ *
+ * Both sides of the comparison project a comment down to this shape before
+ * anything is compared: the client from its merged local rows, the cloud from
+ * replaying its own events. The projection is named here — rather than left
+ * as a field list each side maintains — because a comparison whose two sides
+ * disagree about WHICH fields count reports a difference of opinion as a
+ * difference of content, and does it silently.
+ *
+ * What is deliberately NOT here:
+ *
+ * - **Anchor ladder output** (`anchorState`, `anchoredVersion`,
+ *   `lastGoodPosition`). These are recomputed locally at render/sync time
+ *   against this device's copy of the HTML. The cloud never runs the ladder,
+ *   and two devices that rendered at different moments legitimately hold
+ *   different values for an identical comment. Comparing them turns "the
+ *   anchor was re-resolved here but not there" into `diverged`, which claims
+ *   the comment set disagrees when nothing anyone wrote differs.
+ * - **`authorDisplayName`**. A captured display snapshot, not content. It
+ *   travels on a separate channel from the member directory by design, so an
+ *   event written before the field existed normalizes to empty against a
+ *   local row that has a name — a divergence about rendering.
+ * - **`podMembers`**. Member identity, which align does not compare (see
+ *   below); `memberCount` carries the only part that is content.
+ * - **Cursors, local routing ids, timestamps, `pinSeq`, `sortKey`,
+ *   `conversationId`, member internal ids.** Per
+ *   {@link COMMENT_ALIGN_COMPARES_CONTENT_NOT_CURSORS} and because these are
+ *   assigned per-device.
+ *
+ * `authorKind` IS compared: whether a comment came from a member or from a
+ * share-link visitor is a fact about the comment, not about its presentation.
+ */
+export interface CommentAlignProjection {
+  id: string;
+  filePath: string;
+  elementId: string;
+  selector: string;
+  selectionKind: PreviewCommentSelectionKind;
+  label: string;
+  text: string;
+  htmlHint: string;
+  note: string;
+  status: PreviewCommentStatus;
+  position: CommentAlignBox;
+  style: unknown;
+  memberCount: number;
+  slideIndex: number;
+  attachments: ReadonlyArray<CommentAlignAttachment>;
+  authorKind: 'member' | 'user';
+}
+
+/**
+ * Attachments compare by identity and order, never by bytes.
+ *
+ * The cloud holds the same attachment behind its own storage identity; asking
+ * the two sides to agree on content would make align an upload-integrity
+ * check, which is a different question with a different failure mode. Order
+ * is compared because reordering is an edit the author made.
+ */
+export interface CommentAlignAttachment {
+  id: string;
+  name: string;
+}
+
+/**
+ * Position compares as integers.
+ *
+ * A bbox crosses the wire as JSON floats and comes back through two different
+ * runtimes' parsers. Comparing raw doubles makes align report `diverged` for
+ * a comment nobody touched, on a round-trip artifact. Both sides round to
+ * whole pixels before comparing; sub-pixel drift is not an edit.
+ */
+export interface CommentAlignBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Absent optional fields normalize to the daemon's stored default BEFORE
+ * comparison, on both sides: empty text to `''`, optional structures to
+ * `null`, `selectionKind` to `element`, `authorKind` to `member`,
+ * `memberCount` and `slideIndex` to `0`, `attachments` to `[]`.
+ *
+ * Without a shared normalization rule, "the field was never set" and "the
+ * field was set to its default" compare unequal, and every legacy row
+ * diverges from its own faithful copy.
+ */
+export const COMMENT_ALIGN_NORMALIZES_ABSENT_TO_STORED_DEFAULT = true;
+
+export interface CommentAlignRequest {
+  /**
+   * The complete set of currently-undeleted comments the client has ALREADY
+   * merged, for the whole project — both `member` and `user` authors, and
+   * regardless of `status`.
+   *
+   * "Already merged" is the load-bearing part. Echoing a pull response back
+   * compares the cloud against itself and always reports `aligned`: it proves
+   * the transport round-tripped, not that the merge landed. What align exists
+   * to catch is precisely a merge that dropped, filtered, or mangled a record
+   * the transport delivered correctly.
+   *
+   * Complete is equally load-bearing: a filtered subset can only ever show
+   * comments the client kept, so a record it wrongly discarded is invisible
+   * to the comparison that exists to find it.
+   */
+  comments: ReadonlyArray<CommentAlignProjection>;
+  /**
+   * Guard against the cloud's snapshot moving mid-comparison. A mismatch is
+   * `unknown` / `snapshot_changed` — never `diverged`, because a moving
+   * target was never compared.
+   */
+  expectedLatestSeq: number;
+}
+
+/**
+ * The cloud must prove its event history is continuous before it may answer
+ * `aligned`.
+ *
+ * Replaying a history with a hole and finding the surviving rows equal is not
+ * evidence of agreement — the missing events are exactly the ones that would
+ * have disagreed. A gap is `unknown` / `history_incomplete`.
+ */
+export const COMMENT_ALIGN_REQUIRES_PROVEN_CONTINUOUS_HISTORY = true;
+
+/**
+ * Align is a read. It never resumes a stopped share, re-enqueues an outbox,
+ * advances a cursor, or writes a tombstone — a diagnostic that repairs what
+ * it measures can no longer report what was wrong.
+ */
+export const COMMENT_ALIGN_HAS_NO_SIDE_EFFECTS = true;
+

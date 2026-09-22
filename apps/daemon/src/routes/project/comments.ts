@@ -1,4 +1,5 @@
 import type { Express, Request } from 'express';
+import type { CommentSyncStateService } from '../../collab/comment-sync-state.js';
 import type {
   PreviewComment,
   ProjectCommentReadRequest,
@@ -154,6 +155,39 @@ export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'proj
   ) => Promise<void> | void;
 }
 
+/** External authors cannot be claimed through a member-only editing endpoint. */
+function hasExternalCommentAuthor(comment: PreviewComment): boolean {
+  return comment.authorKind === 'user'
+    || (typeof comment.authorAppUserId === 'string' && comment.authorAppUserId.trim().length > 0);
+}
+
+/** K8 supply only: null body means not determined, never default false.
+ * POST retries existing scoped intents through the normal background drain.
+ */
+export function registerCommentSyncStateRoutes(app: Express, deps: {
+  db: RegisterProjectCommentRoutesDeps['db'];
+  service: CommentSyncStateService;
+  authorize: (req: Request, projectId: string) => Promise<ProjectCommentWorkspaceContextResolution>;
+}): void {
+  for (const method of ['get', 'post'] as const) {
+    app[method]('/api/projects/:id/comment-sync-state', async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const projectId = req.params.id;
+        if (!getProject(deps.db, projectId)) return res.status(404).json({ error: 'project not found' });
+        const resolution = await deps.authorize(req, projectId);
+        if (!resolution.ok) return res.status(resolution.status).json({ error: resolution.code });
+        const context = resolution.context;
+        if (!context?.workspaceId || !context.workspaceMemberId) return res.json(null);
+        const scope = { projectId, workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+        return res.json(await deps.service[method === 'post' ? 'retry' : 'read'](scope));
+      } catch {
+        return res.status(503).json({ error: 'COMMENT_SYNC_STATE_UNAVAILABLE' });
+      }
+    });
+  }
+}
+
 export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectCommentRoutesDeps): void {
   const { db } = ctx;
   const { updateProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
@@ -209,7 +243,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
     return (commentsAreProjectScoped(projectId, context)
       && typeof getProjectPreviewComment === 'function'
       ? getProjectPreviewComment(db, projectId, commentId)
-      : getPreviewComment(db, projectId, conversationId, commentId)) as PreviewComment | null;
+      : getPreviewComment(db, projectId, conversationId, commentId, { includeProjectAnchor: true })) as PreviewComment | null;
   }
 
   /**
@@ -453,7 +487,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
         workspaceResolution.context,
       ) && typeof listProjectPreviewComments === 'function'
         ? listProjectPreviewComments(db, req.params.id)
-        : listPreviewComments(db, req.params.id, req.params.cid),
+        : listPreviewComments(db, req.params.id, req.params.cid, { includeProjectAnchor: true }),
     });
   });
 
@@ -506,6 +540,9 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
         );
         if (!existing) {
           return res.status(404).json({ error: 'comment not found' });
+        }
+        if (hasExternalCommentAuthor(existing)) {
+          return res.status(403).json({ error: 'not permitted' });
         }
         const existingAuthor = existing.authorMemberId ?? null;
         if (existingAuthor) {

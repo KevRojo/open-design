@@ -7587,7 +7587,15 @@ Common options:
         headers: workspaceHeaders,
       });
       if (!resp.ok) return structuredHttpFailure(resp, 'project-not-found');
+      const data: import('@open-design/contracts').ProjectDeleteResponse = await resp.json();
+      if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
       console.log(`[project] deleted ${id}`);
+      if (data.shareResiduals?.length) {
+        const lines = data.shareResiduals.map(item =>
+          `  ${JSON.stringify(item.filePath)} (${JSON.stringify(item.slug)}): ${item.retrying
+            ? 'stop queued for retry' : 'action required; no automatic retry'}`);
+        console.warn('[project] warning: public links may still be live:\n' + lines.join('\n'));
+      }
       return;
     }
     case 'editors': {

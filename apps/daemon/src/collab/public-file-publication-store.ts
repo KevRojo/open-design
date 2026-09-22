@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
+import type { PublicFileMutations } from './public-file-mutations.js';
 import { cancelPersonalCommentRelayOutbox } from './comment-relay-outbox.js';
+import { randomUUID } from 'node:crypto';
 
 type SqliteDb = Database.Database;
 
@@ -16,7 +18,12 @@ export interface PublicFilePublication {
   fileName: string;
 }
 
+/** Internal operation witness; never included in the public publication DTO. */
+export interface PublicFilePublicationRevision { slug: string; token: string }
+
 export interface PublicFilePublicationStore {
+  getRevision(scope: PublicFilePublicationScope): PublicFilePublicationRevision | null;
+  deleteIfRevisionMatches(scope: PublicFilePublicationScope, expected: PublicFilePublicationRevision): boolean;
   get(scope: PublicFilePublicationScope): PublicFilePublication | null;
   set(
     scope: PublicFilePublicationScope,
@@ -44,13 +51,16 @@ export interface PublicFileStopTaskKey extends PublicFilePublicationScope {
 }
 
 export interface PublicFileStopTask extends PublicFileStopTaskKey {
+  /** Absent for legacy tasks or a slug without a current local witness. */
+  publicationRevision?: string;
   failureCount: number;
 }
 
 /** Internal persistence only: callers own stop requests and startup scheduling. */
 export interface StopQueuePublicFilePublicationStore extends ProjectPublicFilePublicationStore {
-  /** Record initial failure (count 1); existing tasks, even exhausted ones, are unchanged. */
-  enqueueStop(key: PublicFileStopTaskKey): void;
+  /** Record initial failure (count 1). Only a matching current revision may replace
+   * an older intent; duplicate intents never reset their failure budget. */
+  enqueueStop(key: PublicFileStopTaskKey, expected?: PublicFilePublicationRevision): void;
   /** Detached snapshot including exhausted tasks for diagnostics; no raw errors are stored. */
   listStops(): ReadonlyArray<PublicFileStopTask>;
   /** One entry per retryable key for one startup pass; no retries are executed here. */
@@ -62,6 +72,13 @@ export interface StopQueuePublicFilePublicationStore extends ProjectPublicFilePu
 }
 
 const MAX_STOP_FAILURES = 5;
+
+function readStopTasks(rows: unknown[]): PublicFileStopTask[] {
+  return (rows as Array<PublicFileStopTask & { publicationRevision: string | null }>).map((row) => {
+    const { publicationRevision, ...task } = row;
+    return publicationRevision == null ? task : { ...task, publicationRevision };
+  });
+}
 
 function stopTaskValues(key: PublicFileStopTaskKey): [string, string, string, string, string] {
   return [key.resourceTeamId, key.ownerMemberId, key.projectId, key.filePath, key.slug];
@@ -83,6 +100,7 @@ export function migratePublicFilePublications(db: SqliteDb): void {
       file_name TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
+      revision TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path)
     );
     CREATE TABLE IF NOT EXISTS public_file_stop_queue (
@@ -92,9 +110,18 @@ export function migratePublicFilePublications(db: SqliteDb): void {
       file_path TEXT NOT NULL,
       slug TEXT NOT NULL,
       failure_count INTEGER NOT NULL CHECK (failure_count BETWEEN 1 AND 5),
+      publication_revision TEXT,
       PRIMARY KEY (resource_team_id, owner_member_id, project_id, file_path, slug)
     );
   `);
+  const stopColumns = db.prepare('PRAGMA table_info(public_file_stop_queue)').all() as Array<{ name: string }>;
+  if (!stopColumns.some(column => column.name === 'publication_revision')) {
+    db.exec('ALTER TABLE public_file_stop_queue ADD COLUMN publication_revision TEXT');
+  }
+  const columns = db.prepare('PRAGMA table_info(public_file_publications)').all() as Array<{ name: string }>;
+  if (!columns.some(column => column.name === 'revision')) {
+    db.exec("ALTER TABLE public_file_publications ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 function scopeKey(scope: PublicFilePublicationScope): string {
@@ -118,12 +145,28 @@ export function createInMemoryPublicFilePublicationStore(): StopQueuePublicFileP
     scope: PublicFilePublicationScope;
     publication: PublicFilePublication;
     publishedAt: number;
+    revision: string;
   }>();
   return {
-    enqueueStop(key) {
+    getRevision(scope) {
+      const entry = publications.get(scopeKey(scope));
+      return entry ? { slug: entry.publication.slug, token: entry.revision } : null;
+    },
+    deleteIfRevisionMatches(scope, expected) {
+      const key = scopeKey(scope);
+      const entry = publications.get(key);
+      if (!entry || entry.publication.slug !== expected.slug || entry.revision !== expected.token) return false;
+      return publications.delete(key);
+    },
+    enqueueStop(key, expected) {
       const id = stopTaskKey(key);
-      if (!stopTasks.has(id)) {
+      const current = publications.get(scopeKey(key));
+      if (expected && (expected.slug !== key.slug || current?.publication.slug !== key.slug
+        || current.revision !== expected.token)) return;
+      const existing = stopTasks.get(id);
+      if (!existing || (expected && existing.publicationRevision !== expected.token)) {
         stopTasks.set(id, {
+          ...(current?.publication.slug === key.slug ? { publicationRevision: current.revision } : {}),
           resourceTeamId: key.resourceTeamId,
           ownerMemberId: key.ownerMemberId,
           projectId: key.projectId,
@@ -158,6 +201,7 @@ export function createInMemoryPublicFilePublicationStore(): StopQueuePublicFileP
         scope: { ...scope },
         publication,
         publishedAt: Date.now(),
+        revision: randomUUID(),
       });
     },
     delete: (scope) => {
@@ -194,14 +238,15 @@ export function createSqlitePublicFilePublicationStore(
   const upsertRow = db.prepare(`
     INSERT INTO public_file_publications
       (resource_team_id, owner_member_id, project_id, file_path,
-       url, slug, file_name, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       url, slug, file_name, created_at, updated_at, revision)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(resource_team_id, owner_member_id, project_id, file_path)
     DO UPDATE SET
       url = excluded.url,
       slug = excluded.slug,
       file_name = excluded.file_name,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      revision = excluded.revision
   `);
   const deleteRow = db.prepare(`
     DELETE FROM public_file_publications
@@ -221,19 +266,52 @@ export function createSqlitePublicFilePublicationStore(
     cancelPersonalCommentRelayOutbox(db, scope);
   });
 
+  const selectRevision = db.prepare(`SELECT slug, revision AS token FROM public_file_publications
+    WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ?`);
+  const deleteRevision = db.prepare(`DELETE FROM public_file_publications
+    WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ?
+    AND slug = ? AND revision = ?`);
+  const deleteRevisionAndCancelOutbox = db.transaction((
+    scope: PublicFilePublicationScope,
+    expected: PublicFilePublicationRevision,
+  ): boolean => {
+    const removed = deleteRevision.run(
+      scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath,
+      expected.slug, expected.token,
+    ).changes === 1;
+    // A stale stop owns neither the current publication nor its relay intents.
+    // Cancellation failure rolls back the witness deletion, and re-publication
+    // cannot interleave between the CAS and cancellation of pre-stop rows.
+    if (removed) cancelPersonalCommentRelayOutbox(db, scope);
+    return removed;
+  });
   // Independent of publications/projects: replacement slugs and local deletion
   // must not erase an outstanding remote stop, including exhausted diagnostics.
   const stopSelect = `SELECT resource_team_id AS resourceTeamId,
     owner_member_id AS ownerMemberId, project_id AS projectId,
-    file_path AS filePath, slug, failure_count AS failureCount
+    file_path AS filePath, slug, failure_count AS failureCount, publication_revision AS publicationRevision
     FROM public_file_stop_queue`;
   const selectStops = db.prepare(stopSelect);
   const selectRetryableStops = db.prepare(`${stopSelect} WHERE failure_count < ?`);
   const enqueueStop = db.prepare(`
     INSERT INTO public_file_stop_queue
-      (resource_team_id, owner_member_id, project_id, file_path, slug, failure_count)
-    VALUES (?, ?, ?, ?, ?, 1)
+      (resource_team_id, owner_member_id, project_id, file_path, slug, failure_count, publication_revision)
+    VALUES (?, ?, ?, ?, ?, 1, (SELECT revision FROM public_file_publications
+      WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ? AND file_path = ? AND slug = ?))
     ON CONFLICT(resource_team_id, owner_member_id, project_id, file_path, slug) DO NOTHING
+  `);
+  // INSERT SELECT makes checking the current witness and replacing only the
+  // superseded intent a single atomic statement, including across DB handles.
+  const enqueueCurrentStop = db.prepare(`
+    INSERT INTO public_file_stop_queue
+      (resource_team_id, owner_member_id, project_id, file_path, slug, failure_count, publication_revision)
+    SELECT resource_team_id, owner_member_id, project_id, file_path, slug, 1, revision
+      FROM public_file_publications
+      WHERE resource_team_id = ? AND owner_member_id = ? AND project_id = ?
+        AND file_path = ? AND slug = ? AND revision = ?
+    ON CONFLICT(resource_team_id, owner_member_id, project_id, file_path, slug)
+    DO UPDATE SET failure_count = 1, publication_revision = excluded.publication_revision
+      WHERE public_file_stop_queue.publication_revision IS NOT excluded.publication_revision
   `);
   const failStop = db.prepare(`UPDATE public_file_stop_queue
     SET failure_count = failure_count + 1 WHERE resource_team_id = ? AND owner_member_id = ?
@@ -242,9 +320,18 @@ export function createSqlitePublicFilePublicationStore(
     AND owner_member_id = ? AND project_id = ? AND file_path = ? AND slug = ?`);
 
   return {
-    enqueueStop(key) { enqueueStop.run(...stopTaskValues(key)); },
-    listStops() { return selectStops.all() as PublicFileStopTask[]; },
-    listRetryableStops() { return selectRetryableStops.all(MAX_STOP_FAILURES) as PublicFileStopTask[]; },
+    getRevision(scope) {
+      return selectRevision.get(scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath) as PublicFilePublicationRevision | undefined ?? null;
+    },
+    deleteIfRevisionMatches(scope, expected) {
+      return deleteRevisionAndCancelOutbox(scope, expected);
+    },
+    enqueueStop(key, expected) {
+      if (!expected) enqueueStop.run(...stopTaskValues(key), ...stopTaskValues(key));
+      else if (expected.slug === key.slug) enqueueCurrentStop.run(...stopTaskValues(key), expected.token);
+    },
+    listStops() { return readStopTasks(selectStops.all()); },
+    listRetryableStops() { return readStopTasks(selectRetryableStops.all(MAX_STOP_FAILURES)); },
     recordStopFailure(key) { failStop.run(...stopTaskValues(key), MAX_STOP_FAILURES); },
     completeStop(key) { completeStop.run(...stopTaskValues(key)); },
     get(scope) {
@@ -288,6 +375,7 @@ export function createSqlitePublicFilePublicationStore(
         publication.fileName,
         timestamp,
         timestamp,
+        randomUUID(),
       );
     },
     delete(scope) {
@@ -297,4 +385,106 @@ export function createSqlitePublicFilePublicationStore(
       deletePublicationAndCancelOutbox(scope);
     },
   };
+}
+
+/**
+ * Prepare an operation bound to the queued resource team AND member. Return null
+ * when capability/identity is unavailable; never resolve to a different account.
+ * Preparation must not send the stop request. The returned operation must retain
+ * the verified credentials rather than consulting mutable current-account state.
+ */
+interface PreparedPublicFileStop {
+  resourceTeamId: string;
+  ownerMemberId: string;
+  stop(): Promise<void>;
+}
+
+export type PreparePublicFileStop = (
+  key: Readonly<PublicFileStopTaskKey>,
+) => Promise<PreparedPublicFileStop | null>;
+
+interface PublicFileStopStartupResult {
+  stopped: number;
+  failed: number;
+  deferred: number;
+  persistenceFailures: number;
+}
+
+/** One pass per daemon lifecycle, not per route registration or request. */
+export function createPublicFileStopStartup(
+  store: StopQueuePublicFilePublicationStore,
+  prepare: PreparePublicFileStop | null,
+  mutations?: PublicFileMutations,
+): () => Promise<PublicFileStopStartupResult> {
+  let started: Promise<PublicFileStopStartupResult> | undefined;
+  return () => started ??= Promise.resolve().then(async () => {
+    const result = { stopped: 0, failed: 0, deferred: 0, persistenceFailures: 0 };
+    const seen = new Set<string>();
+    const processTask = async (task: PublicFileStopTask): Promise<void> => {
+      const key: PublicFileStopTaskKey = {
+        resourceTeamId: task.resourceTeamId,
+        ownerMemberId: task.ownerMemberId,
+        projectId: task.projectId,
+        filePath: task.filePath,
+        slug: task.slug,
+      };
+      const id = stopTaskKey(key);
+      if (seen.has(id)) return;
+      seen.add(id);
+      const stillOwnsTask = () => {
+        const currentTask = store.listStops().find(item => stopTaskKey(item) === id);
+        if (!currentTask || currentTask.publicationRevision !== task.publicationRevision
+          || currentTask.failureCount !== task.failureCount) return false;
+        const current = store.getRevision(key);
+        // Legacy tasks can retry orphaned slugs, but never claim a live witness.
+        return !current || (current.slug === task.slug
+          && current.token === task.publicationRevision);
+      };
+      if (!stillOwnsTask()) { result.deferred++; return; }
+      let operation: PreparedPublicFileStop | null = null;
+      try { operation = await prepare?.(Object.freeze(key)) ?? null; } catch { /* No verified operation. */ }
+      if (!operation
+        || operation.resourceTeamId !== key.resourceTeamId
+        || operation.ownerMemberId !== key.ownerMemberId
+        || !stillOwnsTask()) {
+        result.deferred++;
+        return;
+      }
+      let failed = false;
+      try { await operation.stop(); } catch { failed = true; }
+      // Persistence errors must not masquerade as network failures or success.
+      try {
+        if (!stillOwnsTask()) {
+          result.deferred++;
+          return;
+        }
+        if (failed) {
+          store.recordStopFailure(key);
+          result.failed++;
+        } else {
+          const current = store.getRevision(key);
+          if (current && (task.publicationRevision === undefined
+            || !store.deleteIfRevisionMatches(key, { slug: task.slug, token: task.publicationRevision }))) {
+            result.deferred++;
+            return;
+          }
+          store.completeStop(key);
+          result.stopped++;
+        }
+      } catch {
+        result.persistenceFailures++;
+      }
+    };
+    for (const task of store.listRetryableStops()) {
+      try {
+        if (mutations) await mutations.run(task.projectId, () => processTask(task));
+        else await processTask(task);
+      } catch {
+        // A failed ownership read must neither send an unverified stop nor
+        // abort unrelated tasks. Preserve the task and its network budget.
+        result.persistenceFailures++;
+      }
+    }
+    return result;
+  });
 }

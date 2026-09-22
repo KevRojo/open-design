@@ -16,6 +16,7 @@ import type {
   WorkspaceCollabContext,
 } from '@open-design/contracts';
 import { CollabCloudError, type CollabCloudClient } from '../integrations/collab-cloud.js';
+import type { SyncedCommentMergeResult } from '../db.js';
 import type { WorkspaceContextProvider } from './workspace-context.js';
 import type { CommentRelayScope } from './comment-relay-scope.js';
 import type {
@@ -64,6 +65,41 @@ export interface CollabCloudServiceDeps {
     projectId: string,
     context: WorkspaceCollabContext,
   ) => ReadonlySet<string>;
+  /**
+   * Where a comment we already store lives, by project AND comment id.
+   *
+   * A deletion arriving from the cloud carries no anchor: there is nothing left
+   * to point at. The personal path filters incoming records by `filePath`, so a
+   * tombstone matches nothing and is dropped — while the cursor still advances
+   * past it. The deletion is then unreachable forever, and the local copy keeps
+   * a comment the author deleted on the web.
+   *
+   * Resolving the stored record's own `filePath` is what lets a tombstone be
+   * judged by the same publication rules as the comment it deletes, instead of
+   * by an anchor it cannot have.
+   *
+   * Contract, and each clause is load-bearing:
+   * - BOTH ids are required. Matching on comment id alone would let one
+   *   project's deletion reach another project's row.
+   * - `found: false` means the row is genuinely absent — a safe no-op.
+   * - A failed lookup MUST throw. It must never be reported as absence: that
+   *   would turn "the database did not answer" into "there is nothing to
+   *   delete", and the batch would be acknowledged with the deletion lost.
+   * - Only the stored path is returned. The comment's own content stays out of
+   *   this seam; the caller is deciding eligibility, not reading the comment.
+   */
+  resolveStoredCommentLocation?: (
+    projectId: string,
+    commentId: string,
+  ) => { found: false } | { found: true; filePath: string | null };
+  /** Resolve a server-asserted publication identity to a currently published local path.
+   * null is an unknown/stopped alias; errors retain the batch cursor for retry.
+   * This does not authorize a merge: existing identity/file checks still apply.
+   */
+  resolvePublishedCommentSourcePath?: (input: {
+    projectId: string; publicationSlug: string; publishedPath: string;
+    context: WorkspaceCollabContext;
+  }) => string | null;
   /** Local binding witness captured synchronously when the mutation commits. */
   resolveLocalProjectRelayBinding?: (projectId: string) => {
     workspaceId: string;
@@ -89,13 +125,13 @@ export interface CollabCloudServiceDeps {
   resolveLocalConversationId: (projectId: string) => string | null;
   /**
    * Merge one pulled comment into local storage, idempotently by comment id.
-   * Returns true when a new row was inserted (false when it already existed).
+   * Acknowledge changed or safely unchanged state; throw on persistence failure.
    */
   mergeComment: (input: {
     projectId: string;
     conversationId: string;
     comment: CollabCloudComment;
-  }) => boolean;
+  }) => SyncedCommentMergeResult;
   /** Poll cadence; defaults to the spec's foreground 5s (§D4.5). */
   pollIntervalMs?: number;
   /** Durable outbound Team-comment queue. Omitted by isolated/local callers. */
@@ -471,10 +507,16 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     identity: { teamId: string; memberId: string },
   ): Promise<void> {
     try {
+      // Recheck each publication-bound record immediately before network I/O:
+      // an earlier record may have awaited while stop/re-publish changed the witness.
+      if (record.publication && !deps.commentOutbox?.isPublicationCurrent?.(record)) {
+        deps.commentOutbox?.acknowledge(record);
+        return;
+      }
       const result = await deps.client.pushComment(
         identity.teamId,
         record.projectId,
-        record.comment,
+        record.publication ? { ...record.comment, filePath: record.publication.publicFilePath } : record.comment,
       );
       // Revision-conditional ACK: if an edit/delete was queued while this
       // payload was in flight, its newer row remains for the next drain.
@@ -765,7 +807,7 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     // Personal relay eligibility is per published file. Re-check both the
     // principal and active publication set after the async transport returns:
     // an account/workspace switch or stop must never merge an in-flight reply.
-    let comments = result.comments;
+    const comments = result.comments;
     let responseIdentity = identity;
     if (identity.relayScope === 'personal') {
       const freshContext = await deps.resolveProjectWorkspaceContext?.(projectId, { fresh: true }) ?? null;
@@ -777,7 +819,8 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
         || freshIdentity.teamId !== identity.teamId
       ) return false;
       responseIdentity = freshIdentity;
-      comments = comments.filter((comment) => freshIdentity.allowedFilePaths!.has(comment.filePath));
+      // Apply per-record eligibility during sequential merging below: a later
+      // tombstone may target a row created earlier in this very response.
     }
     // Commit the result under the freshly-authoritative publication scope.
     // If the set changed while a conditional request was in flight, a 304 is
@@ -789,8 +832,45 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
       return true;
     }
     let inserted = 0;
-    for (const comment of comments) {
-      if (deps.mergeComment({ projectId, conversationId, comment })) inserted += 1;
+    for (const incoming of comments) {
+      let comment = incoming;
+      // Tombstones intentionally have no publication identity: their trusted
+      // project-scoped stored target remains the deletion authority below.
+      if (!incoming.deleted && 'publicationSlug' in incoming) {
+        const publicationSlug = incoming.publicationSlug;
+        if (typeof publicationSlug !== 'string' || !publicationSlug.trim()) {
+          throw new Error('Invalid server publication identity');
+        }
+        if (!deps.resolvePublishedCommentSourcePath) throw new Error('Publication mapping lookup is unavailable');
+        const filePath = deps.resolvePublishedCommentSourcePath({
+          projectId, publicationSlug, publishedPath: incoming.filePath,
+          context: requestContext,
+        });
+        if (filePath === null) continue;
+        comment = { ...incoming, filePath };
+      }
+      if (responseIdentity.relayScope === 'personal') {
+        const allowed = responseIdentity.allowedFilePaths!;
+        if (comment.deleted) {
+          // A tombstone has no authoritative anchor. Even when it carries a
+          // path, only the stored, project-scoped target can authorize deletion.
+          // Resolve here, after preceding records have actually persisted.
+          if (!deps.resolveStoredCommentLocation) {
+            throw new Error('Stored comment location lookup is unavailable');
+          }
+          const location = deps.resolveStoredCommentLocation(projectId, comment.id);
+          if (!location.found) continue; // Confirmed absence is a safe no-op.
+          if (!location.filePath) {
+            throw new Error('Stored comment location has no file path');
+          }
+          if (!allowed.has(location.filePath)) continue;
+        } else if (!allowed.has(comment.filePath)) continue;
+      }
+      const outcome = deps.mergeComment({ projectId, conversationId, comment });
+      if (outcome === 'changed') inserted += 1;
+      else if (outcome !== 'unchanged') {
+        throw new Error('Comment persistence did not acknowledge the pulled record');
+      }
     }
     etags.set(responseCursorKey, result.etag);
     cursors.set(responseCursorKey, result.latestSeq);
