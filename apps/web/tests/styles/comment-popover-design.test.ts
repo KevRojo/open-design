@@ -12,7 +12,11 @@ describe('floating comment card surface', () => {
       return declarations;
     };
     expect(values('.surface:global(.comment-popover)')).toMatchObject({ gap: '8px' });
-    expect(values('.surface > :global(.comment-popover-titlebar)')).toMatchObject({ margin: '0' });
+    expect(values('.surface > :global(.comment-popover-titlebar)')).toMatchObject({ margin: '0', gap: '7px' });
+    expect(values('.surface :global(.comment-popover-title)')).toMatchObject({ color: '#1F1F1F' });
+    for (const property of ['overflow', 'white-space', 'text-overflow', 'min-width']) {
+      expect(values('.surface :global(.comment-popover-title)')).not.toHaveProperty(property);
+    }
     expect(values('.surface > :global(.comment-popover-actions)')).toMatchObject({ 'margin-top': '0', gap: '6px' });
     expect(values('.surface :global(.comment-popover-actions-end)')).toMatchObject({ gap: '6px' });
     for (const property of ['flex-wrap', 'max-width', 'justify-content']) {

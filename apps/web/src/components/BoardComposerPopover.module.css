@@ -16,6 +16,11 @@
 
 .surface > :global(.comment-popover-titlebar) {
   margin: 0;
+  gap: 7px;
+}
+
+.surface :global(.comment-popover-title) {
+  color: #1F1F1F;
 }
 
 .surface > :global(.comment-popover-actions) {

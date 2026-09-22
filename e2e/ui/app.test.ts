@@ -389,6 +389,13 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   const composerBody = floatingComposer.locator('.comment-popover-body');
   const composerActions = floatingComposer.locator('.comment-popover-actions');
   await expect(composerTitle).toHaveCSS('margin', '0px');
+  await expect(composerTitle).toHaveCSS('gap', '7px');
+  const titleLabel = composerTitle.locator('.comment-popover-title');
+  await expect(titleLabel).toHaveCSS('color', 'rgb(31, 31, 31)');
+  await expect(titleLabel).toHaveCSS('font-size', '12px');
+  await expect(titleLabel).toHaveCSS('font-weight', '600');
+  await expect(titleLabel).toHaveCSS('text-overflow', 'ellipsis');
+  await expect(titleLabel).toHaveCSS('white-space', 'nowrap');
   await expect(composerActions).toHaveCSS('margin-top', '0px');
   await expect(composerActions).toHaveCSS('gap', '6px');
   await expect(composerActions).toHaveCSS('flex-wrap', 'wrap');
