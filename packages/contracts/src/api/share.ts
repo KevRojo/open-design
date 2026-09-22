@@ -1480,3 +1480,43 @@ export interface SharePublishedLink {
 export type SharePublishResponse =
   | ({ status: 'published'; receipt: SharePublishReceipt } & SharePublishedLink)
   | { status: 'binding_pending'; receipt: SharePublishReceipt; binding: SharePublishBindingPending };
+
+/**
+ * Has this project ever been shared — as opposed to being shared right now?
+ *
+ * Derived from the BINDING, not from the local publication row.
+ *
+ * ## Why the local row cannot answer it
+ *
+ * Stopping a share deletes the daemon's publication record: that row is a
+ * cache of "what we last published", and once the share is stopped there is
+ * nothing being served for it to describe. So locally, `stopped` and
+ * `never shared` look identical — both are an absent row.
+ *
+ * The binding is the opposite: stop sets it to `stopped` rather than removing
+ * it, precisely so the same slug can resume. A binding that exists in ANY
+ * status is therefore proof the project was shared at some point, and that is
+ * the only place that proof lives.
+ *
+ * ## What must not stand in for it
+ *
+ * - **An empty publication list** — that is the stopped case as well as the
+ *   never case.
+ * - **An absent or empty share URL** — same collapse, one layer up.
+ * - **`status === 'none'`** — `none` means "no share is active", which is
+ *   true of a stopped share too.
+ *
+ * Each of those reads "stopped" as "never", and every feature built on that
+ * reading will re-offer a first-time experience to someone who already shared
+ * this project and deliberately stopped.
+ *
+ * ## No new field
+ *
+ * This is a question answered by data that already exists. A separate
+ * `hasEverShared` column would be a second truth to keep in sync with the
+ * binding, and the two would disagree the first time one of them was written
+ * without the other.
+ */
+export function hasEverShared(input: { bindingExists: boolean }): boolean {
+  return input.bindingExists;
+}
