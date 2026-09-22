@@ -23,7 +23,7 @@ inputs:
     required: false
     default: 'false'
   install-profile:
-    description: Dependency installation boundary (workspace|source-web|release-executor|mac-runtime)
+    description: Dependency installation boundary (workspace|source-web|release-executor|release-tools|release-validation|mac-runtime)
     required: false
     default: 'workspace'
   postinstall-intent:
@@ -64,7 +64,7 @@ runs:
       run: |
         case "$INSTALL_PROFILE" in
           workspace) ;;
-          source-web|release-executor|mac-runtime)
+          source-web|release-executor|release-tools|release-validation|mac-runtime)
             if [ "${{ inputs.cache-tools }}" = "true" ]; then
               echo "$INSTALL_PROFILE install profile cannot cache the full workspace tool closure" >&2
               exit 1
@@ -207,6 +207,24 @@ runs:
         --filter @open-design/tools-pack...
         --filter @open-design/tools-release...
 
+    - name: '[prepare] Release tool dependencies'
+      if: ${{ (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'release-tools' }}
+      shell: bash
+      run: >-
+        pnpm install --frozen-lockfile --ignore-scripts
+        --filter @open-design/tools-release...
+
+    - name: '[prepare] Release validation dependencies'
+      if: ${{ (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'release-validation' }}
+      shell: bash
+      run: >-
+        pnpm install --frozen-lockfile --ignore-scripts
+        --filter @open-design/e2e...
+        --filter @open-design/tools-dev...
+        --filter @open-design/tools-pack...
+        --filter @open-design/tools-release...
+        --filter @open-design/tools-serve...
+
     - name: '[prepare] macOS runtime product dependencies'
       if: ${{ (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'mac-runtime' }}
       shell: bash
@@ -218,14 +236,14 @@ runs:
         --filter @open-design/daemon...
 
     - name: '[prepare] Workspace restore support'
-      if: ${{ inputs.postinstall-intent == '' && (inputs.install-profile == 'source-web' || inputs.install-profile == 'release-executor' || inputs.install-profile == 'mac-runtime') }}
+      if: ${{ inputs.postinstall-intent == '' && inputs.install-profile != 'workspace' }}
       shell: bash
       run: >-
         pnpm --filter '@open-design/download...'
         --workspace-concurrency=1 --if-present run build
 
     - name: '[prepare] Planned workspace restore support'
-      if: ${{ inputs.postinstall-intent != '' && (steps.postinstall-plan.outputs.install-profile == 'source-web' || steps.postinstall-plan.outputs.install-profile == 'release-executor' || steps.postinstall-plan.outputs.install-profile == 'mac-runtime') }}
+      if: ${{ inputs.postinstall-intent != '' && steps.postinstall-plan.outputs.install-profile != 'workspace' }}
       shell: bash
       env:
         OPEN_DESIGN_POSTINSTALL_ENTRY: build

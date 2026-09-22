@@ -1509,11 +1509,6 @@ jobs:
           ref: ${{ needs.metadata.outputs.commit }}
           # Shallow — see the metadata job's checkout for why.
           fetch-depth: 1
-      # The artifact downloads below run on the runner's own Node, and the pnpm
-      # toolchain this job actually uses is set up further down, right before
-      # `pnpm install`. The Setup Node.js that used to sit here was a second,
-      # redundant copy of that one — it paid for its own post-job step and
-      # bought nothing.
       - name: Download mac prerelease publish manifest
         uses: actions/download-artifact@v8
         with:
@@ -1530,18 +1525,11 @@ jobs:
         with:
           name: open-design-prerelease-win-x64-publish-manifest
           path: ${{ runner.temp }}/release-platform-manifests
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Setup release publisher
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          postinstall-intent: release-publish
+          save-pnpm-cache: ${{ env.PRERELEASE_SAVE_PNPM_CACHE }}
 
       - name: Prepare and publish prerelease release notes
         env:
@@ -1673,19 +1661,11 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
           fetch-depth: 1
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Setup release validation
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      # tools-pack resolves electron and electron-builder on every subcommand,
-      # not just `build`, so the workspace install is required even though this
-      # job packages nothing.
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          postinstall-intent: release-validation
+          save-pnpm-cache: ${{ env.PRERELEASE_SAVE_PNPM_CACHE }}
       - name: Stage published mac arm64 dmg
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_arm64/build.json
@@ -1754,16 +1734,11 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
           fetch-depth: 1
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Setup release validation
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          postinstall-intent: release-validation
+          save-pnpm-cache: ${{ env.PRERELEASE_SAVE_PNPM_CACHE }}
       - name: Stage published mac intel dmg
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json
@@ -1831,16 +1806,11 @@ jobs:
         with:
           ref: ${{ needs.metadata.outputs.commit }}
           fetch-depth: 1
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+      - name: Setup release validation
+        uses: ./.github/actions/setup-workspace
         with:
-          version: 10.33.2
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          postinstall-intent: release-validation
+          save-pnpm-cache: ${{ env.PRERELEASE_SAVE_PNPM_CACHE }}
       - name: Stage published windows installer
         env:
           BUILD_JSON_PATH: ${{ runner.temp }}\release-build\win_x64\build.json

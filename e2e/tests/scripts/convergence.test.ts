@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1221,6 +1222,36 @@ print("snapshot and candidate binding passed")
       expect(config.workflows.ci.workloads[entry.workload].inputs).toEqual(["suite://ui-runtime"]);
       expect(config.workflows.ci.workloads[entry.workload].reusable).toBe(true);
     }
+  });
+
+  test("keeps the balanced OD Next server partitions on separate daemon shards", () => {
+    const daemonRoot = path.join(repoRoot, "apps", "daemon");
+    const collectTests = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
+      .flatMap((entry) => {
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) return collectTests(absolute);
+        return /\.test\.(?:[cm]?js|tsx?)$/.test(entry.name) ? [absolute] : [];
+      });
+    const ranked = collectTests(path.join(daemonRoot, "tests"))
+      .map((file) => `/${path.relative(daemonRoot, file).split(path.sep).join("/")}`)
+      .map((file) => ({ file, hash: createHash("sha1").update(file).digest("hex") }))
+      .sort((left, right) => left.hash.localeCompare(right.hash));
+    const shardCount = 4;
+    const baseSize = Math.floor(ranked.length / shardCount);
+    const remainder = ranked.length % shardCount;
+    const partitionShards = new Map<string, number>();
+    let offset = 0;
+    for (let shard = 1; shard <= shardCount; shard += 1) {
+      const size = baseSize + (shard <= remainder ? 1 : 0);
+      for (const { file } of ranked.slice(offset, offset + size)) {
+        if (file.includes("/od-next-automatic-simple-server-partition-")) {
+          partitionShards.set(file, shard);
+        }
+      }
+      offset += size;
+    }
+    expect(partitionShards.size).toBe(4);
+    expect(new Set(partitionShards.values())).toEqual(new Set([1, 2, 3, 4]));
   });
 
   test("includes postinstall plan controls in formal release workload identities", () => {

@@ -275,6 +275,22 @@ describe("postinstall script contract", () => {
       expect(plan.resolvedTargets).toEqual(expect.arrayContaining(["packages/release", "tools/pack"]));
       expect(typeof plan.digest).toBe("string");
 
+      const exactInstallProfiles: Record<string, string> = {
+        "release-control": "release-tools",
+        "release-publish": "release-tools",
+        "release-validation": "release-validation",
+      };
+      for (const [intent, installProfile] of Object.entries(exactInstallProfiles)) {
+        const result = spawnSync("python3", [
+          workflowPostinstallPath,
+          "plan",
+          "--intent", intent,
+          "--output", output,
+        ], { cwd: workspaceRoot, encoding: "utf8" });
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(readFileSync(output, "utf8")).installProfile).toBe(installProfile);
+      }
+
       const exactWorkflowTargets: Record<string, string[] | "all"> = {
         "release-smoke": ["tools/pack", "tools/serve"],
         "ci-workspace-unit": "all",

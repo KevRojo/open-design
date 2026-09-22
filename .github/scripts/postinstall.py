@@ -13,7 +13,14 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-INSTALL_PROFILES = {"workspace", "source-web", "release-executor", "mac-runtime"}
+INSTALL_PROFILES = {
+    "workspace",
+    "source-web",
+    "release-executor",
+    "release-tools",
+    "release-validation",
+    "mac-runtime",
+}
 
 
 def canonical_json(value: Any) -> str:

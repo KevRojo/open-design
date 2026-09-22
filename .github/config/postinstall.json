@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "intents": {
     "release-control": {
-      "installProfile": "workspace",
+      "installProfile": "release-tools",
       "requestedTargets": ["tools/release"]
     },
     "shared-javascript": {
@@ -30,7 +30,7 @@
       "requestedTargets": "all"
     },
     "release-publish": {
-      "installProfile": "workspace",
+      "installProfile": "release-tools",
       "requestedTargets": ["tools/release"]
     },
     "test-web": {
@@ -54,7 +54,7 @@
       "requestedTargets": ["tools/dev", "tools/pack"]
     },
     "release-validation": {
-      "installProfile": "workspace",
+      "installProfile": "release-validation",
       "requestedTargets": ["packages/contracts", "tools/dev", "tools/pack", "tools/release", "tools/serve"]
     },
     "release-smoke": {

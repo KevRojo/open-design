@@ -217,7 +217,14 @@ function complexCapabilitySnapshot(): OdNextRuntimeCapabilitySnapshotV1 {
   };
 }
 
-describe('OD Next automatic production through the real server', () => {
+export function registerOdNextAutomaticSimpleServerTests(activePartition: number): void {
+  const inactiveTest = new Proxy(() => undefined, {
+    apply: () => inactiveTest,
+    get: () => inactiveTest,
+  }) as unknown as typeof it;
+  const partitionIt = (partition: number): typeof it => partition === activePartition ? it : inactiveTest;
+
+  describe('OD Next automatic production through the real server', () => {
   let started: StartedServer | null = null;
   let binDir: string | null = null;
   let sequence = 0;
@@ -257,7 +264,7 @@ describe('OD Next automatic production through the real server', () => {
     }
   });
 
-  it('isolates host CLI probes while retaining real selected Codex detection and preflight', async () => {
+  partitionIt(2)('isolates host CLI probes while retaining real selected Codex detection and preflight', async () => {
     const hostRoot = await mkdtemp(path.join(os.tmpdir(), 'od-next-controlled-host-'));
     const hostBinDir = path.join(hostRoot, 'bin');
     const hostHome = path.join(hostRoot, 'home');
@@ -358,7 +365,7 @@ process.exit(127);
     }
   });
 
-  it.each(['intent-question', 'intent-request', 'intent-first-write', 'intent-fail'] as const)(
+  partitionIt(1).each(['intent-question', 'intent-request', 'intent-first-write', 'intent-fail'] as const)(
     'OPEND-2623 real server: %s uses one native intent supplement and retains source ownership',
     async (mode) => {
       const productionPreflight = vi.fn(() => EXECUTION_PREFLIGHT);
@@ -427,7 +434,7 @@ process.exit(127);
     },
   );
 
-  it('keeps off/observe public POST behavior ordinary and idempotent with zero strategy tasks', async () => {
+  partitionIt(4)('keeps off/observe public POST behavior ordinary and idempotent with zero strategy tasks', async () => {
     const fixture = await createPublicRolloutFixture('inert');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -471,7 +478,7 @@ process.exit(127);
     expect(researchContract).toContain('Run the ordinary public fixture.');
   });
 
-  it('runs the selected official example on the ordinary route without pinning it to the project', async () => {
+  partitionIt(3)('runs the selected official example on the ordinary route without pinning it to the project', async () => {
     const fixture = await createPublicRolloutFixture('selected-example-ordinary', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -539,7 +546,7 @@ process.exit(127);
     expect(invocations[0]?.stdin).not.toContain('克制的 COO');
   });
 
-  it('lets a verified example replace an existing automatic-default pin for only the current run', async () => {
+  partitionIt(1)('lets a verified example replace an existing automatic-default pin for only the current run', async () => {
     const fixture = await createPublicRolloutFixture('selected-example-upgrade', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -650,7 +657,7 @@ process.exit(127);
     expect(fallbackInvocations[0]?.stdin).not.toContain('克制的 COO');
   });
 
-  it('does not reuse an automatic-default pin when the bound example identity is stale', async () => {
+  partitionIt(3)('does not reuse an automatic-default pin when the bound example identity is stale', async () => {
     const fixture = await createPublicRolloutFixture('stale-selected-example', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -762,7 +769,7 @@ process.exit(127);
   // variable — that is what "configure it and it takes effect" has to mean for
   // a packaged install, where the saved mode is the only control a user has:
   // the packaged child environment allowlist carries no `OD_NEXT_*` key.
-  it('runs OD Next by default and leaves it on the next run once the installation opts out', async () => {
+  partitionIt(3)('runs OD Next by default and leaves it on the next run once the installation opts out', async () => {
     const fixture = await createPublicRolloutFixture('app-config-opt-out', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -844,7 +851,7 @@ process.exit(127);
     // slow runner.
   }, 60_000);
 
-  it('keeps the automatic route when a named Skill cannot be resolved', async () => {
+  partitionIt(2)('keeps the automatic route when a named Skill cannot be resolved', async () => {
     const fixture = await createPublicRolloutFixture('prestart-skill-fallback', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -877,7 +884,7 @@ process.exit(127);
     expect(canceled.status).toBe(200);
   });
 
-  it('rolls back automatic task preparation and reclaims once through the ordinary default', async () => {
+  partitionIt(1)('rolls back automatic task preparation and reclaims once through the ordinary default', async () => {
     const fixture = await createPublicRolloutFixture('preclaim-task-fallback', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -931,7 +938,7 @@ process.exit(127);
     }
   });
 
-  it('routes the four approved automatic profiles while ordinary Image remains media-only', async () => {
+  partitionIt(1)('routes the four approved automatic profiles while ordinary Image remains media-only', async () => {
     const fixture = await createPublicRolloutFixture('approved-profiles', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1264,7 +1271,7 @@ process.exit(127);
     await waitForRunTerminal(started.url, explicitImageRun.runId as string);
   });
 
-  it('keeps legacy automatic scenario bindings eligible for OD Next', async () => {
+  partitionIt(4)('keeps legacy automatic scenario bindings eligible for OD Next', async () => {
     const fixture = await createPublicRolloutFixture('legacy-scenario-compat', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1302,7 +1309,7 @@ process.exit(127);
     await waitForRunTerminal(started.url, created.runId as string);
   });
 
-  it('binds adapter-family capability facts for an unrecognized new CLI version', async () => {
+  partitionIt(2)('binds adapter-family capability facts for an unrecognized new CLI version', async () => {
     const agentCliVersion = 'codex-cli 99.0.0-forward-compatible';
     const fixture = await createPublicRolloutFixture(
       'synthetic-planning-facts',
@@ -1349,7 +1356,7 @@ process.exit(127);
     expect(canceled.status).toBe(200);
   });
 
-  it('reports the deciding authority through the shared API and CLI, and offers no reset', async () => {
+  partitionIt(3)('reports the deciding authority through the shared API and CLI, and offers no reset', async () => {
     // This used to cover the instance stop latch and its compare-and-swap
     // reset. Both are gone: nothing but the saved mode turns OD Next off, so
     // there is no latch to inspect and no operator recovery to protect. What is
@@ -1429,7 +1436,7 @@ process.exit(127);
     expect(resetCli.stderr).toContain('od config set odNextStrategyMode off');
   });
 
-  it('keeps active retry/task recipe-only while rollback lazily resolves the ordinary default', async () => {
+  partitionIt(2)('keeps active retry/task recipe-only while rollback lazily resolves the ordinary default', async () => {
     const fixture = await createPublicRolloutFixture('rollback', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1518,7 +1525,7 @@ process.exit(127);
       .toBe(strategyTaskCountAtStart + 1);
   });
 
-  it('carries explicit Web and CLI Skills into the same automatic run', async () => {
+  partitionIt(4)('carries explicit Web and CLI Skills into the same automatic run', async () => {
     const fixture = await createPublicRolloutFixture('web-cli-skill-parity', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1598,7 +1605,7 @@ process.exit(127);
     expect(canceled.status).toBe(200);
   });
 
-  it('carries the Home-picked Skill persisted on the project into the Bundle', async () => {
+  partitionIt(2)('carries the Home-picked Skill persisted on the project into the Bundle', async () => {
     // The real Home flow: the @-mention is stored on the project row at create
     // time and the first run never names it again. That row is the third
     // branch of the old explicit-authority read, so it needs its own witness.
@@ -1656,7 +1663,7 @@ process.exit(127);
     expect(canceled.status).toBe(200);
   });
 
-  it('routes project context plugins through the ordinary default', async () => {
+  partitionIt(3)('routes project context plugins through the ordinary default', async () => {
     const fixture = await createPublicRolloutFixture('context-plugin-authority', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1691,7 +1698,7 @@ process.exit(127);
     await waitForRunTerminal(started.url, created.runId as string);
   });
 
-  it('binds an active headless request and its strategy Snapshot to the project conversation', async () => {
+  partitionIt(4)('binds an active headless request and its strategy Snapshot to the project conversation', async () => {
     const fixture = await createPublicRolloutFixture('headless-conversation', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1721,7 +1728,7 @@ process.exit(127);
     );
   });
 
-  it('rejects mapped-row deletion or legacy NULL final text without spawning an ordinary retry', async () => {
+  partitionIt(1)('rejects mapped-row deletion or legacy NULL final text without spawning an ordinary retry', async () => {
     const fixture = await createPublicRolloutFixture('persisted-task-tamper', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1774,7 +1781,7 @@ process.exit(127);
       .toBe(invocationCount);
   });
 
-  it('rejects task-to-Run scope drift without spawning a retry', async () => {
+  partitionIt(1)('rejects task-to-Run scope drift without spawning a retry', async () => {
     const fixture = await createPublicRolloutFixture('persisted-task-scope-drift', 'design');
     started = fixture.started;
     binDir = fixture.binDir;
@@ -1805,7 +1812,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(1);
   });
 
-  it('never overrides explicit plugin, snapshot, or existing project-pin authority', async () => {
+  partitionIt(2)('never overrides explicit plugin, snapshot, or existing project-pin authority', async () => {
     const fixture = await createPublicRolloutFixture(
       'authority',
       'design',
@@ -1941,7 +1948,7 @@ process.exit(127);
   // `internalRunCreation.start(...)` and never enter it. Every OD Next rate
   // computed per physical Run — volume, success, failure, cancellation,
   // duration — is therefore measured on the request stage alone.
-  it('installs the run analytics lifecycle on every physical Run of an automatic chain', async () => {
+  partitionIt(4)('installs the run analytics lifecycle on every physical Run of an automatic chain', async () => {
     const fixture = await createFixture('repair');
     const analyticsHeaders = {
       'x-od-analytics-device-id': 'device-opend-2365',
@@ -2006,7 +2013,7 @@ process.exit(127);
     // it captures, so three physical Runs settle well past the shared default.
   }, 90_000);
 
-  it('runs parsed plan -> serialization repair -> production after each source end and remains exactly-once across restart', async () => {
+  partitionIt(3)('runs parsed plan -> serialization repair -> production after each source end and remains exactly-once across restart', async () => {
     const fixture = await createFixture('repair');
     const sourcePdfAttachment = path.join(
       process.env.OD_DATA_DIR!,
@@ -2334,7 +2341,7 @@ process.exit(127);
     });
   });
 
-  it('keeps a completed task exactly-once across an exact retry and daemon restart', async () => {
+  partitionIt(2)('keeps a completed task exactly-once across an exact retry and daemon restart', async () => {
     const fixture = await createFixture('repair');
     const body = createRunRequest(fixture, 'Update the existing operator header.');
 
@@ -2379,7 +2386,7 @@ process.exit(127);
     });
   });
 
-  it('uses the canonical Web current turn as the implicit research query', async () => {
+  partitionIt(3)('uses the canonical Web current turn as the implicit research query', async () => {
     const fixture = await createFixture('repair');
     const repeatedQuery = 'REPEATED_CURRENT_QUERY_TOKEN';
     const priorTranscript = [
@@ -2415,7 +2422,7 @@ process.exit(127);
     expect(researchContract).not.toContain('## assistant');
   });
 
-  it('keeps a blocked production turn on its clean process exit instead of a failed Run', async () => {
+  partitionIt(4)('keeps a blocked production turn on its clean process exit instead of a failed Run', async () => {
     const fixture = await createFixture('repair');
     await writeFile(`${fixture.logPath}.blocked-production`, '1');
     queueFixtureIds(fixture);
@@ -2471,7 +2478,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(3);
   }, 90_000);
 
-  it("ends a refused planning turn as the agent's reply instead of a failed Run", async () => {
+  partitionIt(3)("ends a refused planning turn as the agent's reply instead of a failed Run", async () => {
     const fixture = await createFixture('repair');
     await writeFile(`${fixture.logPath}.refused-request`, '1');
     queueFixtureIds(fixture);
@@ -2520,7 +2527,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(1);
   }, 90_000);
 
-  it('blocks the durable task when the selected agent exits before publishing a session', async () => {
+  partitionIt(4)('blocks the durable task when the selected agent exits before publishing a session', async () => {
     const fixture = await createFixture('repair');
     await writeFile(`${fixture.logPath}.fail-start`, '1');
 
@@ -2546,7 +2553,7 @@ process.exit(127);
     });
   });
 
-  it('fails a mapped Run before live Skill staging when its frozen package row is missing', async () => {
+  partitionIt(2)('fails a mapped Run before live Skill staging when its frozen package row is missing', async () => {
     const fixture = await createFixture('repair');
     const body = createRunRequest(fixture, 'Do not fall back to a live Skill.');
     queueFixtureIds(fixture);
@@ -2568,7 +2575,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(invocationCount);
   });
 
-  it('fails a mapped Run before live Skill staging when its frozen package is tampered', async () => {
+  partitionIt(4)('fails a mapped Run before live Skill staging when its frozen package is tampered', async () => {
     const fixture = await createFixture('repair');
     const body = createRunRequest(fixture, 'Do not use a tampered Skill package.');
     queueFixtureIds(fixture);
@@ -2593,7 +2600,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(invocationCount);
   });
 
-  it.each([
+  partitionIt(2).each([
     { declaredEntry: true, childFile: 'plant-taxonomy-guide.html' },
     { declaredEntry: false, childFile: 'plant-taxonomy-guide.html' },
     { declaredEntry: false, childFile: 'index.html' },
@@ -2656,7 +2663,7 @@ process.exit(127);
     expect(resumed[1]!.argv).toContain('resume');
   });
 
-  it('does not report unfinished work when the task delivered under a stale plan', async () => {
+  partitionIt(1)('does not report unfinished work when the task delivered under a stale plan', async () => {
     // QA on project 3ffc55f1: the turn wrote its deliverable and OD Next
     // settled the task `completed`, but the agent's last plan snapshot still
     // showed pending items. The Run was stamped endedWithUnfinishedWork, so the
@@ -2693,7 +2700,7 @@ process.exit(127);
     expect(deliveredTurn!.strategyTaskDelivered).toBe(true);
   });
 
-  it('fails closed when daemon-owned execution preflight rejects', async () => {
+  partitionIt(4)('fails closed when daemon-owned execution preflight rejects', async () => {
     const fixture = await createFixture('repair');
     await stopServer(started);
     started = await startDaemon(async () => {
@@ -2717,7 +2724,7 @@ process.exit(127);
     });
   });
 
-  it('does not allocate a stale continuation when cancel wins during execution preflight', async () => {
+  partitionIt(3)('does not allocate a stale continuation when cancel wins during execution preflight', async () => {
     const fixture = await createFixture('repair');
     await stopServer(started);
     let enterResolver!: () => void;
@@ -2755,7 +2762,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(1);
   });
 
-  it('runs a verified complex package chain and requires normalized Child evidence', async () => {
+  partitionIt(1)('runs a verified complex package chain and requires normalized Child evidence', async () => {
     const capabilityResult = resolveBundledOdNextRuntimeCapability({
       agentId: 'codex',
       agentCliVersion: 'codex-cli 0.147.0',
@@ -2815,7 +2822,7 @@ process.exit(127);
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(2);
   });
 
-  it('binds native Claude Agents to complex Build Packages and completes from durable facts', async () => {
+  partitionIt(4)('binds native Claude Agents to complex Build Packages and completes from durable facts', async () => {
     const capabilityResult = resolveBundledOdNextRuntimeCapability({
       agentId: 'claude',
       agentCliVersion: '2.1.233 (Claude Code)',
@@ -2865,7 +2872,7 @@ process.exit(127);
     expect(persistedEvents).not.toContain('INTERNAL_CHILD_TOOL_OUTPUT');
   });
 
-  it.each(['cancel', 'normal'] as const)(
+  partitionIt(3).each(['cancel', 'normal'] as const)(
     'OPEND-2960 real server preserves child evidence through %s app-server close and archives once',
     async (mode) => {
       const fixture = await createFixture('repair');
@@ -3122,7 +3129,8 @@ process.exit(127);
       agentId: selectedAgentId,
     };
   }
-});
+  });
+}
 
 type CodexArchiveFrame = { pid: number; method: string; threadId?: string };
 async function readCodexArchiveFrames(file: string): Promise<CodexArchiveFrame[]> {
