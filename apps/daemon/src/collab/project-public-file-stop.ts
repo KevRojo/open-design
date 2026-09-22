@@ -1,4 +1,17 @@
+import type { ProjectDeleteShareResidual } from '@open-design/contracts';
 import type { PreparePublicFileStop, PublicFilePublicationScope, StopQueuePublicFilePublicationStore } from './public-file-publication-store.js';
+
+/** Internal handoff only: this error does not assert local deletion succeeded.
+ * The deletion owner must finish its local work before returning ok: true.
+ */
+export class ProjectPublicFileStopPendingError extends Error {
+  readonly shareResiduals: ReadonlyArray<ProjectDeleteShareResidual>;
+  constructor(residuals: ReadonlyArray<ProjectDeleteShareResidual>) {
+    super('PUBLIC_FILE_STOP_PENDING');
+    this.name = 'ProjectPublicFileStopPendingError';
+    this.shareResiduals = Object.freeze(residuals.map(item => Object.freeze({ ...item })));
+  }
+}
 
 /**
  * Stop the original owner's publications before allowing catalog/local deletion.
@@ -39,8 +52,24 @@ export function createProjectPublicFileStop(store: StopQueuePublicFilePublicatio
       if (store.deleteIfRevisionMatches(key, revision)) store.completeStop(key);
       else pending = true;
     }
-    if (pending || store.listByProject(scope).length > 0) {
-      throw new Error('PUBLIC_FILE_STOP_PENDING');
+    const remaining = store.listByProject(scope);
+    if (pending || remaining.length > 0) {
+      const retryable = store.listRetryableStops();
+      const residuals: ProjectDeleteShareResidual[] = remaining.map(file => {
+        const revision = store.getRevision({ ...scope, filePath: file.filePath });
+        return {
+          filePath: file.filePath,
+          slug: file.slug,
+          retrying: revision?.slug === file.slug && retryable.some(task =>
+            task.resourceTeamId === scope.resourceTeamId
+            && task.ownerMemberId === scope.ownerMemberId
+            && task.projectId === scope.projectId
+            && task.filePath === file.filePath
+            && task.slug === file.slug
+            && task.publicationRevision === revision.token),
+        };
+      });
+      throw new ProjectPublicFileStopPendingError(residuals);
     }
   };
 }
