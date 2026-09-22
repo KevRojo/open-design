@@ -435,7 +435,10 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(titleLabel).toHaveText(await titleLabel.getAttribute('title') ?? '');
   await test.info().attach('comment-composer-width-wide', { body: await page.screenshot(), contentType: 'image/png' });
   await page.setViewportSize({ width: 1280, height: 720 });
-  await expect.poll(async () => (await floatingComposer.boundingBox())?.width ?? 0).toBeLessThan(300);
+  await expect.poll(async () => {
+    const bounds = await floatingComposer.boundingBox();
+    return bounds !== null && bounds.width > 200 && bounds.width < 300;
+  }).toBe(true);
   const compactCard = await floatingComposer.boundingBox();
   expect(compactCard).not.toBeNull();
   expect(compactCard!.width).toBeGreaterThan(200);
@@ -551,6 +554,19 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toBeVisible();
 
   await expect(sidePanel.getByTestId('comment-side-item').filter({ hasText: 'Make the headline more specific.' }).first()).toBeVisible();
+  await page.getByTestId('comment-saved-marker-hero-title').getByRole('button').click();
+  await expect(floatingComposer).toBeVisible();
+  await expect(note).toHaveValue(multilineComment);
+  await expect(note).not.toHaveAttribute('readonly');
+  await expect(saveComment).toBeDisabled();
+  const editedComment = `${multilineComment}\nPreserve the existing layout.`;
+  await note.fill(editedComment);
+  await expect(saveComment).toBeEnabled();
+  await note.press('Enter');
+  await expect(floatingComposer).toHaveCount(0);
+  await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(1);
+  await expect(sidePanel.getByTestId('comment-side-item')).toContainText('Preserve the existing layout.');
+  await expect(page.getByTestId('comment-saved-marker-hero-title')).toHaveCount(1);
   await captureLane4CommentState(page, '06-panel-populated');
   await captureLane4CommentState(page, '06-author-self');
   // K6/K7/O1–O7/OP4 share the Owner-board sidebar shell (◇ provenance).
@@ -611,7 +627,7 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
       filePath?: string;
     }>;
   };
-  expect(body.message).toContain(multilineComment);
+  expect(body.message).toContain(editedComment);
   expect(body.commentAttachments).toEqual([
     expect.objectContaining({
       elementId: 'hero-title',
