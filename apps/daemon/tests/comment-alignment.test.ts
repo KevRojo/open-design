@@ -118,6 +118,15 @@ it('guards HTTP by project Owner and the real od CLI uses the same read-only act
     ], { env: { ...process.env, NODE_OPTIONS: '' }, timeout: 15000 });
     expect(JSON.parse(stdout)).toEqual({ state: 'unknown', reason: 'history_incomplete', latestSeq: 3 });
     expect(calls).toBe(2);
+    current = { ...context, workspaceMemberId: 'other' };
+    await expect(promisify(execFile)(process.execPath, [
+      fileURLToPath(new URL('../../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
+      fileURLToPath(new URL('../src/cli.ts', import.meta.url)),
+      'comment', 'align', 'p', '--daemon-url', base, '--json',
+    ], { env: { ...process.env, NODE_OPTIONS: '' }, timeout: 15000 })).rejects.toMatchObject({
+      stderr: expect.stringContaining('"code":"comment-align-rejected"'),
+    });
+    expect(calls).toBe(2);
   } finally { if (server.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 

@@ -514,7 +514,7 @@ async function runComment(args) {
       surfaceFetchError(error, base);
       process.exit(3);
     }
-    if (!response.ok) return structuredHttpFailure(response);
+    if (!response.ok) return structuredHttpFailure(response, 'comment-align-rejected');
     const payload = await response.json();
     if (flags.json) return process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
     console.log(`[comment] align ${payload.state}${payload.reason ? ` (${payload.reason})` : ''}`);
