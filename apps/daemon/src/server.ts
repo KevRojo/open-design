@@ -5171,7 +5171,7 @@ export async function startServer({
   // conflict, and `tsc` did not object — only esbuild did, at transform time.
   const retryPublicFileStopsAtStartup = createPublicFileStopStartup(
     publicFilePublicationStore,
-    createVelaPublicFileStop({ configuredEnv: configuredAmrEnv }),
+    createVelaPublicFileStop({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
     publicFileMutations,
   );
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
@@ -8593,7 +8593,7 @@ export async function startServer({
   const projectCreatePreparationTimeoutMs = projectCreatePreparationTimeoutMsFromEnv();
   const stopProjectPublicFiles = createProjectPublicFileStop(
     publicFilePublicationStore,
-    createVelaPublicFileStop({ configuredEnv: configuredAmrEnv }),
+    createVelaPublicFileStop({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
   );
   registerProjectRoutes(app, {
     db,
