@@ -43,6 +43,11 @@ export function createPublicSharePublishingFixture(
           cloud.set(scope.projectId + ':' + scope.filePath, { projectId: scope.projectId, sourceFilePath: scope.filePath, slug, status: 'stopped' });
           return JSON.stringify({ status: 'stopped', projectId: scope.projectId, slug });
         }
+        if (args[1] === 'bind') {
+          cloud.set(scope.projectId + ':' + scope.filePath, { projectId: scope.projectId, sourceFilePath: scope.filePath, slug, status: 'active' });
+          return JSON.stringify({ status: 'active', projectId: scope.projectId, slug,
+            verifiedVersion: Number(args[args.indexOf('--version') + 1]), verifiedVersionId: args[args.indexOf('--version-id') + 1] });
+        }
         if (args[1] !== 'publish') throw new Error('unexpected share operation');
         const versionId = args[args.indexOf('--version-id') + 1];
         const receipt = { slug, versionId, version: 1, publishedAt: 1, entryPath: args[args.indexOf('--entry-path') + 1] };

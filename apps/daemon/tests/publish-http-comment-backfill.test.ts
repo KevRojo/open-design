@@ -8,9 +8,8 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { closeDatabase, openDatabase, insertProject, insertConversation, upsertPreviewComment, getWorkspaceProjectByProjectId } from '../src/db.js';
 import { createCollabRuntime } from '../src/collab/runtime.js';
 import { registerCollabSyncRoutes } from '../src/routes/collab-sync.js';
-import { createPublicSharePublishingFixture, fixtureShareSlug } from './public-share-publishing-fixture.js';
+import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
 import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
-import { readPublishedCommentBackfill } from '../src/collab/published-comment-backfill-state.js';
 import { enqueuePublishedFileComments } from '../src/collab/published-file-comment-backfill.js';
 import { createCommentRelayOutboxStore, commentRelayLocalBindingMatches } from '../src/collab/comment-relay-outbox.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
@@ -18,6 +17,7 @@ import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.
 import { commentRelayScope } from '../src/collab/comment-relay-scope.js';
 import { runVelaResourceCommand } from '../src/collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../src/integrations/vela.js';
+import { createPublicSharePublishingFixture, fixtureShareSlug } from './public-share-publishing-fixture.js';
 
 vi.mock('../src/collab/vela-cli-resource-adapter.js', async importOriginal => ({
   ...await importOriginal<typeof import('../src/collab/vela-cli-resource-adapter.js')>(), runVelaResourceCommand: vi.fn(),
@@ -56,12 +56,13 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
     vi.mocked(runVelaResourceCommand).mockImplementation(async args => JSON.stringify(args[0] === 'snapshot'
       ? { slug: 'stable-alias', name: 'local.html', kind: 'project', versionId: 'v1', createdAt: new Date(1).toISOString() }
       : { id: 'v1', version: 1 }));
-    const transportCommands: string[][] = [];
+    const publicationCommands: string[][] = [];
     registerCollabSyncRoutes(app, {
       collab: runtime, publicFilePublicationStore: store,
-      ...createPublicSharePublishingFixture(db, store, runVelaResourceCommand, enqueuePublishedFileComments, { commands: transportCommands }),
+      ...createPublicSharePublishingFixture(db, store, runVelaResourceCommand, enqueuePublishedFileComments, { commands: publicationCommands }),
+      recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, enqueuePublishedFileComments),
       verifyWorkspaceRequest: async req => req.get('x-od-workspace-id') === 'w' && req.get('x-od-workspace-member-id') === 'owner' ? context : null,
-      resolveSharedProject: async () => null, resolveSharedProjectOwner: async () => null,
+      resolveSharedProject: async projectId => ({ projectId, ownerMemberId: 'owner', sharedAt: new Date(1).toISOString() }), resolveSharedProjectOwner: async () => 'owner',
       resolveProjectDir: () => root,
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -75,18 +76,17 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
     expect(db.inTransaction).toBe(false);
     const commands = vi.mocked(runVelaResourceCommand).mock.calls;
     expect(commands.map(call => call[0][0])).toEqual(['push']);
-    expect(transportCommands.map(args => args.slice(0, 2).join(' '))).toEqual(['resource push', 'share publish']);
+    expect(publicationCommands.map(args => args.slice(0, 2))).toEqual(fail
+      ? [['resource', 'push'], ['share', 'publish'], ['share', 'stop']]
+      : [['resource', 'push'], ['share', 'publish']]);
     expect(commands.every(call => call[1] === 'w')).toBe(true);
     const scope = { resourceTeamId: 'w', ownerMemberId: 'owner', projectId: 'p', filePath: 'pages/local.html' };
-    const subject = { projectId: 'p', workspaceId: 'w', workspaceMemberId: 'owner', filePath: scope.filePath };
     if (fail) {
-      expect(readPublishedCommentBackfill(db, subject)).toBeUndefined();
       expect(body).toMatchObject({ error: 'PUBLIC_FILE_PUBLISH_UNAVAILABLE' });
       expect(store.get(scope)).toBeNull(); expect(queue.count()).toBe(0);
       expect(db.prepare('SELECT * FROM comment_relay_publication_mappings').all()).toEqual([]);
     } else {
       expect(body).toMatchObject({ status: 'published', receipt: { slug: fixtureShareSlug } });
-      expect(readPublishedCommentBackfill(db, subject)).toMatchObject({ state: 'pending' });
       const rows = queue.listDue(Date.now());
       expect(rows.map(row => row.comment.id)).toEqual(['first', 'second']);
       for (const row of rows) {
@@ -124,7 +124,6 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
       try {
         await relay.flushPendingComments();
         expect(delivered).toEqual([]); expect(recoveredQueue.count()).toBe(2);
-        expect(readPublishedCommentBackfill(reopened, subject)).toMatchObject({ state: 'failed', retryable: true });
         expect(recoveredStore.getRevision(scope)).toEqual(revision);
         offline = false;
         await relay.flushPendingComments();
@@ -132,7 +131,6 @@ it.each([false, true])('production publish HTTP uses real comment transaction; s
           id, note: id, memberId: 'original-author', filePath: 'index.html',
         })));
         expect(recoveredQueue.count()).toBe(0);
-        expect(readPublishedCommentBackfill(reopened, subject)).toMatchObject({ state: 'succeeded', retryable: false });
         await relay.flushPendingComments(); expect(delivered).toHaveLength(2);
       } finally { relay.dispose(); }
     }

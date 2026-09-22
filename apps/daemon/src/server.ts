@@ -1075,6 +1075,7 @@ import { registerCommentAlignmentRoutes } from './routes/project/comments.js';
 import { createShareAliasReservations } from './collab/share-alias-reservation.js';
 import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
 import { resolvePublicShareViewerUrl } from './collab/public-share-viewer-url.js';
+import { ensurePublicShareProject } from './collab/public-share-project-bootstrap.js';
 import { createVelaProjectShareState } from './collab/vela-project-share-state.js';
 import { registerPublicFileStopRetryRoutes } from './routes/public-file-stop-retry.js';
 import { runPinnedVelaCommand } from './collab/vela-pinned-command.js';
@@ -5302,8 +5303,23 @@ export async function startServer({
     // (slug + revision token read back after the write), so a half-written
     // publication cannot enqueue work that later resolves against nothing.
     recordPublicFilePublication,
+    resolveLocalPublicShareOwner: (projectId, workspaceId) => {
+      const binding = getWorkspaceProjectByProjectId(db, projectId);
+      if (!binding || binding.workspaceId !== workspaceId || binding.resourceState !== 'active'
+        || binding.cloudTombstonedAt != null || !getProject(db, projectId)
+        || projectIsUnmaterializedSharedPlaceholder(projectId)) return null;
+      return typeof binding.createdByWorkspaceMemberId === 'string' ? binding.createdByWorkspaceMemberId : null;
+    },
     resolvePublicShareLink: (projectId, slug) => resolvePublicShareViewerUrl(projectId, slug, process.env, configuredAmrEnv()),
     sharePublishing: {
+      ensureProject: (scope, principal, run) => ensurePublicShareProject({
+        projectId: scope.projectId, principal, run, describeProject: describeCollabProject,
+        resolveProjectDir: async projectId => {
+          const project = getProject(db, projectId);
+          if (!project) throw new Error('PUBLIC_SHARE_PROJECT_MISSING');
+          return resolveProjectShareDir(PROJECTS_DIR, projectId, project, resolveProjectDir);
+        },
+      }),
       reservations: createShareAliasReservations(db),
       outbox: shareBindingOutbox,
       complete: createSharePublicationCompletion(db, recordPublicFilePublication, shareBindingOutbox, true),

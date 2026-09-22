@@ -5,7 +5,9 @@ import type { createShareAliasReservations } from '../collab/share-alias-reserva
 import type { createSharePublicationCompletion } from '../collab/share-publication-completion.js';
 import type { ShareBindingOutbox } from '../collab/share-binding-outbox.js';
 import type { runVelaCommand } from '../integrations/vela-command.js';
-import type { SharePublishResponse } from '@open-design/contracts';
+import { sharePublishResponse } from '../collab/share-publish-response.js';
+import { stopVelaShare } from '../collab/vela-share-stop.js';
+import { resumePendingShareBinding } from '../collab/resume-pending-share-binding.js';
 import type { RecordPublicFilePublication } from '../collab/public-file-publication-recording.js';
 import type { ShareContentFingerprints } from '../collab/share-content-fingerprint.js';
 import { createShareFileMapping, publishedPathForSource, type ShareFileMapping } from '../collab/share-file-mapping.js';
@@ -233,10 +235,13 @@ export interface RegisterCollabSyncRoutesDeps {
   publicFilePublicationStore?: PublicFilePublicationStore;
   shareContentFingerprints?: ShareContentFingerprints;
   readProjectShareState?: ReadProjectShareState;
+  /** Durable local author proof for a not-yet-catalogued project. Never inferred from the requester. */
+  resolveLocalPublicShareOwner?: (projectId: string, workspaceId: string) => string | null;
   /** Reconstruct a previously unavailable presentation link without republishing. */
   resolvePublicShareLink?: (projectId: string, slug: string) => string | null;
   recordPublicFilePublication?: RecordPublicFilePublication;
   sharePublishing?: {
+    ensureProject?(scope: PublicFilePublicationScope, principal: ResourceHubPrincipal, run: typeof runVelaCommand): Promise<TeamProject>;
     reservations: ReturnType<typeof createShareAliasReservations>;
     outbox: ShareBindingOutbox;
     complete: ReturnType<typeof createSharePublicationCompletion>;
@@ -1288,8 +1293,12 @@ export function registerCollabSyncRoutes(
     if (!sharedProjectResult.ok) {
       return res.status(503).json({ error: 'WORKSPACE_PROJECT_OWNERSHIP_UNAVAILABLE' });
     }
-    const sharedProject = sharedProjectResult.project;
-    if (sharedProject?.ownerMemberId && sharedProject.ownerMemberId !== principal.memberId) {
+    let sharedProject = sharedProjectResult.project;
+    const needsCatalog = sharedProject === null;
+    const owner = sharedProject?.ownerMemberId
+      ?? (needsCatalog ? deps.resolveLocalPublicShareOwner?.(projectId, verifiedContext.workspaceId) : null);
+    // An inbound placeholder is not local content authority, even for the same owner.
+    if (!owner || owner !== principal.memberId || isUnmaterializedSharedPlaceholder(projectStore?.get?.(projectId))) {
       return res.status(403).json({ error: 'WORKSPACE_PROJECT_PUBLISH_DENIED' });
     }
     const publisher = deps.sharePublishing;
@@ -1330,6 +1339,22 @@ export function registerCollabSyncRoutes(
       });
     }
 
+    if (needsCatalog) {
+      try {
+        if (!publisher.ensureProject) throw new Error('project bootstrap unavailable');
+        sharedProject = await publisher.ensureProject(scope, principal, prepared.run);
+      } catch {
+        return res.status(503).json({ error: 'WORKSPACE_PROJECT_OWNERSHIP_UNAVAILABLE' });
+      }
+      if (sharedProject.projectId !== projectId || sharedProject.ownerMemberId !== principal.memberId) {
+        return res.status(403).json({ error: 'WORKSPACE_PROJECT_PUBLISH_DENIED' });
+      }
+    }
+    const resumed = await resumePendingShareBinding(scope, publicFilePublicationStore, publisher.outbox, prepared.run);
+    if (resumed) return res.json(sharePublishResponse(resumed, prepared.url));
+    // Absence must be observed remotely, not inferred from a lost local row.
+    // Unknown or pre-existing aliases must never be auto-stopped on a local failure.
+    const previousState = await deps.readProjectShareState?.(scope).catch(() => null);
     const resourceId = publicFileResourceIdFor(projectId, filePath, principal);
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'od-public-file-'));
     try {
@@ -1366,14 +1391,23 @@ export function registerCollabSyncRoutes(
       const publication: PublicFilePublication = {
         url: prepared.url, slug: result.receipt.slug, fileName: filePath,
       };
-      const outcome = publisher.complete({ scope, resourceId, publication,
-        mapping: sharePlan.mapping, result });
-      const response: SharePublishResponse = outcome.status === 'published'
-        ? prepared.url !== null
-          ? { status: 'published', receipt: outcome.receipt, url: prepared.url }
-          : { status: 'published', receipt: outcome.receipt, link: { status: 'unavailable', code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' } }
-        : { status: 'binding_pending', receipt: outcome.receipt, binding: outcome.binding,
-          ...(prepared.url === null ? { link: { status: 'unavailable' as const, code: 'PUBLIC_SHARE_WEB_URL_UNAVAILABLE' as const } } : {}) };
+      let outcome: ReturnType<typeof publisher.complete>;
+      try {
+        outcome = publisher.complete({ scope, resourceId, publication, mapping: sharePlan.mapping, result });
+      } catch {
+        if (previousState?.projectId === projectId && !previousState.publications.some(item => item.slug === result.receipt.slug)) {
+          try {
+            await stopVelaShare(projectId, result.receipt.slug, prepared.run);
+            return res.status(502).json({ error: 'PUBLIC_FILE_PUBLISH_UNAVAILABLE' });
+          } catch { /* Remote publication may still be accessible: never hide it. */ }
+        }
+        return res.status(502).json({ error: {
+          code: 'PUBLIC_FILE_MANUAL_REVOKE_REQUIRED',
+          message: `Publication metadata could not be saved; the public share may remain accessible${prepared.url ? ` at ${prepared.url}` : ''}. Use od project share stop to revoke it explicitly.`,
+          data: { ...publication, receipt: result.receipt },
+        } });
+      }
+      const response = sharePublishResponse(outcome, prepared.url);
       if (response.status === 'binding_pending' && response.binding.retrying) {
         try { publisher.retry(); }
         catch { response.binding = { retrying: false, code: 'SHARE_BINDING_RETRY_UNAVAILABLE' }; }
