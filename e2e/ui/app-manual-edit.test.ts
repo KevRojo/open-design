@@ -636,9 +636,7 @@ test('[P1] comment selection falls back from an empty od-id to its screen label 
   const frame = artifactPreviewFrame(page);
   const target = frame.locator('[data-screen-label="Home"]');
   await expect(target).toBeVisible();
-  expect(await target.evaluate((element) => (
-    document.querySelector('[data-screen-label="Home"]') === element
-  ))).toBe(true);
+  await expect(target).toHaveAttribute('data-od-id', '');
 
   await target.click();
   const popover = page.getByTestId('comment-popover');
@@ -659,6 +657,9 @@ test('[P1] comment selection falls back from an empty od-id to its screen label 
     elementId: 'Home',
     selector: '[data-screen-label="Home"]',
   });
+  expect(await target.evaluate((element, selector) => (
+    document.querySelector(selector) === element
+  ), body.target?.selector ?? '')).toBe(true);
 });
 
 test('[P1] draw annotation composer floats near the selected mark and can be queued', async ({ page }) => {
