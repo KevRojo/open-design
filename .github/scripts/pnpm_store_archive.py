@@ -132,24 +132,26 @@ def _reusable_roots(store: Path) -> list[Path]:
     return roots
 
 
-def _append_timing(path: Path | None, operation: str, duration_ms: int, status: str) -> None:
+def _append_timing(
+    path: Path | None,
+    operation: str,
+    duration_ms: int,
+    status: str,
+    measurements: dict[str, int] | None = None,
+) -> None:
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as output:
-        output.write(
-            json.dumps(
-                {
-                    "operation": "pnpm-store-archive",
-                    "phase": "cache",
-                    "target": operation,
-                    "status": status,
-                    "durationMs": duration_ms,
-                },
-                separators=(",", ":"),
-            )
-            + "\n"
-        )
+        entry = {
+            "operation": "pnpm-store-archive",
+            "phase": "cache",
+            "target": operation,
+            "status": status,
+            "durationMs": duration_ms,
+        }
+        entry.update(measurements or {})
+        output.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
 def pack(store: Path, archive: Path, binary: Path, timing_path: Path | None) -> None:
@@ -176,7 +178,16 @@ def pack(store: Path, archive: Path, binary: Path, timing_path: Path | None) -> 
         _run([str(binary), "t", "-bd", str(archive)], stdout=subprocess.DEVNULL)
         status = "built"
     finally:
-        _append_timing(timing_path, "pack", round((time.monotonic() - started) * 1000), status)
+        _append_timing(
+            timing_path,
+            "pack",
+            round((time.monotonic() - started) * 1000),
+            status,
+            {
+                "archiveBytes": archive.stat().st_size if archive.is_file() else 0,
+                "reusableRoots": len(roots),
+            },
+        )
 
 
 def unpack(store: Path, archive: Path, binary: Path, timing_path: Path | None) -> None:
@@ -195,7 +206,13 @@ def unpack(store: Path, archive: Path, binary: Path, timing_path: Path | None) -
         _reusable_roots(store)
         status = "restored"
     finally:
-        _append_timing(timing_path, "unpack", round((time.monotonic() - started) * 1000), status)
+        _append_timing(
+            timing_path,
+            "unpack",
+            round((time.monotonic() - started) * 1000),
+            status,
+            {"archiveBytes": archive.stat().st_size},
+        )
 
 
 def _path(value: str | None) -> Path | None:
