@@ -3409,6 +3409,7 @@ export const zhCN: Dict = {
   "fileViewer.shareMenuSave": "保存",
   "fileViewer.shareMenuPublishViaOd": "快速分享（OpenDesign 托管）",
   "fileViewer.unifiedShareAria": "分享和导出操作",
+  "fileViewer.moreSharingOptions": "更多分享方式",
   "fileViewer.unifiedShareTab": "分享",
   "fileViewer.unifiedExportTab": "导出",
   "fileViewer.unifiedSendTab": "发送到...",

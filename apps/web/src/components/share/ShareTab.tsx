@@ -3,8 +3,6 @@ import { Button } from '@open-design/components';
 import { workspaceContextHasTeamIdentity, type WorkspaceCollabContext } from '@open-design/contracts';
 import type { PublicFilePublishFailureKey } from '../../collab/public-file-publish';
 import type { useT } from '../../i18n';
-import type { WebDeployProviderId } from '../../providers/registry';
-import type { DeployProviderOption } from '../FileViewer';
 import { RemixIcon } from '../RemixIcon';
 import styles from './ShareTab.module.css';
 
@@ -49,11 +47,7 @@ export function ShareTab({
   viewerOnlyDisabledTitle,
   publishCurrentFilePublic,
   publishFailureKey,
-  DEPLOY_PROVIDER_OPTIONS,
   streaming,
-  openDeployModal,
-  deployActionIconFor,
-  deployActionLabelFor,
   sharePageUrl,
   canCopyShareLink,
   shareUnavailableHint,
@@ -82,11 +76,7 @@ export function ShareTab({
   viewerOnlyDisabledTitle: string;
   publishCurrentFilePublic: () => Promise<void>;
   publishFailureKey: SharePublishFailureKey | null;
-  DEPLOY_PROVIDER_OPTIONS: DeployProviderOption[];
   streaming: boolean;
-  openDeployModal: (nextProviderId?: WebDeployProviderId, intent?: 'deploy' | 'social-share') => Promise<void>;
-  deployActionIconFor: (providerId: WebDeployProviderId) => 'pages-line' | 'upload-cloud-line';
-  deployActionLabelFor: (providerId: WebDeployProviderId) => string;
   sharePageUrl: string;
   canCopyShareLink: boolean;
   shareUnavailableHint: string;
@@ -317,34 +307,12 @@ export function ShareTab({
                       </div>
                       </>
                       ) : null}
-                      {menuOrigin === 'toolbar' ? (
+                      {menuOrigin === 'toolbar' && sharePageUrl ? (
                         <>
                           <div className="share-menu-divider" />
                           <div className="share-menu-section-label" role="presentation">
                             {t('fileViewer.shareMenuPublishOnline')}
                           </div>
-                          {DEPLOY_PROVIDER_OPTIONS.map((option) => (
-                            <button
-                              key={option.id}
-                              type="button"
-                              className="share-menu-item"
-                              role="menuitem"
-                              disabled={streaming || viewerOnly}
-                              title={
-                                viewerOnly
-                                  ? viewerOnlyDisabledTitle
-                                  : streaming
-                                    ? t('fileViewer.shareAfterGenerationComplete')
-                                    : undefined
-                              }
-                              onClick={() => {
-                                void openDeployModal(option.id);
-                              }}
-                            >
-                              <span className="share-menu-icon"><RemixIcon name={deployActionIconFor(option.id)} size={15} /></span>
-                              <span>{deployActionLabelFor(option.id)}</span>
-                            </button>
-                          ))}
                           {sharePageUrl ? (
                             <>
                               <button

@@ -4152,6 +4152,7 @@ export interface Dict {
   'fileViewer.shareMenuSave': string;
   'fileViewer.shareMenuPublishViaOd': string;
   'fileViewer.unifiedShareAria': string;
+  'fileViewer.moreSharingOptions': string;
   'fileViewer.unifiedShareTab': string;
   'fileViewer.unifiedExportTab': string;
   'fileViewer.unifiedSendTab': string;

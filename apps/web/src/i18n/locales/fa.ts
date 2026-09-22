@@ -3244,6 +3244,7 @@ export const fa: Dict = {
   'fileViewer.shareMenuSave': 'ذخیره',
   'fileViewer.shareMenuPublishViaOd': 'اشتراک‌گذاری سریع · OpenDesign',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "گزینه‌های بیشتر اشتراک‌گذاری",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

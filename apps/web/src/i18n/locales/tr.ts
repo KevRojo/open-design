@@ -3237,6 +3237,7 @@ export const tr: Dict = {
   'fileViewer.shareMenuSave': 'KAYDET',
   'fileViewer.shareMenuPublishViaOd': 'HIZLI PAYLAŞIM · OPENDESIGN',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "Diğer paylaşım seçenekleri",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

@@ -3237,6 +3237,7 @@ export const ja: Dict = {
   'fileViewer.shareMenuSave': '保存',
   'fileViewer.shareMenuPublishViaOd': 'クイック共有（OpenDesign ホスティング）',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "その他の共有方法",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

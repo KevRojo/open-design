@@ -193,8 +193,8 @@ describe('Z11a · ShareTab 搬动前的 DOM 基线', () => {
       expect(personal).not.toContain(marker);
     }
     for (const html of [personal, team]) {
-      expect(html).toContain('Deploy to Vercel');
-      expect(html).toContain('Deploy to Cloudflare Pages');
+      expect(html).not.toContain('Deploy to Vercel');
+      expect(html).not.toContain('Deploy to Cloudflare Pages');
     }
     expect(team).toContain('share-menu-section-label--help');
   });
@@ -227,7 +227,7 @@ describe('Z11a · ShareTab 搬动前的 DOM 基线', () => {
 });
 
 describe('Shared share shell header', () => {
-  it.each([false, true])('puts workspace scope after the public action and before deployment, published=%s', async published => {
+  it.each([false, true])('puts workspace scope after the public action with deployment in the header, published=%s', async published => {
     stubFetch(published);
     renderViewer(teamContext());
     fireEvent.click(toolbarAction('Share'));
@@ -244,9 +244,10 @@ describe('Shared share shell header', () => {
     const row = scope.parentElement!.parentElement!;
     expect(trigger.parentElement!.parentElement).toBe(row);
     expect(row.nextElementSibling).toHaveTextContent('Only you can access this project. Choose workspace members to share it with the team.');
+    fireEvent.click(screen.getByRole('button', { name: 'More sharing options' }));
     const deploy = screen.getByRole('menuitem', { name: /Deploy to Vercel/i });
     expect(action.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scope.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deploy.compareDocumentPosition(scope) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
   it.each([
     ['toolbar', false], ['toolbar', true], ['artifact-card', false], ['artifact-card', true],
@@ -259,7 +260,7 @@ describe('Shared share shell header', () => {
     else await screen.findByRole('menuitem', { name: /Generate and copy link/i });
     const heading = await screen.findByRole('heading', { name: 'Share', level: 2 });
     expect(heading.parentElement?.nextElementSibling).toHaveClass('chrome-unified-panel--share');
-    const close = heading.parentElement!.querySelector<HTMLButtonElement>('button')!;
+    const close = screen.getByRole('button', { name: 'Close' });
     expect(close).toHaveAccessibleName('Close');
     expect(close).toBeEnabled();
     fireEvent.click(close);
@@ -347,6 +348,7 @@ describe('S12 · HTML share menu', () => {
       return;
     }
     fireEvent.click(toolbarAction('Share'));
+    fireEvent.click(screen.getByRole('button', { name: 'More sharing options' }));
     for (const name of [/Deploy to Vercel/i, /Deploy to Cloudflare Pages/i]) {
       const provider = await screen.findByRole('menuitem', { name });
       expect(provider).toBeDisabled();
@@ -372,6 +374,7 @@ describe('S12 · HTML share menu', () => {
     await screen.findByRole('button', { name: /stop sharing/i });
     const panel = document.querySelector<HTMLElement>('.chrome-unified-panel--share')!;
     expect(panel.querySelector('.chrome-publish-url')?.textContent).toBe('https://open-design.ai/artifact/project-1/stable-slug');
+    fireEvent.click(screen.getByRole('button', { name: 'More sharing options' }));
     expect(screen.getByRole('menuitem', { name: /Deploy to Vercel/i })).toBeEnabled();
     expect(screen.getByRole('menuitem', { name: /Deploy to Cloudflare Pages/i })).toBeEnabled();
     expect(panel.querySelector('.social-share-grid')).toBeNull();
@@ -404,6 +407,7 @@ describe('Z11a · 基线守不住、但必须守住的几条', () => {
 
   it('弹层里仍有可点的 menuitem 行(面板不是空壳)', async () => {
     await openSharePanel(null);
+    fireEvent.click(screen.getByRole('button', { name: 'More sharing options' }));
     expect(
       screen.queryAllByRole('menuitem').length,
       '分享面板里一行 menuitem 都没有,说明搬丢了内容',

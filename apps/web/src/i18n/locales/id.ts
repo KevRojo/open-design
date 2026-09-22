@@ -3237,6 +3237,7 @@ export const id: Dict = {
   'fileViewer.shareMenuSave': 'SIMPAN',
   'fileViewer.shareMenuPublishViaOd': 'BAGIKAN CEPAT · OPENDESIGN',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "Opsi berbagi lainnya",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

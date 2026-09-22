@@ -3244,6 +3244,7 @@ export const ar: Dict = {
   'fileViewer.shareMenuSave': 'حفظ',
   'fileViewer.shareMenuPublishViaOd': 'مشاركة سريعة · OpenDesign',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "المزيد من خيارات المشاركة",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

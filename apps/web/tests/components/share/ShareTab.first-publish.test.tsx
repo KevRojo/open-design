@@ -21,8 +21,7 @@ function props(overrides: Partial<Props> = {}): Props {
     publishingPublicFile: false, publishProgress: null,
     unpublishCurrentFilePublic: vi.fn().mockResolvedValue(undefined), viewerOnlyDisabledTitle: 'read only',
     publishCurrentFilePublic: vi.fn().mockResolvedValue(undefined), publishFailureKey: null,
-    DEPLOY_PROVIDER_OPTIONS: [], streaming: false, openDeployModal: vi.fn().mockResolvedValue(undefined),
-    deployActionIconFor: () => 'pages-line', deployActionLabelFor: () => 'Deploy',
+    streaming: false,
     sharePageUrl: '', canCopyShareLink: false, shareUnavailableHint: '',
     copyShareLink: vi.fn().mockResolvedValue(true), copyShareLinkLabel: '',
     canOpenSharePage: false, shareLinkStatusHint: '', ...overrides,
@@ -99,13 +98,13 @@ describe('S1 first-publish visual seam', () => {
   });
 
   it('uses only the existing publish callback and leaves deployment outside the seam', () => {
-    const input = firstProps({ menuOrigin: 'toolbar', DEPLOY_PROVIDER_OPTIONS: [{ id: 'vercel-self', labelKey: 'fileViewer.vercelProvider', tokenLink: 'https://vercel.com', tokenLinkKey: 'fileViewer.vercelTokenGetLink', tokenPlaceholderKey: 'fileViewer.vercelTokenPlaceholder', tokenReuseHintKey: 'fileViewer.vercelTokenReuseHint', tokenRequiredKey: 'fileViewer.vercelTokenRequired', tokenLabelKey: 'fileViewer.vercelToken' }] });
+    const input = firstProps({ menuOrigin: 'toolbar' });
     render(<ShareTab {...input} />);
     fireEvent.click(screen.getByRole('menuitem', { name: 'fileViewer.generateAndCopyLink' }));
     expect(input.publishCurrentFilePublic).toHaveBeenCalledTimes(1);
     expect(input.copyPublishedFileLink).not.toHaveBeenCalled();
     expect(input.unpublishCurrentFilePublic).not.toHaveBeenCalled();
-    expect(screen.getByRole('menuitem', { name: 'Deploy' }).className).toBe('share-menu-item');
+    expect(screen.queryByRole('menuitem', { name: 'Deploy' })).toBeNull();
   });
 
   it.each(['streaming', 'viewerOnly', 'publishingPublicFile'] as const)('preserves %s disablement and feedback', (restriction) => {

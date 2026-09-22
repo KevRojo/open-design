@@ -3237,6 +3237,7 @@ export const hu: Dict = {
   'fileViewer.shareMenuSave': 'MENTÉS',
   'fileViewer.shareMenuPublishViaOd': 'GYORS MEGOSZTÁS · OPENDESIGN',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "További megosztási lehetőségek",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

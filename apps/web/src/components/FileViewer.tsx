@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
 import { SharePanelHeader } from './share/SharePanelHeader';
+import { ShareMoreMenu } from './share/ShareMoreMenu';
 import shareEntryStyles from './share/ShareEntry.module.css';
 import { AnchoredMenuShell } from './chat/AnchoredMenuShell';
 import { createPortal, flushSync } from 'react-dom';
@@ -16124,10 +16125,6 @@ function HtmlViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSocialShareKey]);
   const activeProjectSocialShare = projectSocialShare ?? projectSocialShareFallback;
-  const deployActionIconFor = (providerId: WebDeployProviderId) => {
-    if (providerId === 'cloudflare-pages') return 'pages-line';
-    return 'upload-cloud-line';
-  };
   const latestShareDeployment = useMemo(
     () => pickLatestShareDeployment(deploymentsByProvider),
     [deploymentsByProvider],
@@ -17239,7 +17236,20 @@ function HtmlViewer({
                         title={t('fileViewer.unifiedShareTab')}
                         closeLabel={t('common.close')}
                         onClose={closeDeployMenu}
-                      />
+                      >
+                        <ShareMoreMenu label={t('fileViewer.moreSharingOptions')} items={DEPLOY_PROVIDER_OPTIONS.map(option => ({
+                          id: option.id,
+                          label: deployActionLabelFor(option.id),
+                          icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                            {option.id === CLOUDFLARE_PAGES_PROVIDER_ID
+                              ? <><rect x="4" y="3" width="16" height="18" rx="1.5" /><path d="M4 8h16M8 12h8M8 16h5" /></>
+                              : <path d="M7 18H6a4 4 0 0 1-.6-8A7 7 0 0 1 19 9a4.5 4.5 0 0 1-1 9h-1M12 21V11m-3 3 3-3 3 3" />}
+                          </svg>,
+                          disabled: streaming || viewerOnly,
+                          title: viewerOnly ? viewerOnlyDisabledTitle : streaming ? t('fileViewer.shareAfterGenerationComplete') : undefined,
+                          onSelect: () => { void openDeployModal(option.id); },
+                        }))} />
+                      </SharePanelHeader>
                       <ShareTab
                         menuOrigin={menuOrigin}
                         workspaceContext={workspaceContext}
@@ -17261,11 +17271,7 @@ function HtmlViewer({
                         viewerOnlyDisabledTitle={viewerOnlyDisabledTitle}
                         publishCurrentFilePublic={publishCurrentFilePublic}
                         publishFailureKey={publishFailureKey}
-                        DEPLOY_PROVIDER_OPTIONS={DEPLOY_PROVIDER_OPTIONS}
                         streaming={streaming}
-                        openDeployModal={openDeployModal}
-                        deployActionIconFor={deployActionIconFor}
-                        deployActionLabelFor={deployActionLabelFor}
                         sharePageUrl={sharePageUrl}
                         canCopyShareLink={canCopyShareLink}
                         shareUnavailableHint={shareUnavailableHint}

@@ -3063,6 +3063,55 @@ for (const published of [false, true]) {
   });
 }
 
+test('[P1] S12 more sharing opens the existing deployment dialog from the share header', async ({ page }) => {
+  await mockWritablePersonalProjectScope(page);
+  const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
+  await page.goto(`/projects/${projectId}/conversations/${conversationId}`);
+  await expectWorkspaceReady(page);
+  const secondShare = page.getByTestId('artifact-card-publish-index.html').nth(1);
+  await secondShare.click();
+  const menu = page.locator('.share-menu-popover[role="menu"]');
+  const heading = menu.getByRole('heading', { name: 'Share', level: 2 });
+  await expect(heading).toBeVisible();
+  const moreSharing = menu.getByRole('button', { name: 'More sharing options', exact: true });
+  await expect(moreSharing).toBeVisible();
+  await expect(moreSharing).toHaveCSS('width', '20px');
+  await expect(moreSharing).toHaveCSS('height', '20px');
+  await moreSharing.click();
+  const deploymentMenu = menu.getByRole('menu', { name: 'More sharing options', exact: true });
+  await expect(deploymentMenu.getByRole('menuitem')).toHaveText(['Deploy to Vercel', 'Deploy to Cloudflare Pages']);
+  for (const [property, value] of Object.entries({ width: '214px', height: '68px', padding: '4px', gap: '2px', 'border-radius': '8px', 'background-color': 'rgb(255, 255, 255)' })) {
+    await expect(deploymentMenu).toHaveCSS(property, value);
+  }
+  const vercelAction = deploymentMenu.getByRole('menuitem', { name: 'Deploy to Vercel', exact: true });
+  for (const [property, value] of Object.entries({ height: '28px', padding: '0px 8px', gap: '8px', 'font-size': '12px', 'font-weight': '400' })) {
+    await expect(vercelAction).toHaveCSS(property, value);
+  }
+  await expect(vercelAction).toBeFocused();
+  await test.info().attach('s12-more-sharing', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.keyboard.press('ArrowDown');
+  await expect(deploymentMenu.getByRole('menuitem', { name: 'Deploy to Cloudflare Pages' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(deploymentMenu).toBeHidden();
+  await expect(moreSharing).toBeFocused();
+  await expect(heading).toBeVisible();
+  await moreSharing.click();
+  await vercelAction.click();
+  const deployDialog = page.getByRole('dialog');
+  await expect(deployDialog).toBeVisible();
+  await expect(deployDialog.getByRole('combobox', { name: /Provider/i })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(deployDialog).toBeHidden();
+  await secondShare.click();
+  await expect(heading).toBeVisible();
+  // The toolbar consumes the same shell, not a second deployment implementation.
+  await menu.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator('.chrome-share-menu--unified > button[aria-label="Share"]').click();
+  await moreSharing.click();
+  await expect(deploymentMenu.getByRole('menuitem')).toHaveCount(2);
+  await test.info().attach('s12-toolbar-sharing', { body: await page.screenshot(), contentType: 'image/png' });
+});
+
 test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the card menu focused', async ({ page }) => {
   await mockWritablePersonalProjectScope(page);
   const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
@@ -3157,7 +3206,7 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(menu).not.toContainText(/Quick Share/i);
   await expect(menu).not.toContainText('Share project in workspace');
   await expect(menu).not.toContainText('Visibility in workspace');
-  await expect(menu).not.toContainText('Deploy to Vercel');
+  await expect(menu.getByRole('menuitem', { name: 'Deploy to Vercel', exact: true })).toBeHidden();
   await expect(menu).not.toContainText('Save as template');
 
   // S7 HTTP failure fixture, not a real cloud failure. Only the production API
@@ -3300,6 +3349,7 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
     json: { publishedVersion: 1, materializedVersion: 1, syncState: 'synced', ownerMemberId: 'another-owner' },
   }));
   await page.reload();
+  await page.getByText('Loading OpenDesign…').waitFor({ state: 'hidden', timeout: T.long });
   await expect(page.getByTestId('chat-composer-input')).toHaveAttribute('aria-readonly', 'true');
   // Read-only navigation may focus the preview; reveal chat through its UI controls.
   const showChat = page.getByTestId('workspace-focus-toggle');
@@ -4738,10 +4788,6 @@ function conversationIdFromMessagesApiPath(url: string): string {
   return match ? decodeURIComponent(match[1]!) : '';
 }
 
-async function openNewProjectPanel(page: Page) {
-  await openNewProjectModal(page);
-}
-
 async function expectDesignsView(page: Page) {
   if (!/\/projects$/.test(new URL(page.url()).pathname)) {
     // The rail's Projects destination went away in #5517; /projects is still a
@@ -4780,22 +4826,6 @@ async function pickComposerModel(page: Page, name: RegExp): Promise<void> {
   await list.getByRole('radio', { name }).click();
   // Selecting a model dismisses the popover.
   await expect(page.locator('.avatar-popover[role="dialog"]')).toHaveCount(0);
-}
-
-async function selectAvatarModelOption(
-  page: Page,
-  modelSelect: Locator,
-  optionName: RegExp,
-) {
-  await expect(modelSelect).toBeVisible();
-  const option = page.getByRole('option', { name: optionName });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await modelSelect.click();
-    if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) break;
-    await page.keyboard.press('Escape').catch(() => {});
-  }
-  await expect(option).toBeVisible({ timeout: 10_000 });
-  await option.click();
 }
 
 async function routeComposerPlusFixtures(page: Page) {

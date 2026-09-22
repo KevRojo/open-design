@@ -3237,6 +3237,7 @@ export const th: Dict = {
   'fileViewer.shareMenuSave': 'บันทึก',
   'fileViewer.shareMenuPublishViaOd': 'แชร์อย่างรวดเร็ว · OpenDesign',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "ตัวเลือกการแชร์เพิ่มเติม",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

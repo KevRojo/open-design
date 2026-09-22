@@ -7,6 +7,8 @@
   min-height: 24px;
 }
 
+.tools { display: flex; align-items: center; gap: 4px; }
+
 .title {
   margin: 0;
   min-width: 0;

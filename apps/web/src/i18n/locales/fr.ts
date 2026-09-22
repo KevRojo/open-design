@@ -3237,6 +3237,7 @@ export const fr: Dict = {
   'fileViewer.shareMenuSave': 'ENREGISTRER',
   'fileViewer.shareMenuPublishViaOd': 'PARTAGE RAPIDE · OPENDESIGN',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "Autres options de partage",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

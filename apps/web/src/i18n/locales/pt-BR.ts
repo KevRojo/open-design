@@ -3237,6 +3237,7 @@ export const ptBR: Dict = {
   'fileViewer.shareMenuSave': 'SALVAR',
   'fileViewer.shareMenuPublishViaOd': 'COMPARTILHAMENTO RÁPIDO · OPENDESIGN',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "Mais opções de compartilhamento",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

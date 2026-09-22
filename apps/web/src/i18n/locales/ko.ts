@@ -3237,6 +3237,7 @@ export const ko: Dict = {
   'fileViewer.shareMenuSave': '저장',
   'fileViewer.shareMenuPublishViaOd': '빠른 공유 (OpenDesign 호스팅)',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "추가 공유 옵션",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',

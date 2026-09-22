@@ -5959,6 +5959,7 @@ describe('FileViewer SVG artifacts', () => {
 
     await openUnifiedShareTab();
 
+    fireEvent.click(screen.getByRole('button', { name: 'More sharing options' }));
     expect(screen.getByRole('menuitem', { name: /Deploy to Vercel/i })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: /Deploy to Cloudflare Pages/i }));
 
@@ -6025,6 +6026,7 @@ describe('FileViewer SVG artifacts', () => {
 
     const openDeployModal = async () => {
       await openUnifiedShareTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /Deploy to Vercel/i }));
       return screen.findByRole('dialog');
     };
@@ -6200,6 +6202,7 @@ describe('FileViewer SVG artifacts', () => {
     );
 
     await openUnifiedShareTab();
+    fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Deploy to Cloudflare Pages/i }));
 
     const providerSelect = await screen.findByRole('combobox', { name: /Provider/i });
@@ -6262,6 +6265,7 @@ describe('FileViewer SVG artifacts', () => {
     );
 
     await openUnifiedShareTab();
+    fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Deploy to Cloudflare Pages/i }));
 
     const providerSelect = await screen.findByRole('combobox', { name: /Provider/i });
@@ -6388,6 +6392,7 @@ describe('FileViewer SVG artifacts', () => {
     );
 
     await openUnifiedShareTab();
+    fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Deploy to Cloudflare Pages/i }));
 
     const zoneSelect = await screen.findByRole('combobox', { name: /Domain/i });
@@ -6761,7 +6766,8 @@ describe('FileViewer SVG artifacts', () => {
     expect(screen.getByText('Visibility in workspace')).toBeTruthy();
     expect(await screen.findByText('Generate and copy link')).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Generate and copy link/i })).toBeTruthy();
-    expect(screen.getByText('SHARE ON YOUR OWN HOSTING')).toBeTruthy();
+    expect(screen.queryByText('SHARE ON YOUR OWN HOSTING')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More sharing options' }));
     expect(screen.getByRole('menuitem', { name: /Deploy to Vercel/i })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: /Deploy to Cloudflare Pages/i })).toBeTruthy();
     // The "publish online first" guide row is gone — the publish button above
@@ -8642,6 +8648,7 @@ describe('FileViewer SVG artifacts', () => {
 
     // No link yet (nothing published, nothing deployed): no social icons and
     // no "deploy first" teaser row — the deploy rows below are the path.
+    fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     expect(await screen.findByRole('menuitem', { name: /Deploy to Vercel/i })).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'X' })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /deploy then share/i })).toBeNull();
@@ -8705,6 +8712,7 @@ describe('FileViewer SVG artifacts', () => {
 
     // A protected deployment is NOT a clean link — recipients could not open
     // it, so the panel offers no social icons until the link is public.
+    fireEvent.click(await screen.findByRole('button', { name: 'More sharing options' }));
     expect(await screen.findByRole('menuitem', { name: /Deploy to Vercel/i })).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'X' })).toBeNull();
   });

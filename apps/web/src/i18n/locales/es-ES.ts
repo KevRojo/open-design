@@ -3244,6 +3244,7 @@ export const esES: Dict = {
   'fileViewer.shareMenuSave': 'GUARDAR',
   'fileViewer.shareMenuPublishViaOd': 'COMPARTIR RÁPIDO · OPENDESIGN',
   'fileViewer.unifiedShareAria': 'Share and export actions',
+  "fileViewer.moreSharingOptions": "Más opciones para compartir",
   'fileViewer.unifiedShareTab': 'Share',
   'fileViewer.unifiedExportTab': 'Export',
   'fileViewer.unifiedSendTab': 'Send to...',
