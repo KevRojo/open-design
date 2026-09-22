@@ -99,6 +99,12 @@ function killProcessesUsingPath(pathFragment: string): void {
   }
 }
 
+export function registerChatRouteTests(activePartition: number): void {
+  if (!Number.isInteger(activePartition) || activePartition < 1 || activePartition > 4) {
+    throw new Error(`Invalid chat route test partition: ${activePartition}`);
+  }
+  const partitionIt = (partition: number) => partition === activePartition ? it : it.skip;
+
 describe('/api/chat', () => {
   let server: http.Server;
   let baseUrl: string;
@@ -306,7 +312,7 @@ child.on('exit', (code, signal) => {
     }
   });
 
-  it('does not reference an out-of-scope response while starting a run', async () => {
+  partitionIt(1)('does not reference an out-of-scope response while starting a run', async () => {
     process.env.PATH = '';
     const emptyAgentHome = mkdtempSync(join(tmpdir(), 'od-empty-agent-home-'));
     tempDirs.push(emptyAgentHome);
@@ -327,7 +333,7 @@ child.on('exit', (code, signal) => {
     expect(body).toContain('AGENT_UNAVAILABLE');
   });
 
-  it('keeps serving when delivered-session persistence has no conversation row', async () => {
+  partitionIt(2)('keeps serving when delivered-session persistence has no conversation row', async () => {
     const conversationId = `missing-conversation-${randomUUID()}`;
 
     await withFakeAgent(
@@ -363,7 +369,7 @@ process.exit(0);
     );
   });
 
-  it('marks json stream runs failed when an error frame exits with code 0', async () => {
+  partitionIt(3)('marks json stream runs failed when an error frame exits with code 0', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     await withFakeAgent(
@@ -410,7 +416,7 @@ process.exit(0);
     );
   });
 
-  it('marks OpenCode tool-only runs failed when no assistant output is produced', async () => {
+  partitionIt(4)('marks OpenCode tool-only runs failed when no assistant output is produced', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     await withFakeAgent(
@@ -483,7 +489,7 @@ process.exit(0);
    * 在那里把 text_delta 攒进 run.askUserScanText),所以它同时钉住了信号的采集
    * 和 finish() 的判定;runs.test.ts 那几条只钉后者。
    */
-  it('does not stamp unfinished work on a turn that ended by asking the user', async () => {
+  partitionIt(1)('does not stamp unfinished work on a turn that ended by asking the user', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     await withFakeAgent(
@@ -545,7 +551,7 @@ process.exit(0);
   // 量法能看见缺陷:同一份待办、同一条链路,只把可渲染的表单换成被引用的裸标记,
   // 这一轮就必须重新报「有未完成的活」。产物 HTML / 代码示例里出现这段文本的回合
   // 不许因此被静音。
-  it('still stamps unfinished work when the form markup was only quoted', async () => {
+  partitionIt(2)('still stamps unfinished work when the form markup was only quoted', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     await withFakeAgent(
@@ -599,7 +605,7 @@ process.exit(0);
     );
   });
 
-  it('passes OPENCODE_CONFIG_CONTENT external_directory rules for the managed project cwd', async () => {
+  partitionIt(3)('passes OPENCODE_CONFIG_CONTENT external_directory rules for the managed project cwd', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for OpenCode cwd permission tests');
     }
@@ -670,7 +676,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('passes BYOK provider config to the daemon-backed OpenCode runtime', async () => {
+  partitionIt(4)('passes BYOK provider config to the daemon-backed OpenCode runtime', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for BYOK OpenCode config tests');
     }
@@ -764,7 +770,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('passes keyless BYOK provider config without auth fields to OpenCode', async () => {
+  partitionIt(1)('passes keyless BYOK provider config without auth fields to OpenCode', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for BYOK OpenCode config tests');
     }
@@ -852,7 +858,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('does not pass BYOK provider config to other local runtimes', async () => {
+  partitionIt(2)('does not pass BYOK provider config to other local runtimes', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for BYOK OpenCode config tests');
     }
@@ -912,7 +918,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('strips inherited OpenCode server auth env before spawning the opencode CLI', async () => {
+  partitionIt(3)('strips inherited OpenCode server auth env before spawning the opencode CLI', async () => {
     const inheritedPassword = process.env.OPENCODE_SERVER_PASSWORD;
     process.env.OPENCODE_SERVER_PASSWORD = 'test-parent-server-password';
 
@@ -960,7 +966,7 @@ process.stdin.on('end', () => {
   });
 
 
-  it('reuses an existing assistant message row instead of creating a duplicate when assistantMessageId is supplied', async () => {
+  partitionIt(4)('reuses an existing assistant message row instead of creating a duplicate when assistantMessageId is supplied', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for assistant message reuse tests');
     }
@@ -1040,7 +1046,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('does not leave a pinned assistant message queued when legacy chat fails before spawning', async () => {
+  partitionIt(1)('does not leave a pinned assistant message queued when legacy chat fails before spawning', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for assistant message pin tests');
     }
@@ -1096,7 +1102,7 @@ process.stdin.on('end', () => {
     expect(lastStatus).toBe('failed');
   });
 
-  it('rewrites the OpenCode scanner overflow into a generic retry message', async () => {
+  partitionIt(2)('rewrites the OpenCode scanner overflow into a generic retry message', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     await withFakeAgent(
@@ -1126,7 +1132,7 @@ process.exit(1);
     );
   });
 
-  it('rejects a requested media-only model before AMR ACP launch', async () => {
+  partitionIt(3)('rejects a requested media-only model before AMR ACP launch', async () => {
     const { body, invocations, responseOk } = await runAmrModelRequest('nano-banana-2');
 
     expect(responseOk).toBe(true);
@@ -1137,7 +1143,7 @@ process.exit(1);
     expect(body).not.toContain('Hello from fake vela.');
   });
 
-  it('forwards an unknown custom-provider chat slug when the AMR catalog is stale', async () => {
+  partitionIt(4)('forwards an unknown custom-provider chat slug when the AMR catalog is stale', async () => {
     const { body, invocations, responseOk } = await runAmrModelRequest(
       'custom-provider/future-chat-2027',
     );
@@ -1154,7 +1160,7 @@ process.exit(1);
     expect(body).toContain('"status":"succeeded"');
   });
 
-  it('survives transient AMR Link catalog failures without aborting the run', async () => {
+  partitionIt(1)('survives transient AMR Link catalog failures without aborting the run', async () => {
     // The run preflight resolves the AMR catalog through the shared
     // AmrModelLoadingCache, which degrades to the offline `vela model preset`
     // seed whenever the authoritative `vela model list` is momentarily
@@ -1238,7 +1244,7 @@ child.on('exit', (code, signal) => {
     }
   });
 
-  it('proceeds with the AMR run via the cached/preset catalog when the live model list is unavailable', async () => {
+  partitionIt(2)('proceeds with the AMR run via the cached/preset catalog when the live model list is unavailable', async () => {
     // Red spec for the packaged-prerelease "AMR model the selected model is not
     // available from Vela" report: the run preflight used to do a fresh,
     // blocking `vela model list` (authoritative remote catalog) on EVERY run
@@ -1322,7 +1328,7 @@ child.on('exit', (code, signal) => {
     }
   });
 
-  it('persists exact AMR prompt budget context across new and resumed sessions', async () => {
+  partitionIt(3)('persists exact AMR prompt budget context across new and resumed sessions', async () => {
     const previousRuntimeKey = process.env.VELA_RUNTIME_KEY;
     const previousLinkUrl = process.env.VELA_LINK_URL;
     const previousPreset = process.env.FAKE_VELA_MODEL_PRESET_JSON;
@@ -1427,7 +1433,7 @@ child.on('exit', (code, signal) => {
     }
   });
 
-  it('keeps service tier overrides when /api/runs omits model but settings has one', async () => {
+  partitionIt(4)('keeps service tier overrides when /api/runs omits model but settings has one', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for service tier settings tests');
     }
@@ -1482,7 +1488,7 @@ process.exit(0);
     }
   });
 
-  it('keeps service tier overrides when /api/runs omits model and settings has none', async () => {
+  partitionIt(1)('keeps service tier overrides when /api/runs omits model and settings has none', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for service tier settings tests');
     }
@@ -1536,7 +1542,7 @@ process.exit(0);
     }
   });
 
-  it('allows plugin authoring to succeed when the requested generated-plugin artifacts exist before close', async () => {
+  partitionIt(2)('allows plugin authoring to succeed when the requested generated-plugin artifacts exist before close', async () => {
     const projectId = `proj-plugin-authoring-success-${randomUUID()}`;
 
     const createProjectResponse = await fetch(`${baseUrl}/api/projects`, {
@@ -1606,7 +1612,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('does not report plugin authoring as succeeded when the agent only emits planning text without artifacts', async () => {
+  partitionIt(3)('does not report plugin authoring as succeeded when the agent only emits planning text without artifacts', async () => {
     const projectId = `proj-plugin-authoring-${randomUUID()}`;
 
     const createProjectResponse = await fetch(`${baseUrl}/api/projects`, {
@@ -1678,7 +1684,7 @@ process.stdin.on('end', () => {
       },
     );
   });
-  it('does not fail plugin authoring when the turn-1 reply is a clarifying question-form awaiting the brief', async () => {
+  partitionIt(4)('does not fail plugin authoring when the turn-1 reply is a clarifying question-form awaiting the brief', async () => {
     // The `od-plugin-authoring` plugin's turn-1 flow is to emit a
     // `<question-form>` collecting the plugin brief, then STOP and wait for
     // the user to answer — artifacts only land on the follow-up turn. The
@@ -1742,7 +1748,7 @@ process.stdin.on('end', () => {
       },
     );
   });
-  it('does not fail plugin authoring when the clarifying form uses the <ask-question> alias', async () => {
+  partitionIt(1)('does not fail plugin authoring when the clarifying form uses the <ask-question> alias', async () => {
     // `<ask-question>` is the alias the web form parser accepts alongside
     // the canonical `<question-form>` (apps/web/src/artifacts/question-form.ts).
     // Models sometimes drift to it; the UI still renders a valid brief form,
@@ -1806,7 +1812,7 @@ process.stdin.on('end', () => {
       },
     );
   });
-  it('still fails plugin authoring when a question-form tag wraps a non-renderable (non-JSON) body', async () => {
+  partitionIt(2)('still fails plugin authoring when a question-form tag wraps a non-renderable (non-JSON) body', async () => {
     // The clarification carve-out must match the web parser's renderable-form
     // contract (JSON body with a `questions` array), not just the opening
     // tag. A `<question-form>` whose body is not valid form JSON renders as
@@ -1869,7 +1875,7 @@ process.stdin.on('end', () => {
       },
     );
   });
-  it('does not fail plugin authoring when a valid form follows a Unicode preamble that expands under toLowerCase', async () => {
+  partitionIt(3)('does not fail plugin authoring when a valid form follows a Unicode preamble that expands under toLowerCase', async () => {
     // The mirrored close-tag scan must stay in the original-string coordinate
     // space. Some code points expand under toLowerCase ("İ" -> "i̇"), so
     // lowercasing the whole buffer before indexing would desync the close-tag
@@ -1931,7 +1937,7 @@ process.stdin.on('end', () => {
       },
     );
   });
-  it('closes the # Instructions block with an explicit "do not echo" guard so models do not parrot the prompt back', async () => {
+  partitionIt(4)('closes the # Instructions block with an explicit "do not echo" guard so models do not parrot the prompt back', async () => {
     // claude-opus-4-7 (and a few other instruction-tuned models) start
     // their reply by echoing the # Instructions block verbatim, which
     // shows up to users as the system prompt leading the visible
@@ -1976,7 +1982,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('injects @-mention skillIds into the composed system prompt', async () => {
+  partitionIt(1)('injects @-mention skillIds into the composed system prompt', async () => {
     await withFakeAgent(
       'opencode',
       `
@@ -2020,7 +2026,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('stages ad-hoc skill side files into the project cwd', async () => {
+  partitionIt(2)('stages ad-hoc skill side files into the project cwd', async () => {
     const projectId = `project-${randomUUID()}`;
     const stagedRelativePath = `.od-skills/${skillCwdAliasSegment(resolve(process.cwd(), '..', '..', 'skills', 'release-notes-one-pager'))}/references/checklist.md`;
     const expectedChecklist = await fsp.readFile(
@@ -2085,7 +2091,7 @@ process.stdin.on('end', () => {
     expect(stagedFileBody).toBe(expectedChecklist);
   });
 
-  it('stages side files for every composed skill into the project cwd', async () => {
+  partitionIt(3)('stages side files for every composed skill into the project cwd', async () => {
     const projectId = `project-${randomUUID()}`;
     const stagedPaths = [
       `.od-skills/${skillCwdAliasSegment(resolve(process.cwd(), '..', '..', 'skills', 'release-notes-one-pager'))}/references/checklist.md`,
@@ -2151,7 +2157,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('propagates the composed skill mode for ad-hoc-only deck skills', async () => {
+  partitionIt(4)('propagates the composed skill mode for ad-hoc-only deck skills', async () => {
     await withFakeAgent(
       'opencode',
       `
@@ -2192,7 +2198,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('preserves a persisted media skill as the primary surface over a composed deck mention', async () => {
+  partitionIt(1)('preserves a persisted media skill as the primary surface over a composed deck mention', async () => {
     await withFakeAgent(
       'opencode',
       `
@@ -2240,7 +2246,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('honors mediaExecution on legacy chat requests', async () => {
+  partitionIt(2)('honors mediaExecution on legacy chat requests', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     const response = await fetch(`${baseUrl}/api/chat`, {
@@ -2275,7 +2281,7 @@ process.stdin.on('end', () => {
     });
   });
 
-  it('rejects invalid mediaExecution on legacy chat requests', async () => {
+  partitionIt(3)('rejects invalid mediaExecution on legacy chat requests', async () => {
     const conversationId = `conv-${randomUUID()}`;
     const response = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
@@ -2299,7 +2305,7 @@ process.stdin.on('end', () => {
     expect(runsBody.runs).toEqual([]);
   });
 
-  it('propagates ad-hoc skill critique policy into the chat resolver', async () => {
+  partitionIt(4)('propagates ad-hoc skill critique policy into the chat resolver', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for user skill critique-policy tests');
     }
@@ -2378,7 +2384,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('preserves plugin-local and composed @-mention skills in plugin-bound runs', async () => {
+  partitionIt(1)('preserves plugin-local and composed @-mention skills in plugin-bound runs', async () => {
     const pluginId = `plugin-local-${randomUUID()}`;
     const pluginFixtureDir = await createPluginFixture({
       pluginId,
@@ -2462,7 +2468,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('stages colliding plugin and composed skill dirs under distinct aliases', async () => {
+  partitionIt(2)('stages colliding plugin and composed skill dirs under distinct aliases', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for colliding skill-dir staging tests');
     }
@@ -2568,7 +2574,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('canonicalizes aliased skill ids before deduping composed skills', async () => {
+  partitionIt(3)('canonicalizes aliased skill ids before deduping composed skills', async () => {
     await withFakeAgent(
       'opencode',
       `
@@ -2611,7 +2617,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('classifies Cursor Agent authentication stderr as a typed run error', async () => {
+  partitionIt(4)('classifies Cursor Agent authentication stderr as a typed run error', async () => {
     await withFakeAgent(
       'cursor-agent',
       `
@@ -2656,7 +2662,7 @@ process.exit(1);
     );
   });
 
-  it('classifies Cursor Agent Not logged in stderr as a typed run error', async () => {
+  partitionIt(1)('classifies Cursor Agent Not logged in stderr as a typed run error', async () => {
     await withFakeAgent(
       'cursor-agent',
       `
@@ -2701,7 +2707,7 @@ process.exit(1);
     );
   });
 
-  it('classifies Cursor Agent stdout auth text as a typed run error', async () => {
+  partitionIt(2)('classifies Cursor Agent stdout auth text as a typed run error', async () => {
     await withFakeAgent(
       'cursor-agent',
       `
@@ -2747,7 +2753,7 @@ process.exit(1);
     );
   });
 
-  it('classifies Cursor Agent stdout error payloads as typed auth failures', async () => {
+  partitionIt(3)('classifies Cursor Agent stdout error payloads as typed auth failures', async () => {
     const cursorErrorLine = JSON.stringify({
       type: 'error',
       message: 'Error: [unauthenticated] Error',
@@ -2797,7 +2803,7 @@ process.exit(1);
     );
   });
 
-  it('classifies DeepSeek TUI config guidance as typed auth failures', async () => {
+  partitionIt(4)('classifies DeepSeek TUI config guidance as typed auth failures', async () => {
     await withFakeAgent(
       'deepseek',
       `
@@ -2855,7 +2861,7 @@ process.exit(1);
     );
   });
 
-  it('suppresses Antigravity auth stdout and emits AGENT_AUTH_REQUIRED without an event: stdout delta', async () => {
+  partitionIt(1)('suppresses Antigravity auth stdout and emits AGENT_AUTH_REQUIRED without an event: stdout delta', async () => {
     await withFakeAgent(
       'agy',
       `
@@ -2899,7 +2905,7 @@ process.exit(0);
     );
   });
 
-  it('parses successful Antigravity Gemini JSONL output instead of forwarding raw stdout', async () => {
+  partitionIt(2)('parses successful Antigravity Gemini JSONL output instead of forwarding raw stdout', async () => {
     await withFakeAgent(
       'agy',
       `
@@ -2943,7 +2949,7 @@ process.exit(0);
     );
   });
 
-  it('forwards Antigravity plain stdout JSONL when it lacks the Gemini init marker', async () => {
+  partitionIt(3)('forwards Antigravity plain stdout JSONL when it lacks the Gemini init marker', async () => {
     await withFakeAgent(
       'agy',
       `
@@ -2983,7 +2989,7 @@ process.exit(0);
     );
   });
 
-  it('fails plain-stream runs when stdout artifact persistence fails', async () => {
+  partitionIt(4)('fails plain-stream runs when stdout artifact persistence fails', async () => {
     await withFakeAgent(
       'agy',
       `
@@ -3031,7 +3037,7 @@ process.exit(0);
     );
   });
 
-  it('fails Antigravity Gemini JSONL output with no visible assistant content', async () => {
+  partitionIt(1)('fails Antigravity Gemini JSONL output with no visible assistant content', async () => {
     await withFakeAgent(
       'agy',
       `
@@ -3074,7 +3080,7 @@ process.exit(0);
     );
   });
 
-  it('preserves the first buffered stdout timestamp for Antigravity Gemini assistant text', () => {
+  partitionIt(2)('preserves the first buffered stdout timestamp for Antigravity Gemini assistant text', () => {
     const timestamp = bufferedAntigravityGeminiFirstTokenAt(
       [{
         receivedAt: 1_234,
@@ -3089,7 +3095,7 @@ process.exit(0);
     expect(timestamp).toBe(1_234);
   });
 
-  it('stamps Antigravity Gemini assistant text from the chunk that completes the first assistant message', () => {
+  partitionIt(3)('stamps Antigravity Gemini assistant text from the chunk that completes the first assistant message', () => {
     const timestamp = bufferedAntigravityGeminiFirstTokenAt([
       {
         receivedAt: 1_234,
@@ -3108,7 +3114,7 @@ process.exit(0);
     expect(timestamp).toBe(5_678);
   });
 
-  it('does not stamp a first token timestamp for Antigravity Gemini streams without assistant text', () => {
+  partitionIt(4)('does not stamp a first token timestamp for Antigravity Gemini streams without assistant text', () => {
     const timestamp = bufferedAntigravityGeminiFirstTokenAt(
       [{
         receivedAt: 1_234,
@@ -3122,7 +3128,7 @@ process.exit(0);
     expect(timestamp).toBeNull();
   });
 
-  it('surfaces Qoder assistant error records through the SSE error channel', async () => {
+  partitionIt(1)('surfaces Qoder assistant error records through the SSE error channel', async () => {
     const qoderErrorLine = JSON.stringify({
       type: 'assistant',
       message: { content: [] },
@@ -3159,7 +3165,7 @@ process.exit(0);
     );
   });
 
-  it('marks reasoning-only stream runs failed when no assistant output is produced', async () => {
+  partitionIt(2)('marks reasoning-only stream runs failed when no assistant output is produced', async () => {
     const reasoningLine = JSON.stringify({
       type: 'assistant',
       message: {
@@ -3216,7 +3222,7 @@ process.exit(0);
     );
   });
 
-  it('fails Qoder runs when the result reports is_error with exit code 0', async () => {
+  partitionIt(3)('fails Qoder runs when the result reports is_error with exit code 0', async () => {
     const qoderResultLine = JSON.stringify({
       type: 'result',
       subtype: 'error',
@@ -3262,7 +3268,7 @@ process.exit(0);
     );
   });
 
-  it('fails stalled json-stream runs after the inactivity timeout elapses', async () => {
+  partitionIt(4)('fails stalled json-stream runs after the inactivity timeout elapses', async () => {
     const previous = process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS;
     process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS = '500';
     try {
@@ -3310,7 +3316,7 @@ setInterval(() => {}, 1000);
     }
   });
 
-  it('keeps Claude stream runs alive while structured output is still flowing', async () => {
+  partitionIt(1)('keeps Claude stream runs alive while structured output is still flowing', async () => {
     const previous = process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS;
     process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS = '3000';
     try {
@@ -3361,7 +3367,7 @@ const timer = setInterval(() => {
     }
   });
 
-  it('surfaces Claude auth diagnostics through the SSE error channel', async () => {
+  partitionIt(2)('surfaces Claude auth diagnostics through the SSE error channel', async () => {
     await withFakeAgent(
       'claude',
       `
@@ -3396,7 +3402,7 @@ process.exit(1);
     );
   });
 
-  it('prefers a terminal Claude prompt-length error over auth-shaped stderr (#6979)', async () => {
+  partitionIt(3)('prefers a terminal Claude prompt-length error over auth-shaped stderr (#6979)', async () => {
     await withFakeAgent(
       'claude',
       `
@@ -3449,7 +3455,7 @@ process.exit(1);
     );
   });
 
-  it('does not treat prompt-length text in an assistant payload as the terminal cause (#6979)', async () => {
+  partitionIt(4)('does not treat prompt-length text in an assistant payload as the terminal cause (#6979)', async () => {
     await withFakeAgent(
       'claude',
       `
@@ -3498,7 +3504,7 @@ process.exit(1);
     );
   });
 
-  it('caps oversized inactivity overrides so Node does not fire the timer immediately', async () => {
+  partitionIt(1)('caps oversized inactivity overrides so Node does not fire the timer immediately', async () => {
     const previous = process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS;
     process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS = '10000000000';
     try {
@@ -3535,7 +3541,7 @@ setTimeout(() => {
     }
   });
 
-  it('marks stalled runs failed even when the child ignores SIGTERM', async () => {
+  partitionIt(2)('marks stalled runs failed even when the child ignores SIGTERM', async () => {
     const previous = process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS;
     process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS = '500';
     try {
@@ -3579,7 +3585,7 @@ setInterval(() => {}, 1000);
     }
   });
 
-  it('marks submitted discovery form answers as the active turn before the transcript', async () => {
+  partitionIt(3)('marks submitted discovery form answers as the active turn before the transcript', async () => {
     const captureDir = mkdtempSync(join(tmpdir(), 'od-form-answer-prompt-'));
     tempDirs.push(captureDir);
     const capturePath = join(captureDir, 'prompt.txt');
@@ -3656,7 +3662,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('latches intent signals on the conversation so a signal-free later turn keeps the deck framework', async () => {
+  partitionIt(4)('latches intent signals on the conversation so a signal-free later turn keeps the deck framework', async () => {
     // Red spec for specs/current/intent-signal-cache-hotfix.md §3 case 6 (R2).
     // History is trimmed on agent switch (scopeHistoryToAgent) and
     // non-transcript clients never resend prior turns, so a deck signal that
@@ -3772,7 +3778,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('uses a project design system in sandboxed chat runs without an explicit run designSystemId', async () => {
+  partitionIt(1)('uses a project design system in sandboxed chat runs without an explicit run designSystemId', async () => {
     const projectId = `project-ds-${randomUUID()}`;
     const projectResponse = await fetch(`${baseUrl}/api/projects`, {
       method: 'POST',
@@ -3849,7 +3855,7 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('does not compose another member Personal design system from a persisted project id', async () => {
+  partitionIt(2)('does not compose another member Personal design system from a persisted project id', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for Workspace design-system prompt tests');
     }
@@ -3939,7 +3945,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('composes the project creator Personal design system', async () => {
+  partitionIt(3)('composes the project creator Personal design system', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for Workspace design-system prompt tests');
     }
@@ -4029,7 +4035,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('composes a Team design system without touching same-slug Personal or foreign projects', async () => {
+  partitionIt(4)('composes a Team design system without touching same-slug Personal or foreign projects', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for Workspace design-system prompt tests');
     }
@@ -4236,7 +4242,7 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('keeps requested design systems separate from missing injected design systems', async () => {
+  partitionIt(1)('keeps requested design systems separate from missing injected design systems', async () => {
     const missingDesignSystemId = `missing-ds-${randomUUID()}`;
     const projectId = `project-missing-ds-${randomUUID()}`;
     const projectResponse = await fetch(`${baseUrl}/api/projects`, {
@@ -4312,7 +4318,7 @@ process.stdin.on('end', () => {
 });
 
 describe('daemon run creation during shutdown', () => {
-  it('rejects new run creation while shutdown cleanup is still in flight', async () => {
+  partitionIt(2)('rejects new run creation while shutdown cleanup is still in flight', async () => {
     const previousGrace = process.env.OD_CHAT_RUN_SHUTDOWN_GRACE_MS;
     process.env.OD_CHAT_RUN_SHUTDOWN_GRACE_MS = '100';
     const started = await startServer({ port: 0, returnServer: true }) as {
@@ -4396,7 +4402,7 @@ async function waitForRunStatus(
 }
 
 describe('chat prompt helpers', () => {
-  it('appends a final prompt override after the client system prompt and removes earlier duplicates', () => {
+  partitionIt(3)('appends a final prompt override after the client system prompt and removes earlier duplicates', () => {
     const override = '## Final runtime policy\nUse the shared media dispatcher.';
     const clientMediaContract =
       '## Media generation contract\nclient contract wins unless a later override says otherwise';
@@ -4415,7 +4421,7 @@ describe('chat prompt helpers', () => {
     expect(prompt.match(/## Final runtime policy/g)).toHaveLength(1);
   });
 
-  it('defaults enabled research without an explicit query to the current message', () => {
+  partitionIt(4)('defaults enabled research without an explicit query to the current message', () => {
     const prompt = resolveResearchCommandContract(
       { enabled: true },
       'EV market 2025 trends',
@@ -4433,7 +4439,7 @@ describe('chat prompt helpers', () => {
     expect(explicit).not.toContain('legacy full transcript must not replace it');
   });
 
-  it('resolves design-system selection precedence for run prompt composition', () => {
+  partitionIt(1)('resolves design-system selection precedence for run prompt composition', () => {
     expect(resolveEffectiveDesignSystemSelection({
       requestDesignSystemId: 'request-ds',
       pluginDesignSystemId: 'plugin-ds',
@@ -4469,7 +4475,7 @@ describe('chat prompt helpers', () => {
     })).toEqual({ id: null, source: 'none' });
   });
 
-  it('extracts the primary design-system id from a plugin snapshot', () => {
+  partitionIt(2)('extracts the primary design-system id from a plugin snapshot', () => {
     expect(designSystemIdFromPluginSnapshot({
       resolvedContext: {
         items: [
@@ -4491,7 +4497,7 @@ describe('chat prompt helpers', () => {
     expect(designSystemIdFromPluginSnapshot({ resolvedContext: { items: [] } })).toBeNull();
   });
 
-  it('describes stable prompt cache hits and miss reasons', () => {
+  partitionIt(3)('describes stable prompt cache hits and miss reasons', () => {
     expect(describeStablePromptCache({
       isResuming: false,
       storedStablePromptHash: null,
@@ -4527,7 +4533,7 @@ describe('chat prompt helpers', () => {
     });
   });
 
-  it('names the drifted sections when a section map is supplied', () => {
+  partitionIt(4)('names the drifted sections when a section map is supplied', () => {
     expect(describeStablePromptCache({
       isResuming: true,
       storedStablePromptHash: 'hash-a',
@@ -4542,7 +4548,7 @@ describe('chat prompt helpers', () => {
     });
   });
 
-  it('reports unattributed drift when the prefix moved but no tracked section did', () => {
+  partitionIt(1)('reports unattributed drift when the prefix moved but no tracked section did', () => {
     // The hash is the source of truth, so this is a real miss; an empty list
     // would read as a drift with no cause instead of the coverage gap it is.
     expect(describeStablePromptCache({
@@ -4557,7 +4563,7 @@ describe('chat prompt helpers', () => {
     });
   });
 
-  it('does not attribute sections for a missing stored hash', () => {
+  partitionIt(2)('does not attribute sections for a missing stored hash', () => {
     // A legacy/reseeded row has no baseline to diff, so every section would
     // read as "changed" and drown the signal real drift carries.
     expect(describeStablePromptCache({
@@ -4574,7 +4580,7 @@ describe('chat prompt helpers', () => {
     });
   });
 
-  it('does not grant media-specific extra directories to Codex', () => {
+  partitionIt(3)('does not grant media-specific extra directories to Codex', () => {
     const dirs = resolveChatExtraAllowedDirs({
       agentId: '  CoDeX  ',
       skillsDir: '/repo/skills',
@@ -4586,7 +4592,7 @@ describe('chat prompt helpers', () => {
     expect(dirs).toEqual([]);
   });
 
-  it('keeps resource and linked dirs for non-Codex agents', () => {
+  partitionIt(4)('keeps resource and linked dirs for non-Codex agents', () => {
     const existingDirs = new Set([
       '/repo/skills',
       '/repo/design-systems',
@@ -4608,3 +4614,4 @@ describe('chat prompt helpers', () => {
   });
 
 });
+}

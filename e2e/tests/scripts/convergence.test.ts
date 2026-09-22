@@ -1223,16 +1223,23 @@ print("snapshot and candidate binding passed")
     }
   });
 
-  test("pins one balanced OD Next server partition to each daemon shard", () => {
+  test("pins one entry from each balanced real-server suite to every daemon shard", () => {
     const daemonRoot = path.join(repoRoot, "apps", "daemon");
-    const partitionFiles = readdirSync(path.join(daemonRoot, "tests"))
-      .filter((file) => /^od-next-automatic-simple-server-partition-\d+\.test\.ts$/.test(file))
-      .sort();
-    expect(partitionFiles).toEqual(Array.from({ length: 4 }, (_, index) =>
-      `od-next-automatic-simple-server-partition-${index + 1}.test.ts`));
-    for (const [index, file] of partitionFiles.entries()) {
-      expect(readFileSync(path.join(daemonRoot, "tests", file), "utf8"))
-        .toContain(`registerOdNextAutomaticSimpleServerTests(${index + 1});`);
+    const testsRoot = path.join(daemonRoot, "tests");
+    const entries = [
+      ["chat-route", "registerChatRouteTests"],
+      ["od-next-automatic-simple-server", "registerOdNextAutomaticSimpleServerTests"],
+    ] as const;
+    for (const [family, registrar] of entries) {
+      const partitionFiles = readdirSync(testsRoot)
+        .filter((file) => new RegExp(`^${family}-partition-\\d+\\.test\\.ts$`).test(file))
+        .sort();
+      expect(partitionFiles).toEqual(Array.from({ length: 4 }, (_, index) =>
+        `${family}-partition-${index + 1}.test.ts`));
+      for (const [index, file] of partitionFiles.entries()) {
+        expect(readFileSync(path.join(testsRoot, file), "utf8"))
+          .toContain(`${registrar}(${index + 1});`);
+      }
     }
 
     const vitestConfig = readFileSync(path.join(daemonRoot, "vitest.config.ts"), "utf8");
@@ -1240,7 +1247,7 @@ print("snapshot and candidate binding passed")
     expect(vitestConfig).toContain("sequencer: DaemonTestSequencer");
     expect(sequencer).toContain("if (shard.count !== PARTITION_COUNT)");
     expect(sequencer).toContain("const ordinaryShard = await super.shard(ordinaryFiles)");
-    expect(sequencer).toContain("partitions.get(shard.index)!");
+    expect(sequencer).toContain("partitionsByFamily.get(family)!.get(shard.index)!");
   });
 
   test("includes postinstall plan controls in formal release workload identities", () => {

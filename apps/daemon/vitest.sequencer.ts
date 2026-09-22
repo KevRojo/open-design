@@ -3,7 +3,8 @@ import { basename } from 'node:path';
 import { BaseSequencer, type TestSpecification } from 'vitest/node';
 
 const PARTITION_COUNT = 4;
-const PARTITION_PATTERN = /^od-next-automatic-simple-server-partition-(\d+)\.test\.ts$/;
+const PARTITION_FAMILIES = ['chat-route', 'od-next-automatic-simple-server'] as const;
+const PARTITION_PATTERN = /^(chat-route|od-next-automatic-simple-server)-partition-(\d+)\.test\.ts$/;
 
 export class DaemonTestSequencer extends BaseSequencer {
   override async shard(files: TestSpecification[]): Promise<TestSpecification[]> {
@@ -12,7 +13,7 @@ export class DaemonTestSequencer extends BaseSequencer {
       return super.shard(files);
     }
 
-    const partitions = new Map<number, TestSpecification>();
+    const partitionsByFamily = new Map<string, Map<number, TestSpecification>>();
     const ordinaryFiles: TestSpecification[] = [];
     for (const file of files) {
       const match = PARTITION_PATTERN.exec(basename(file.moduleId));
@@ -21,20 +22,27 @@ export class DaemonTestSequencer extends BaseSequencer {
         continue;
       }
 
-      const partition = Number(match[1]);
+      const family = match[1];
+      const partition = Number(match[2]);
+      const partitions = partitionsByFamily.get(family) ?? new Map<number, TestSpecification>();
       if (partition < 1 || partition > PARTITION_COUNT || partitions.has(partition)) {
-        throw new Error(`Invalid OD Next server partition entry: ${file.moduleId}`);
+        throw new Error(`Invalid daemon partition entry: ${file.moduleId}`);
       }
       partitions.set(partition, file);
+      partitionsByFamily.set(family, partitions);
     }
 
-    if (partitions.size !== PARTITION_COUNT) {
-      throw new Error(
-        `Expected ${PARTITION_COUNT} OD Next server partition entries, found ${partitions.size}`,
-      );
+    const activeFamilies = PARTITION_FAMILIES.filter((family) => partitionsByFamily.has(family));
+    for (const family of activeFamilies) {
+      const actual = partitionsByFamily.get(family)?.size ?? 0;
+      if (actual !== PARTITION_COUNT) {
+        throw new Error(`Expected ${PARTITION_COUNT} ${family} partition entries, found ${actual}`);
+      }
     }
 
     const ordinaryShard = await super.shard(ordinaryFiles);
-    return [...ordinaryShard, partitions.get(shard.index)!];
+    const pinned = activeFamilies.map((family) =>
+      partitionsByFamily.get(family)!.get(shard.index)!);
+    return [...ordinaryShard, ...pinned];
   }
 }
