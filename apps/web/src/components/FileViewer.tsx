@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
+import { useShareScopeKeyboard } from './share/useShareScopeKeyboard';
 import { SharePanelHeader } from './share/SharePanelHeader';
 import { ShareMoreMenu } from './share/ShareMoreMenu';
 import shareEntryStyles from './share/ShareEntry.module.css';
@@ -6559,6 +6560,11 @@ function ReactComponentViewer({
   const publicFileRequestSeqRef = useRef(0);
   const publicFileIdentityRef = useRef({ projectId, fileName: file.name });
   const shareRef = useRef<HTMLDivElement | null>(null);
+  const { scopeTriggerRef, scopeOptionsRef, handleScopeKeyDown } = useShareScopeKeyboard({
+    open: shareAccessMenuOpen,
+    disabled: shareAccessBusy || viewerOnly,
+    setOpen: setShareAccessMenuOpen,
+  });
   // HTML entries that load this file as a Babel module. `null` = still
   // checking; `[]` = standalone artifact; non-empty = a module of a
   // multi-file React prototype, which has no standalone preview. Issue #2744.
@@ -7056,10 +7062,11 @@ function ReactComponentViewer({
                             <RemixIcon name="question-line" size={14} />
                           </button>
                         </div>
-                        <div className="chrome-access-select">
+                        <div className="chrome-access-select" onKeyDown={handleScopeKeyDown}>
                             <button
                               type="button"
                               className="chrome-access-trigger"
+                              ref={scopeTriggerRef}
                               aria-haspopup="listbox"
                               aria-expanded={shareAccessMenuOpen}
                               disabled={shareAccessBusy || viewerOnly}
@@ -7089,7 +7096,7 @@ function ReactComponentViewer({
                               <RemixIcon name="arrow-down-s-line" size={16} />
                             </button>
                             {shareAccessMenuOpen ? (
-                              <div className="chrome-access-options" role="listbox">
+                              <div className="chrome-access-options" role="listbox" ref={scopeOptionsRef}>
                                 {([
                                   ['private', 'lock-line', t('fileViewer.workspaceAccessPrivate')],
                                   ['workspace', 'team-line', t('fileViewer.workspaceAccessMembers')],

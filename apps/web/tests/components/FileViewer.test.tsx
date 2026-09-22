@@ -7119,6 +7119,43 @@ describe('FileViewer SVG artifacts', () => {
     'ReactComponentViewer',
   );
 
+  it.each(['html', 'react-component'] as const)('supports scope keyboard navigation in the %s viewer without writing', async (kind) => {
+    const context = teamWorkspaceContext();
+    stubFetchWithWorkspaceContext(context);
+    const file = kind === 'html' ? publicPublishFile() : baseFile({
+      name: 'Widget.tsx', path: 'Widget.tsx', mime: 'text/plain', kind: 'code',
+      artifactManifest: {
+        version: 1, kind: 'react-component', title: 'Widget', entry: 'Widget.tsx',
+        renderer: 'react-component', exports: ['jsx'],
+      },
+    });
+    renderWithProjectWorkspace(
+      <FileViewer projectId="project-1" projectKind="prototype" file={file}
+        liveHtml="<html><body>Scope keyboard</body></html>" />,
+      context,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /share/i }));
+    const menu = await screen.findByRole('menu');
+    const trigger = menu.querySelector<HTMLButtonElement>('.chrome-access-trigger')!;
+    expect(trigger).toBeEnabled();
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const options = await screen.findAllByRole('option');
+    expect(screen.getByRole('option', { selected: true })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    expect(options.at(-1)).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(options[0]).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(menu).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    const writes = vi.mocked(fetch).mock.calls.filter(([, init]) =>
+      !['GET', 'HEAD'].includes((init?.method ?? 'GET').toUpperCase()));
+    expect(writes).toEqual([]);
+  });
+
   // Scope help is persistent content in the HTML share panel. It remains
   // team-gated; unlike provider tooltips it needs no focus or hover.
   it('shows workspace-access help inline without a focus or hover prerequisite', async () => {
