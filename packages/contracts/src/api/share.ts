@@ -1210,3 +1210,119 @@ export const SHARE_BRIDGE_LIMITS = {
  * its own. The frame proposes a target; a person decides to comment.
  */
 export const SHARE_BRIDGE_ORDERING_AND_REVOCATION_REQUIRED = true;
+
+/* ------------------------------------------------------------------ *
+ * Opening a share: the alias resolves, then the content loads
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the share page needs to open a link, resolved from the stable alias.
+ *
+ * A NEW shape rather than a change to the existing immutable-snapshot DTO,
+ * because the two describe different things and are read by different
+ * callers. The snapshot DTO is about one immutable set of bytes; this is
+ * about the alias that currently points at one.
+ *
+ * ## Two identities, and they are not interchangeable
+ *
+ * - `slug` is the STABLE alias — the thing in the link a person was sent. It
+ *   survives updates by design.
+ * - `snapshotSlug` is the immutable snapshot it points at RIGHT NOW. It
+ *   changes on every update.
+ *
+ * The existing reader was only ever missing the second one. Adding it here
+ * rather than overloading `slug` is what lets the next step say which bytes
+ * it believes it is loading.
+ */
+export interface StableAliasViewerMetadata {
+  /** Stable alias; the link the viewer holds. */
+  slug: string;
+  /** The immutable snapshot this alias points at now. */
+  snapshotSlug: string;
+  /** Entry file inside that snapshot. */
+  entryPath: string;
+  /** Human-facing name for the shared artifact. */
+  displayName: string;
+  /** Epoch ms of the publish this snapshot came from. */
+  publishedAt: number;
+  /** Alias generation. */
+  version: number;
+}
+
+/**
+ * Opening a share is two requests, and the second must prove it is still
+ * talking about the first one's answer.
+ *
+ * ```
+ * 1. GET /api/v1/public/snapshots/:stableSlug?projectId=…&shareAlias=1
+ *      → StableAliasViewerMetadata
+ * 2. GET /api/v1/public/snapshots/:snapshotSlug/files/:entryPath
+ *        ?projectId=…&shareSlug=…&commentBridge=1
+ *      → the document
+ * ```
+ *
+ * ## The window between them is the whole problem
+ *
+ * An update can land in that gap. If step 2 resolved the alias again, it
+ * would serve the NEW bytes while the page around it — the comment anchors,
+ * the pins, the version it thinks it is showing — still describes the old
+ * ones. Comments would point at elements that no longer exist, or worse, at
+ * different elements that happen to match.
+ *
+ * So step 2 names the `snapshotSlug` step 1 returned, and the server serves
+ * it only when that is still the current one. A moved alias is `409`, and
+ * the page refreshes deliberately instead of silently drifting.
+ *
+ * ## A query parameter is not authorization
+ *
+ * `projectId`, `shareSlug` and the `commentBridge` / `shareAlias` flags are
+ * all supplied by the caller. They say which pairing is being ASKED about;
+ * they cannot say it is allowed. Both steps authorize against the binding —
+ * active, and belonging to the team and resource the catalog records — before
+ * anything is served. Treating the flag as the gate would make the whole
+ * surface openable by adding a parameter.
+ */
+export const SHARE_VIEWER_ENTRY_STATUS = {
+  /** No such alias/snapshot, or the pair does not match. The two are not distinguished. */
+  missingOrMismatched: 404,
+  /** The share was stopped. */
+  stopped: 410,
+  /** The alias has moved on; the snapshot named is no longer current. */
+  generationAdvanced: 409,
+} as const;
+
+/**
+ * `404` covers both "not there" and "does not match" on purpose.
+ *
+ * Separating them would let a caller probe which halves of a pair exist by
+ * watching the status change. The viewer has nothing to do differently in
+ * the two cases, so there is nothing to buy with the distinction.
+ */
+export const SHARE_VIEWER_MISSING_AND_MISMATCH_SHARE_ONE_STATUS = true;
+
+/**
+ * The shared document is never cached and never revalidated.
+ *
+ * `no-store`, no `ETag`, no `Last-Modified`, and no `304` path. The alias is
+ * stable across updates, so a cached response keyed by URL would serve the
+ * previous version under a link that now points elsewhere — and a validator
+ * would let a `304` confirm exactly that stale body.
+ *
+ * The CSP sandbox is unchanged by any of this: the document still loads with
+ * `allow-scripts` and the existing sandbox flags.
+ */
+export const SHARE_VIEWER_DOCUMENT_IS_UNCACHEABLE = true;
+
+/**
+ * What the host does with `409`.
+ *
+ * It tells the person the share moved on and offers to reload. It does NOT
+ * re-POST anything, and it does NOT start polling the artifact's version to
+ * find out when it changed again — a share page that polls is a share page
+ * that keeps a tab busy forever for a change that may never come.
+ *
+ * This matches {@link SHARE_SNAPSHOT_DISCOVERY_IN_P0}: an already-open page
+ * does not track updates on its own. `409` is the one moment it learns, and
+ * it learns because the person acted.
+ */
+export const SHARE_VIEWER_409_PROMPTS_RELOAD_WITHOUT_POLLING = true;
