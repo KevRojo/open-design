@@ -529,7 +529,14 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect.poll(() => composerBody.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
   await expect(composerBody).toHaveCSS('overflow-y', 'auto');
   const saveComment = page.getByTestId('comment-popover-save');
-  await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
+  const multilineComment = 'Make the headline more specific.\nKeep the supporting copy concise.';
+  await note.fill('Make the headline more specific.');
+  await note.press('Shift+Enter');
+  await note.pressSequentially('Keep the supporting copy concise.');
+  await expect(note).toHaveValue(multilineComment);
+  await expect(floatingComposer).toBeVisible();
+  await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(0);
+  await expect(page.getByTestId('comment-saved-marker-hero-title')).toHaveCount(0);
   await expect(saveComment).toBeEnabled();
   await expect.poll(async () => {
     const bounds = await saveComment.boundingBox();
@@ -604,7 +611,7 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
       filePath?: string;
     }>;
   };
-  expect(body.message).toContain('Make the headline more specific.');
+  expect(body.message).toContain(multilineComment);
   expect(body.commentAttachments).toEqual([
     expect.objectContaining({
       elementId: 'hero-title',
