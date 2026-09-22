@@ -1320,6 +1320,45 @@ export const SHARE_VIEWER_ENTRY_STATUS = {
 export const SHARE_VIEWER_MISSING_AND_MISMATCH_SHARE_ONE_STATUS = true;
 
 /**
+ * Deleting the source makes the link stop serving. This is not best-effort.
+ *
+ * Product ruling: once the file or project is gone, its public link must
+ * become inaccessible and say so. The residual on
+ * {@link ProjectDeleteShareResidual} describes the window before that is
+ * true, not a state the system is allowed to settle in — a residual with
+ * `retrying: false` is an unmet obligation someone has to clear, not a
+ * tolerated outcome.
+ *
+ * The consequence for the viewer: a stop caused by deletion is `410`, the
+ * same as any other stop, but it is not the same event to the person
+ * holding the link. "The owner stopped sharing this" invites them to ask for
+ * it back; "the original file was deleted" tells them there is nothing to ask
+ * for. {@link SHARE_VIEWER_STOP_REASONS} carries that difference so the two
+ * do not collapse into one sentence.
+ */
+export const SHARE_LINK_MUST_DIE_WITH_ITS_SOURCE = true;
+
+/**
+ * Why a stop carries a reason at all.
+ *
+ * A single `410` can only produce a single sentence, and the only sentence
+ * true for every `410` is the vaguest one. Naming the cause lets the viewer
+ * say the accurate thing without the server leaking anything the holder of a
+ * dead link could not already infer: they know the link existed, and they now
+ * know it does not work.
+ *
+ * `unspecified` is deliberate and is NOT a synonym for `stopped_by_owner`.
+ * A reason the server did not record must not be rendered as a cause it did.
+ */
+export const SHARE_VIEWER_STOP_REASONS = [
+  'stopped_by_owner',
+  'source_deleted',
+  'unspecified',
+] as const;
+export type ShareViewerStopReason = (typeof SHARE_VIEWER_STOP_REASONS)[number];
+
+
+/**
  * The shared document is never cached and never revalidated.
  *
  * `no-store`, no `ETag`, no `Last-Modified`, and no `304` path. The alias is
