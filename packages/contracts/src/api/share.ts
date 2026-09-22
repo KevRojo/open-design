@@ -1543,8 +1543,20 @@ export interface CommentSyncState {
   lastError: string | null;
   /** K8. A CONJUNCTION — see below. */
   sessionMissing: boolean;
-  /** K3. Distinct from never-shared. */
-  shareStopped: boolean;
+  /**
+   * K3. Distinct from never-shared, and `null` when it could not be read.
+   *
+   * This field was a required boolean and that was wrong: the authoritative
+   * answer lives on the cloud binding, and a 404, an auth failure, a network
+   * error or an unusable projection each leave the client with no answer at
+   * all. A boolean forces one of those to be spelled `false` — "the share is
+   * not stopped" — which is a confident claim about something that was never
+   * read, and the banner it drives would be absent for a share that really
+   * had been stopped.
+   *
+   * So `null` means undeterminable, and it is not `false`.
+   */
+  shareStopped: boolean | null;
   /**
    * Last align result, when one was run.
    *
@@ -1593,6 +1605,21 @@ export const COMMENT_SYNC_PENDING_AND_LAST_ERROR_ARE_NOT_FAILURE_STATES = true;
  * sharing was stopped when they never started.
  */
 export const COMMENT_SYNC_STOPPED_IS_NOT_NEVER_SHARED = true;
+
+/**
+ * `pending` counts THIS project's queue for THIS principal — never a global
+ * total.
+ *
+ * The outbox holds work for every project the person has open and, on a
+ * shared machine, potentially more than one identity. Reporting its raw
+ * `count()` would put another project's backlog on this project's banner, and
+ * would tell a viewer how much unsent work exists outside what they can see.
+ *
+ * Scope it the same way every other answer here is scoped, and when the scope
+ * cannot be established, report nothing rather than a number that belongs to
+ * someone else.
+ */
+export const COMMENT_SYNC_PENDING_IS_SCOPED_NOT_GLOBAL = true;
 
 /* ------------------------------------------------------------------ *
  * Pushing comments in one request
