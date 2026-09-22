@@ -549,7 +549,19 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   // Check bounds before actionability can scroll an offscreen footer into view.
   await saveComment.click({ trial: true });
   await test.info().attach('comment-composer-short', { body: await page.screenshot(), contentType: 'image/png' });
+  const firstSaved = page.waitForResponse(response => {
+    const path = new URL(response.url()).pathname;
+    return response.request().method() === 'POST'
+      && path.startsWith(`/api/projects/${encodeURIComponent(projectId)}/conversations/`)
+      && path.endsWith('/comments');
+  });
   await saveComment.click();
+  const firstSaveResponse = await firstSaved;
+  expect(firstSaveResponse.ok()).toBe(true);
+  const originalComment = (await firstSaveResponse.json()).comment;
+  expect(originalComment.id).toEqual(expect.any(String));
+  expect(originalComment.id.length).toBeGreaterThan(0);
+  expect(originalComment.note).toBe(multilineComment);
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toBeVisible();
 
@@ -579,12 +591,24 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
       && path.endsWith('/comments');
   });
   await note.press('Enter');
-  expect((await editSaved).ok()).toBe(true);
+  const editSaveResponse = await editSaved;
+  expect(editSaveResponse.ok()).toBe(true);
+  expect((await editSaveResponse.json()).comment).toMatchObject({
+    id: originalComment.id,
+    note: editedComment,
+  });
   await expect(floatingComposer).toHaveCount(0);
   await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(1);
   await expect(sidePanel.getByTestId('comment-side-item')).toContainText('Preserve the existing layout.');
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toHaveCount(1);
+  const commentsReadBack = page.waitForResponse(response =>
+    response.request().method() === 'GET' && response.url() === editSaveResponse.url());
   await page.reload();
+  const readBackResponse = await commentsReadBack;
+  expect(readBackResponse.ok()).toBe(true);
+  const persistedComments = (await readBackResponse.json()).comments;
+  expect(persistedComments).toHaveLength(1);
+  expect(persistedComments[0]).toMatchObject({ id: originalComment.id, note: editedComment });
   await expectWorkspaceReady(page);
   await expect(artifactPreview(page)).toBeVisible();
   await enterPreviewCommentMode(page);
