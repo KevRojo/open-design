@@ -572,11 +572,30 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   const editedComment = `${multilineComment}\nPreserve the existing layout.`;
   await note.fill(editedComment);
   await expect(saveComment).toBeEnabled();
+  const editSaved = page.waitForResponse(response => {
+    const path = new URL(response.url()).pathname;
+    return response.request().method() === 'POST'
+      && path.startsWith(`/api/projects/${encodeURIComponent(projectId)}/conversations/`)
+      && path.endsWith('/comments');
+  });
   await note.press('Enter');
+  expect((await editSaved).ok()).toBe(true);
   await expect(floatingComposer).toHaveCount(0);
   await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(1);
   await expect(sidePanel.getByTestId('comment-side-item')).toContainText('Preserve the existing layout.');
   await expect(page.getByTestId('comment-saved-marker-hero-title')).toHaveCount(1);
+  await page.reload();
+  await expectWorkspaceReady(page);
+  await expect(artifactPreview(page)).toBeVisible();
+  await enterPreviewCommentMode(page);
+  await expect(sidePanel).toBeVisible();
+  await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(1);
+  await expect(sidePanel.getByTestId('comment-side-item')).toContainText('Preserve the existing layout.');
+  await page.getByTestId('comment-saved-marker-hero-title').getByRole('button').click();
+  await expect(note).toHaveValue(editedComment);
+  await expect(saveComment).toBeDisabled();
+  await note.press('Escape');
+  await expect(floatingComposer).toHaveCount(0);
   await captureLane4CommentState(page, '06-panel-populated');
   await captureLane4CommentState(page, '06-author-self');
   // K6/K7/O1–O7/OP4 share the Owner-board sidebar shell (◇ provenance).
