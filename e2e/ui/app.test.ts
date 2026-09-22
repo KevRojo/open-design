@@ -463,14 +463,30 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await expect(sidePanel).toBeVisible();
   for (const dismiss of ['escape', 'button'] as const) {
     const imageName = `discard-${dismiss}.png`;
-    await floatingComposer.locator('input[type="file"]').setInputFiles({
-      name: imageName,
+    const removedImageName = `remove-${dismiss}.png`;
+    await floatingComposer.locator('input[type="file"]').setInputFiles([removedImageName, imageName].map(name => ({
+      name,
       mimeType: 'image/png',
       buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'),
-    });
+    })));
+    await expect(floatingComposer.locator('.comment-popover-image')).toHaveCount(2);
+    const removedImage = floatingComposer.getByRole('button', { name: removedImageName, exact: true });
+    await floatingComposer.locator('.comment-popover-image').filter({ has: page.getByRole('button', { name: removedImageName, exact: true }) }).locator('.comment-popover-image-remove').click();
+    await expect(removedImage).toHaveCount(0);
+    await expect(floatingComposer.locator('.comment-popover-image')).toHaveCount(1);
     const imagePreview = floatingComposer.getByRole('button', { name: imageName, exact: true });
     await expect(imagePreview).toBeVisible();
     await expect.poll(() => imagePreview.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    await imagePreview.click();
+    const imageDialog = page.getByRole('dialog', { name: imageName, exact: true });
+    await expect(imageDialog).toBeVisible();
+    await expect(imageDialog).toHaveAttribute('aria-modal', 'true');
+    await expect.poll(() => imageDialog.getByRole('img', { name: imageName, exact: true }).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    if (dismiss === 'escape') await test.info().attach('comment-image-lightbox', { body: await page.screenshot(), contentType: 'image/png' });
+    await imageDialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(imageDialog).toHaveCount(0);
+    await expect(floatingComposer).toBeVisible();
+    await expect(imagePreview).toBeVisible();
     await note.fill(`Discard this ${dismiss} draft.`);
     await expect(page.getByTestId('comment-popover-save')).toBeEnabled();
     if (dismiss === 'escape') await note.press('Escape');
