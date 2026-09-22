@@ -1217,14 +1217,16 @@ test('[P1] plugin authoring produces a generated-plugin scaffold with Design Fil
   await expectProjectFileToContain(page, projectId, 'generated-plugin/open-design.json', '"name": "generated-plugin"');
   await expectProjectFileToContain(page, projectId, 'generated-plugin/SKILL.md', '# Generated Plugin');
 
-  await expectRestoredDelayedAssistantMessage(page, projectId, conversationId, {
-    producedFiles: [
-      'generated-plugin/examples/demo.md',
-      'generated-plugin/SKILL.md',
-      'generated-plugin/open-design.json',
-    ],
-    expectedThinking: false,
-  });
+  // Plugin actions have moved from the assistant's per-turn produced-files
+  // card to the project-wide Design Files view. Keep the persistence oracle on
+  // the assistant's completion summary, while the file-list and content checks
+  // above remain the source of truth for the generated scaffold.
+  await expectPersistedAssistantContent(
+    page,
+    projectId,
+    conversationId,
+    'Created generated-plugin with open-design.json, SKILL.md, and examples/demo.md.',
+  );
 
   // The run auto-opens a produced file tab. Plugin actions now live only on
   // the plugin-folder card in Design Files, so navigate there first.
