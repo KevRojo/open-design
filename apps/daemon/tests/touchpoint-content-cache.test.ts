@@ -99,8 +99,11 @@ const trimmedResponse = (full: Record<string, unknown>) => {
   return trimmed;
 };
 
-const MODAL = { placementKey: 'opend.home.campaign-modal', locale: 'en-US' } as const;
-const BADGE = { placementKey: 'opend.home.account-badge', locale: 'en-US' } as const;
+// One (environment, account). OPEND-3436 isolates the whole store by it, so
+// every key here names the same one and the cases go on being about content.
+const SCOPE = 'account-1@https://amr-api.example';
+const MODAL = { scope: SCOPE, placementKey: 'opend.home.campaign-modal', locale: 'en-US' } as const;
+const BADGE = { scope: SCOPE, placementKey: 'opend.home.account-badge', locale: 'en-US' } as const;
 /** What a daemon holding today's fixture would have offered upstream before asking. */
 const HELD_V1 = { heldContentId: 'version-1', heldContentLocale: 'en-US' } as const;
 
@@ -117,7 +120,14 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-const blobsDir = () => path.join(dataDir, 'touchpoint-content-cache', 'blobs');
+/** The one scope directory the fixtures in this file write into. */
+const scopeDir = () => {
+  const root = path.join(dataDir, 'touchpoint-content-cache');
+  const [only] = fs.existsSync(root) ? fs.readdirSync(root) : [];
+  return path.join(root, only ?? 'missing-scope');
+};
+const blobsDir = () => path.join(scopeDir(), 'blobs');
+const assembliesDir = () => path.join(scopeDir(), 'assemblies');
 /** The file a digest names, so a case can damage one specific blob rather than whichever one readdir happens to list first. */
 const blobFile = (value: string) => path.join(blobsDir(), value.slice('sha256:'.length));
 
@@ -169,7 +179,7 @@ describe('touchpoint content cache', () => {
 
   it('still rebuilds when the server answered in a fallback locale', () => {
     const cache = createTouchpointContentCache(dataDir);
-    const requested = { placementKey: MODAL.placementKey, locale: 'zh-CN' } as const;
+    const requested = { scope: SCOPE, placementKey: MODAL.placementKey, locale: 'zh-CN' } as const;
     // Vela resolves a placement locale through [requested, base language,
     // en-US], so a zh-CN request is legitimately answered with en-US content.
     const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
@@ -243,7 +253,7 @@ describe('touchpoint content cache', () => {
     const cache = createTouchpointContentCache(dataDir);
     const full = fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY);
     cache.remember(MODAL, full);
-    const assemblies = path.join(dataDir, 'touchpoint-content-cache', 'assemblies');
+    const assemblies = assembliesDir();
     for (const file of fs.readdirSync(assemblies))
       fs.writeFileSync(path.join(assemblies, file), 'not json');
     expect(cache.held(MODAL)).toBeNull();
@@ -291,6 +301,8 @@ describe('touchpoint content cache', () => {
     cache.remember(MODAL, fullResponse(MODAL.placementKey, 'modal.js', MODAL_ENTRY));
     const root = path.join(dataDir, 'touchpoint-content-cache');
     expect(fs.existsSync(root)).toBe(true);
-    expect(fs.readdirSync(root).sort()).toEqual(['assemblies', 'blobs', 'modules']);
+    // One directory per (environment, account), and the three layers inside it.
+    expect(fs.readdirSync(root)).toHaveLength(1);
+    expect(fs.readdirSync(scopeDir()).sort()).toEqual(['assemblies', 'blobs', 'modules']);
   });
 });

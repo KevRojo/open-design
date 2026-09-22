@@ -173,6 +173,11 @@ describe("ProductionCampaignBadge", () => {
     online = true;
     decisionId = "decision-2";
     requests.length = 0;
+    // OPEND-3436: a client in offline fallback revalidates on the reconnection
+    // itself rather than on the next poll tick, so the event a real network
+    // restore fires is now what drives recovery. What this case is about — the
+    // host is not remounted across the outage — is unchanged.
+    act(() => { window.dispatchEvent(new Event("online")); });
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(requests[0]).toContain("activeDecisionId=decision-1");
     expect(screen.getByTestId("production-campaign-badge").querySelector("opend-touchpoint")).toBe(host);

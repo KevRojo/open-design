@@ -236,6 +236,11 @@ describe("ProductionCampaignHover", () => {
 		online = true;
 		credential = "2";
 		requests.length = 0;
+		// OPEND-3436: a client in offline fallback revalidates on the reconnection
+		// itself rather than on the next poll tick, so the event a real network
+		// restore fires is now what drives recovery. What this case is about —
+		// the host is not rebuilt across the outage — is unchanged.
+		act(() => { window.dispatchEvent(new Event("online")); });
 		await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
 		await act(async () => {});
 		expect(requests.some((url) => url.includes("activeDecisionId=decision-opend.home.hover-entry-1"))).toBe(true);

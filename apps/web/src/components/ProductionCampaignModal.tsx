@@ -333,7 +333,7 @@ export function ProductionCampaignModal({
 			// suppressed offer has to clear instead.
 			if (!continuesOpenPresentation && wasDisplayed(sessionSubject, next.activityId))
 				return openPresentation.current ? { kind: "retain" } : { kind: "clear" };
-			return { kind: "decision", value: { ...touchpointLeaseValue(next), sessionSubject }, key: touchpointContentIdentity(next), validForMs: deadline - serverTime };
+			return { kind: "decision", value: { ...touchpointLeaseValue(next), sessionSubject }, key: touchpointContentIdentity(next), validForMs: deadline - serverTime, offline: loaded.offline };
 		},
 		[clearOpenPresentation, locale, sessionSubject],
 	);
@@ -347,7 +347,7 @@ export function ProductionCampaignModal({
 		const diagnostic = emitProductionTouchpointLoadDiagnostic(error);
 		if (diagnostic) emitWebTouchpointDiagnostic(diagnostic);
 	}, [clearOpenPresentation]);
-	const lifecycle = useTouchpointLifecycle<AuthorizedDecision>({ enabled: productionEnabled, identity: productionEnabled ? JSON.stringify([sessionSubject, locale]) : null, load, onError });
+	const lifecycle = useTouchpointLifecycle<AuthorizedDecision>({ enabled: productionEnabled, identity: productionEnabled ? JSON.stringify([sessionSubject, locale]) : null, load, onError, offlineFallback: true });
 	const { current: decision, generation, clear, isCurrent } = lifecycle;
 	const closeProductionModal = useCallback(() => {
 		clearOpenPresentation();

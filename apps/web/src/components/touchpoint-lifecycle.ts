@@ -178,7 +178,13 @@ export const touchpointLeaseValue = <T extends object>(decision: T): TouchpointL
 	) as TouchpointLeaseValue<T>;
 
 export type TouchpointLifecycleLoad<T> =
-	| Readonly<{ kind: "decision"; value: T; key: string; validForMs: number }>
+	/**
+	 * `offline` (OPEND-3436) marks a decision the daemon rebuilt from its own
+	 * cache because the runtime was unreachable. It changes nothing about how
+	 * the decision is presented — same key, same value, same window — only
+	 * whether this client goes on asking for a newer one.
+	 */
+	| Readonly<{ kind: "decision"; value: T; key: string; validForMs: number; offline?: boolean }>
 	| Readonly<{ kind: "waiting"; retryAfterMs: number }>
 	| Readonly<{ kind: "retain" }>
 	| Readonly<{ kind: "clear"; ended?: boolean }>;
@@ -189,6 +195,19 @@ export type TouchpointLifecycleOptions<T> = Readonly<{
 	identity: string | null;
 	load: (signal: AbortSignal, active: T | null) => Promise<TouchpointLifecycleLoad<T>>;
 	onError?: (error: unknown) => void;
+	/**
+	 * OPEND-3436. Opt in to offline fallback: a failure that means the runtime
+	 * was not reached suspends the poll and the backoff chain, and recovery
+	 * becomes one deduplicated revalidation per user-visible event.
+	 *
+	 * Off by default, and that default is load-bearing rather than cautious. The
+	 * Test channel is an operator watching a schedule they are editing; its
+	 * whole job is to keep asking, its authorization is capped at sixty seconds,
+	 * and there is no cached content behind it to fall back ON. Only the three
+	 * production placements, whose daemon holds a package and a schedule, have
+	 * anything to gain by going quiet.
+	 */
+	offlineFallback?: boolean;
 }>;
 
 type Clock = { monotonic: number; wall: number };
@@ -252,11 +271,25 @@ export const touchpointWithdrawsDisplay = (error: unknown) =>
 	typeof error === "object" && error !== null && (error as { touchpointWithdrawal?: unknown }).touchpointWithdrawal === true;
 
 /**
+ * Only a failure that means the runtime was never reached may silence this
+ * client (OPEND-3436).
+ *
+ * The distinction this draws is the whole safety property of offline fallback.
+ * A transport error, a timeout and a 5xx are all "ask again later, from
+ * whatever you have". A 401, a 403, a 404 or a 410 are the server answering,
+ * and a client that went quiet on one of those would be holding a screen the
+ * server has already taken a position on — the signed-out account still showing
+ * the previous account's campaign is the shape of that bug.
+ */
+export const touchpointEntersOfflineFallback = (error: unknown) =>
+	typeof error === "object" && error !== null && (error as { touchpointOfflineFallback?: unknown }).touchpointOfflineFallback === true;
+
+/**
  * One scheduling implementation for both runtime adapters. A response supplies
  * server-relative authority, never a client activation time. Renewing the same
  * immutable decision keeps its mount identity while replacing its lease.
  */
-export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: TouchpointLifecycleOptions<T>) {
+export function useTouchpointLifecycle<T>({ enabled, identity, load, onError, offlineFallback = false }: TouchpointLifecycleOptions<T>) {
 	const [state, setState] = useState<{ identity: string | null; current: T | null; generation: number; status: LifecycleStatus }>({ identity: null, current: null, generation: 0, status: null });
 	const generation = useRef(0);
 	const lease = useRef<{ identity: string; key: string; value: T; generation: number; start: Clock; validForMs: number } | null>(null);
@@ -280,6 +313,21 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 		let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let retryIndex = 0;
+		/**
+		 * OPEND-3436. True once a failure said the runtime was not reached, and
+		 * false again the moment any answer comes back from it. While it is true
+		 * this client asks only when something happened that could plausibly have
+		 * changed the answer — a reconnection, a return to the page, the end of
+		 * the window — never on a clock.
+		 */
+		let offline = false;
+		/**
+		 * One recovery attempt at a time. A single reconnection commonly fires
+		 * `online`, `focus`, `pageshow` and `visibilitychange`; without this they
+		 * would be four requests at the exact moment the network is least able to
+		 * carry them.
+		 */
+		let revalidating = false;
 		/** When the current cycle began, so retries can be kept inside it. */
 		let cycleStart: Clock | null = null;
 		let status: LifecycleStatus = enabled && identity ? "loading" : null;
@@ -320,6 +368,7 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 			// set-aside lease too, and the retry that succeeded came back
 			// `{kind:"retain"}` with nothing left to restore.
 			const recoverable = lease.current ?? revalidationLease;
+			if (offlineFallback && touchpointEntersOfflineFallback(error)) offline = true;
 			if (touchpointWithdrawsDisplay(error) || !recoverable || elapsed(recoverable.start) >= recoverable.validForMs) {
 				revalidationLease = null;
 				status = "error";
@@ -338,6 +387,10 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 			const delay = RETRY_BACKOFF_MS[retryIndex] ?? 0;
 			const remainingInCycle = cycleStart === null ? 0 : POLL_MS - elapsed(cycleStart);
 			if (
+				// A backoff chain answers "the server is slow or flaky". It has no
+				// answer at all for "there is no network", where every attempt in
+				// the chain fails the same way for the same reason.
+				!offline &&
 				!touchpointWithdrawsDisplay(error) &&
 				retryIndex < RETRY_BACKOFF_MS.length &&
 				delay + REQUEST_TIMEOUT_MS <= remainingInCycle
@@ -358,8 +411,15 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 				const current = lease.current;
 				if (stopped || !current) return;
 				const remaining = current.validForMs - elapsed(current.start);
-				if (remaining <= 0) revoke();
-				else expiryTimer = setTimeout(tick, Math.min(remaining, MAX_TIMER_MS));
+				if (remaining <= 0) {
+					revoke();
+					// The end of the window is the one moment in fallback that is worth
+					// a request: it is what tells the daemon to reclaim the package it
+					// is holding, and it does not wait for a network that may never
+					// come back. One request at a boundary is not a retry chain — the
+					// lease it belonged to is gone, so there is no second boundary.
+					if (offline) revalidateOnce();
+				} else expiryTimer = setTimeout(tick, Math.min(remaining, MAX_TIMER_MS));
 			};
 			tick();
 		};
@@ -381,7 +441,11 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 			const ownsRequest = () => !stopped && request === controller && !controller.signal.aborted;
 			timeout = setTimeout(() => {
 				if (!ownsRequest()) return;
-				abandonAttempt(new Error("touchpoint_request_timeout"));
+				// A budget that ran out without an answer is the same condition as a
+				// refused connection, reported by a different observer.
+				abandonAttempt(
+					Object.assign(new Error("touchpoint_request_timeout"), { touchpointOfflineFallback: true }),
+				);
 			}, REQUEST_TIMEOUT_MS);
 			try {
 				const result = await load(controller.signal, lease.current?.value ?? revalidationLease?.value ?? null);
@@ -391,6 +455,9 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 				// A completed attempt restores the full retry budget for the next one.
 				retryIndex = 0;
 				clearTimeout(retryTimer);
+				// An answer arrived, so the runtime is reachable. Only a decision the
+				// daemon rebuilt from cache says otherwise, and it says so explicitly.
+				offline = offlineFallback && result.kind === "decision" && result.offline === true;
 				if (result.kind === "retain") {
 					if (!lease.current && revalidationLease && elapsed(revalidationLease.start) < revalidationLease.validForMs) {
 						lease.current = { ...revalidationLease, generation: generation.current };
@@ -474,6 +541,21 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 			if (!document.hidden) void refresh();
 		};
 		/**
+		 * Exactly one attempt per recovery, however many events announced it.
+		 *
+		 * The guard is held for the whole attempt rather than released when the
+		 * request is issued, so a burst that spans the request's own lifetime
+		 * still collapses to one. A later, separate event may of course ask
+		 * again: that is a person coming back to the app, not a loop.
+		 */
+		const revalidateOnce = () => {
+			if (stopped || ended || document.hidden || revalidating || request) return;
+			revalidating = true;
+			void refresh().finally(() => {
+				revalidating = false;
+			});
+		};
+		/**
 		 * Returning to the page is not evidence that the activity ended.
 		 *
 		 * `online`, `pageshow` and `visibilitychange` used to run `wake`, which
@@ -498,16 +580,37 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 				return;
 			}
 			const current = lease.current;
-			if (current && elapsed(current.start) < current.validForMs) void refresh();
+			const live = current !== null && elapsed(current.start) < current.validForMs;
+			if (offline) {
+				// A device that slept past the end of an activity comes back with
+				// `armExpiry`'s timer still PENDING — sleep stops the timer queue
+				// while the wall clock runs on — so the lease it was going to retire
+				// is still the published one. Retire it here, before anything is
+				// awaited, or the activity is on screen again for as long as the
+				// recovery takes; with no network that is the full request budget.
+				//
+				// `revoke`, not `wake`: a lapsed offline lease is not something to
+				// set aside and restore, because the daemon has reclaimed its
+				// package on the same schedule. There is nothing to come back to.
+				if (current && !live) revoke();
+				revalidateOnce();
+				return;
+			}
+			if (live) void refresh();
 			else wake();
 		};
-		const offline = () => cancelRequest();
+		const cancelOnOffline = () => cancelRequest();
 		void refresh();
-		const interval = setInterval(() => void refresh(), POLL_MS);
+		// A tick is a question the network cannot answer while it is down, so the
+		// interval stands down and recovery is event-driven until it is back.
+		const interval = setInterval(() => {
+			if (offline) return;
+			void refresh();
+		}, POLL_MS);
 		window.addEventListener("focus", resume);
 		window.addEventListener("online", resume);
 		window.addEventListener("pageshow", resume);
-		window.addEventListener("offline", offline);
+		window.addEventListener("offline", cancelOnOffline);
 		document.addEventListener("visibilitychange", resume);
 		return () => {
 			stopped = true;
@@ -517,10 +620,10 @@ export function useTouchpointLifecycle<T>({ enabled, identity, load, onError }: 
 			window.removeEventListener("focus", resume);
 			window.removeEventListener("online", resume);
 			window.removeEventListener("pageshow", resume);
-			window.removeEventListener("offline", offline);
+			window.removeEventListener("offline", cancelOnOffline);
 			document.removeEventListener("visibilitychange", resume);
 		};
-	}, [enabled, identity, load]);
+	}, [enabled, identity, load, offlineFallback]);
 
 	return {
 		current: enabled && state.identity === identity ? state.current : null,

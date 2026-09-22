@@ -859,6 +859,11 @@ describe("Production campaign live refresh", () => {
 		online = true;
 		decisionId = "decision-2";
 		requests.length = 0;
+		// OPEND-3436: a client in offline fallback revalidates on the reconnection
+		// itself rather than on the next poll tick, so the event a real network
+		// restore fires is now what drives recovery. What this case is about —
+		// the host is not rebuilt across the outage — is unchanged.
+		act(() => { window.dispatchEvent(new Event("online")); });
 		await tick(30_000);
 		expect(requests.length).toBeGreaterThan(0);
 		// The client still identifies itself with the credential it is holding,
@@ -1982,11 +1987,17 @@ describe("ProductionCampaignModal device impressions", () => {
 		await act(async () => { await vi.advanceTimersByTimeAsync(16); });
 		expect(screen.getByRole("dialog")).toBeTruthy();
 	});
-	it("keeps the displayed campaign on screen when a poll fails and its retry recovers", async () => {
+	it("keeps the displayed campaign on screen when a failed poll later recovers", async () => {
 		// A transport failure is not a withdrawal: the lifecycle keeps the lease
-		// and retries inside the same cycle. The presentation has to survive with
-		// it, or the recovering poll reads the device impression and closes the
-		// activity that never left the screen.
+		// and revalidates when the network comes back. The presentation has to
+		// survive with it, or the recovering attempt reads the device impression
+		// and closes the activity that never left the screen.
+		//
+		// OPEND-3436 changed what schedules that recovery — the in-cycle backoff
+		// chain is gone, because a client with no network answers every attempt
+		// in it the same way — so the recovery here is driven by the `online`
+		// event a real reconnection fires. The property under test is the one it
+		// always was: the same campaign is still on screen afterwards.
 		//
 		// The impression this case needs has to be the REAL one. Writing the
 		// marker by hand reads like a shortcut past an unfaked frame, but it
@@ -1994,11 +2005,8 @@ describe("ProductionCampaignModal device impressions", () => {
 		// assigned when `mountTouchpoint` resolves and the marker only in the
 		// frame after that, so "impression recorded, nothing open" exists in the
 		// test and nowhere else. It is also precisely the `{kind:"clear"}` branch
-		// of the load callback — meaning the case tore its own host down whenever
-		// the real SHA-256 behind the mount had not finished inside the fixed
-		// advance above. Idle machine: green. Loaded CI box: `expected null not
-		// to be null`. Waiting for the marker instead is a mount barrier, because
-		// nothing can write it until the presentation is open.
+		// of the load callback. Waiting for the marker instead is a mount barrier,
+		// because nothing can write it until the presentation is open.
 		vi.useFakeTimers({ toFake: [...IMPRESSION_TIMERS] });
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		let calls = 0;
@@ -2014,17 +2022,20 @@ describe("ProductionCampaignModal device impressions", () => {
 		});
 		expect(document.querySelector("opend-touchpoint")).not.toBeNull();
 		await advanceToRecordedImpression();
-		const callsBeforeFailure = calls;
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(30_000);
 		});
+		expect(calls).toBe(2);
 		expect(document.querySelector("opend-touchpoint")).not.toBeNull();
+		act(() => {
+			window.dispatchEvent(new Event("online"));
+		});
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(1_500);
 		});
-		// The failing poll and its retry both have to have happened, or the two
-		// surviving hosts below would only mean nothing ever disturbed them.
-		expect(calls).toBeGreaterThanOrEqual(callsBeforeFailure + 2);
+		// The failing attempt and its recovery both have to have happened, or the
+		// two surviving hosts below would only mean nothing ever disturbed them.
+		expect(calls).toBe(3);
 		expect(document.querySelector("opend-touchpoint")).not.toBeNull();
 		expect(screen.queryByRole("dialog")).not.toBeNull();
 	});

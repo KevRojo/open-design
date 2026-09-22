@@ -3,7 +3,7 @@ import type {
   TestRuntimeAcceptanceRequest,
   TestRuntimeContextRequest,
 } from '@open-design/contracts/api/touchpointTestRuntime';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
@@ -68,6 +68,11 @@ import {
   type TouchpointContentCache,
   type TouchpointContentKey,
 } from './touchpoint-content-cache.js';
+import {
+  touchpointStatusIsTransient,
+  TOUCHPOINT_OFFLINE_REPLAY_HEADER,
+  type TouchpointOfflineReplayReason,
+} from '@open-design/contracts/api/touchpointOffline';
 
 const AMR_API_PROXY_PREFIX = '/api/integrations/vela/api-proxy';
 const VELA_MESSAGE_CENTER_PREFIX = '/api/integrations/vela/message-center';
@@ -500,17 +505,42 @@ const HELD_CONTENT_PARAMS = ['heldContentId', 'heldContentLocale'] as const;
  * A caller that already carries either held-content parameter is passed through
  * untouched: the daemon never rewrites someone else's conditional request.
  */
-function touchpointContentKeyForRequest(url: URL): TouchpointContentKey | null {
+function touchpointContentKeyForRequest(url: URL, scope: string): TouchpointContentKey | null {
   if (HELD_CONTENT_PARAMS.some((param) => url.searchParams.has(param))) return null;
   const placementKey = url.searchParams.get('placementKey');
   const locale = url.searchParams.get('locale');
-  return placementKey && locale ? { placementKey, locale } : null;
+  return placementKey && locale ? { scope, placementKey, locale } : null;
+}
+
+/**
+ * Which (environment, account) a cached package belongs to (OPEND-3436).
+ *
+ * The account is named by a digest of the control key rather than by
+ * `user.id`, and that is deliberate. The control key IS the credential this
+ * environment issued to this account, so two accounts can never collide and a
+ * signed-out daemon can never read a signed-in one's packages. `user.id` would
+ * be the more natural identifier and is the wrong one here: it is populated on
+ * some of the paths that build a control context and `null` on others, so a
+ * single account would flip between two scopes depending on which read
+ * answered — and a flip means a cache that is silently never hit.
+ *
+ * The cost is that rotating the key orphans that account's packages. That is
+ * one refetch, on a path the user is already reauthenticating through, and it
+ * fails in the safe direction.
+ */
+function touchpointCacheScope(context: {
+  profile?: string;
+  apiUrl: string;
+  controlKey: string;
+}): string {
+  const account = createHash('sha256').update(context.controlKey).digest('hex');
+  return `${context.profile ?? ''}\u0000${context.apiUrl}\u0000${account}`;
 }
 
 function proxyTouchpointRuntimeRequest(
   req: Request,
   res: Response,
-  context: { apiUrl: string; controlKey?: string },
+  context: { profile?: string; apiUrl: string; controlKey?: string },
   runtime: 'test' | 'production',
   contentCache?: TouchpointContentCache,
 ): void {
@@ -557,7 +587,10 @@ function proxyTouchpointRuntimeRequest(
   // decision. Everything else keeps the verbatim streaming path.
   const contentKey =
     contentCache && runtime === 'production' && req.method === 'GET' && suffix === '/production'
-      ? touchpointContentKeyForRequest(target)
+      ? touchpointContentKeyForRequest(
+          target,
+          touchpointCacheScope({ ...context, controlKey: context.controlKey }),
+        )
       : null;
 
   const controlKey = context.controlKey;
@@ -577,12 +610,40 @@ function proxyTouchpointRuntimeRequest(
    * rather than adding to it -- so a single mutable reference covers both.
    */
   let currentUpstream: http.ClientRequest | null = null;
+  /**
+   * Set when the caller walked away, so the failure handlers below can tell an
+   * upstream that died from an upstream this proxy killed. Without it, an
+   * aborted attempt reaches the offline path and spends a disk read rebuilding
+   * a megabyte-scale package for a response nobody will ever read.
+   */
+  let callerGone = false;
   const abortUpstream = (): void => {
+    callerGone = true;
     const pending = currentUpstream;
     if (pending && !res.writableEnded && !pending.destroyed) pending.destroy();
   };
   req.once('aborted', abortUpstream);
   res.once('close', abortUpstream);
+  /**
+   * Answer from the daemon's own store because the runtime could not be
+   * reached (OPEND-3436). Reports whether it did, so every caller can fall
+   * through to exactly the behaviour it had before this feature existed.
+   *
+   * The store decides whether there is anything to say: it holds the server's
+   * own schedule, retires a package whose window has closed, and refuses one
+   * that has not opened. This function only carries the answer.
+   */
+  const answerFromCache = (reason: TouchpointOfflineReplayReason): boolean => {
+    if (!contentKey || !contentCache || callerGone || res.headersSent || res.writableEnded)
+      return false;
+    const replayed = contentCache.replayOffline(contentKey, reason);
+    if (!replayed) return false;
+    res.status(200);
+    res.setHeader('content-type', 'application/json');
+    res.setHeader(TOUCHPOINT_OFFLINE_REPLAY_HEADER, '1');
+    res.end(Buffer.from(JSON.stringify(replayed), 'utf8'));
+    return true;
+  };
   /**
    * `fallback` is the one retry the assembly path is allowed: a trimmed reply
    * the daemon cannot rebuild is re-asked as today's full request. Clearing it
@@ -669,8 +730,9 @@ function proxyTouchpointRuntimeRequest(
       };
       upstreamRes.on('error', () => {
         failed = true;
-        if (!res.headersSent) res.status(502).json({ error: 'touchpoint_runtime_unavailable' });
-        else res.end();
+        if (res.headersSent) res.end();
+        else if (!answerFromCache('upstream_unreachable'))
+          res.status(502).json({ error: 'touchpoint_runtime_unavailable' });
       });
       upstreamRes.on('data', (chunk: Buffer) => {
         if (streaming) {
@@ -702,7 +764,30 @@ function proxyTouchpointRuntimeRequest(
           upstreamRes.headers['content-encoding'] as string | undefined,
           MAX_BUFFERED_DECISION_BYTES,
         );
-        if (!decoded || upstreamRes.statusCode !== 200) {
+        const status = upstreamRes.statusCode ?? 502;
+        if (status !== 200) {
+          // A withdrawal is the server exercising its authority, and the one
+          // answer that licenses destroying a stored package. Which 410s do so
+          // is `touchpointWithdrawalReclaims`, stated once in the contract so
+          // the daemon and the browser cannot disagree about what a 410 means.
+          // The 410 itself is forwarded either way — deciding what the browser
+          // does with it is not this proxy's job.
+          if (status === 410 && contentKey && contentCache) {
+            let body: unknown = null;
+            try {
+              if (decoded) body = JSON.parse(decoded.toString('utf8'));
+            } catch {
+              body = null;
+            }
+            contentCache.forgetWithdrawn(contentKey, body);
+          }
+          // 5xx is "temporarily unavailable", which is a transport condition
+          // wearing a status code. Everything else — 401, 403, 404, 410 — is an
+          // answer, and a cache may never overrule one.
+          else if (touchpointStatusIsTransient(status) && answerFromCache('upstream_unavailable'))
+            return;
+        }
+        if (!decoded || status !== 200) {
           echo();
           return;
         }
@@ -749,8 +834,12 @@ function proxyTouchpointRuntimeRequest(
       upstream.destroy(new Error('Touchpoint runtime request timed out')),
     );
     upstream.on('error', () => {
-      if (!res.headersSent) res.status(502).json({ error: 'touchpoint_runtime_unavailable' });
-      else res.end();
+      if (res.headersSent) res.end();
+      // DNS failure, refused connection, reset socket, or this proxy's own
+      // timeout: the runtime was not reached, so the last thing it said is the
+      // best thing the daemon has.
+      else if (!answerFromCache('upstream_unreachable'))
+        res.status(502).json({ error: 'touchpoint_runtime_unavailable' });
     });
     if (body) upstream.write(body);
     upstream.end();

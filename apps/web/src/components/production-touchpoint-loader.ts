@@ -1,3 +1,5 @@
+import { touchpointOfflineReplayOf } from "@open-design/contracts/api/touchpointOffline";
+
 export type ProductionRuntimeRevocationReceipt = Readonly<{
 	touchpointDecisionId: string;
 	deploymentId: string;
@@ -5,7 +7,13 @@ export type ProductionRuntimeRevocationReceipt = Readonly<{
 	contentVersionId: string;
 }>;
 export type ProductionTouchpointLoadResult =
-	| Readonly<{ kind: "decision"; value: unknown }>
+	/**
+	 * `offline` is true when the daemon rebuilt this decision from its own cache
+	 * because the runtime was unreachable (OPEND-3436). The decision itself is
+	 * the server's, timing included; what the flag says is only that nobody
+	 * asked the server just now, so this client should stop asking too.
+	 */
+	| Readonly<{ kind: "decision"; value: unknown; offline: boolean }>
 	| Readonly<{ kind: "no-decision" }>
 	| Readonly<{ kind: "revoked"; receipt: ProductionRuntimeRevocationReceipt }>;
 
@@ -16,9 +24,23 @@ export class ProductionTouchpointLoadError extends Error {
 	 * protocol noise, which the shared lifecycle rides out on the existing lease.
 	 */
 	readonly touchpointWithdrawal: boolean;
+	/**
+	 * Whether this failure means the runtime was never reached, and the client
+	 * may therefore go quiet and live off what the daemon already holds
+	 * (OPEND-3436).
+	 *
+	 * Only two details qualify, and the exclusions are the interesting part. A
+	 * 4xx is the server answering — a client that fell back on a 401 would keep
+	 * a signed-out session's campaign on screen. `malformed_json` and
+	 * `invalid_dto` are exclusions too: the bytes arrived, so the runtime was
+	 * reached, and a body this client cannot read is a protocol defect rather
+	 * than a licence to substitute a cached one.
+	 */
+	readonly touchpointOfflineFallback: boolean;
 	constructor(readonly detail: string) {
 		super("touchpoint_load_failed");
 		this.touchpointWithdrawal = detail === "http_410";
+		this.touchpointOfflineFallback = detail === "network" || /^http_5\d\d$/u.test(detail);
 	}
 }
 
@@ -55,7 +77,7 @@ export async function loadProductionTouchpointDecision(placementKey: string, loc
 	try {
 		const value: unknown = await response.json();
 		if (!value || typeof value !== "object") throw new ProductionTouchpointLoadError("invalid_dto");
-		return { kind: "decision", value };
+		return { kind: "decision", value, offline: touchpointOfflineReplayOf(value) !== null };
 	} catch (error) {
 		if (error instanceof ProductionTouchpointLoadError) throw error;
 		throw new ProductionTouchpointLoadError("malformed_json");

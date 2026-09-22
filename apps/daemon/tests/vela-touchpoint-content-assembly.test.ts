@@ -249,13 +249,22 @@ const rawDecide = () =>
     request.end();
   });
 
-const blobsDir = () => path.join(dataDir, 'touchpoint-content-cache', 'blobs');
+/**
+ * The one (environment, account) directory these cases write into. OPEND-3436
+ * isolates the store by scope, so the three layers now live one level down.
+ */
+const scopeDir = () => {
+  const root = path.join(dataDir, 'touchpoint-content-cache');
+  const [only] = fs.existsSync(root) ? fs.readdirSync(root) : [];
+  return path.join(root, only ?? 'missing-scope');
+};
+const blobsDir = () => path.join(scopeDir(), 'blobs');
 /** The file a digest names, so a case can damage one specific blob rather than whichever one readdir happens to list first. */
 const blobFile = (value: string) => path.join(blobsDir(), value.slice('sha256:'.length));
 
 /** The content id the assembly record on disk names right now, or `null` when there is none. */
 const recordedContentId = (): string | null => {
-  const dir = path.join(dataDir, 'touchpoint-content-cache', 'assemblies');
+  const dir = path.join(scopeDir(), 'assemblies');
   const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
   if (files.length !== 1) return null;
   const record = JSON.parse(fs.readFileSync(path.join(dir, files[0] as string), 'utf8')) as {
