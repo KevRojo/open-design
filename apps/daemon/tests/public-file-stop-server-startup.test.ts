@@ -29,7 +29,7 @@ it('runs the real shared SQLite queue consumer once after server startup, deferr
     started = await startServer({ port: 0, returnServer: true }) as StartServerResult;
     expect(stores).toHaveLength(1);
     expect(startupSpy).toHaveBeenCalledWith(stores[0], prepare, expect.objectContaining({ run: expect.any(Function) }));
-    expect(adapterSpy).toHaveBeenCalled();
+    expect(adapterSpy).toHaveBeenCalledWith(expect.objectContaining({ dataRoot: expect.any(String), configuredEnv: expect.any(Function) }));
     expect(runs).toHaveLength(1);
     const run = runs[0];
     const store = stores[0];

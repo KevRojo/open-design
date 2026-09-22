@@ -1,67 +1,60 @@
 import type { PreparePublicFileStop } from './public-file-publication-store.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { fetchVelaWorkspaceDirectory } from './vela-workspace-context.js';
+import { runPinnedVelaCommand } from './vela-pinned-command.js';
 
 export interface VelaPublicFileStopOptions {
   readSession?: typeof readVelaControlApiContext;
   fetchDirectory?: typeof fetchVelaWorkspaceDirectory;
+  /** Used only by the existing directory integration, never for stop. */
   fetch?: typeof fetch;
   configuredEnv?: Record<string, string> | (() => Record<string, string>);
+  dataRoot?: string;
+  runCommand?: typeof runPinnedVelaCommand;
 }
 
-/**
- * Bind verification and StopShareBinding to one immutable credential snapshot.
- * Workspace roles cannot substitute for the persisted original member. The
- * remote binding authority still checks project ownership when stop executes.
- * Use the same HTTP contract as Vela's Go client: CLI profile loading would
- * re-read mutable disk credentials between preparation and execution.
+/** Bind directory verification and the Go share stop command to one session.
+ * Workspace roles cannot substitute for the persisted original member; the
+ * remote binding authority still checks project ownership at execution time.
  */
 export function createVelaPublicFileStop(options: VelaPublicFileStopOptions = {}): PreparePublicFileStop {
-  const fetchImpl = options.fetch ?? fetch;
   return async (key) => {
-    const configuredEnv = typeof options.configuredEnv === 'function'
-      ? options.configuredEnv() : options.configuredEnv ?? {};
+    const dataRoot = options.dataRoot;
+    if (!dataRoot) return null;
+    const configuredEnv = { ...(typeof options.configuredEnv === 'function'
+      ? options.configuredEnv() : options.configuredEnv ?? {}) };
     const session = (options.readSession ?? readVelaControlApiContext)(process.env, configuredEnv);
     if (!session?.controlKey || !session.apiUrl) return null;
     const captured = Object.freeze({ ...session });
+    const { resourceTeamId, ownerMemberId, projectId, slug } = key;
     const directory = await (options.fetchDirectory ?? fetchVelaWorkspaceDirectory)({
       readSession: () => captured,
-      fetch: fetchImpl,
+      fetch: options.fetch ?? fetch,
     });
     if (!directory.ok || !directory.items.some((item) =>
-      item.workspaceId === key.resourceTeamId
-      && item.workspaceMemberId === key.ownerMemberId
+      item.workspaceId === resourceTeamId
+      && item.workspaceMemberId === ownerMemberId
       && item.memberStatus === 'active'
       && item.lifecycleState !== 'deleted'
       && item.lifecycleState !== 'deleting'
     )) return null;
-    const { resourceTeamId, ownerMemberId, projectId, slug } = key;
     return {
       resourceTeamId,
       ownerMemberId,
       async stop() {
         try {
-          const response = await fetchImpl(new URL(
-            `/api/v1/collab/shares/${encodeURIComponent(slug)}/stop`, captured.apiUrl,
-          ), {
-            method: 'POST',
-            redirect: 'error',
-            headers: {
-              authorization: `Bearer ${captured.controlKey}`,
-              'x-vela-workspace-id': resourceTeamId,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({ projectId }),
-            signal: AbortSignal.timeout(30_000),
+          const stdout = await (options.runCommand ?? runPinnedVelaCommand)({
+            args: ['share', 'stop', slug, '--project-id', projectId, '--json'],
+            session: captured, workspaceId: resourceTeamId, dataRoot, configuredEnv,
           });
-          if (!response.ok) throw new Error('stop rejected');
-          const receipt: unknown = await response.json();
+          const receipt: unknown = JSON.parse(stdout);
           if (typeof receipt !== 'object' || receipt === null
-            || !('status' in receipt) || receipt.status !== 'stopped') {
+            || !('status' in receipt) || receipt.status !== 'stopped'
+            || !('slug' in receipt) || receipt.slug !== slug
+            || !('projectId' in receipt) || receipt.projectId !== projectId) {
             throw new Error('invalid stop receipt');
           }
         } catch {
-          // Do not leak upstream bodies, URLs or credential-bearing errors.
           throw new Error('PUBLIC_FILE_STOP_FAILED');
         }
       },
