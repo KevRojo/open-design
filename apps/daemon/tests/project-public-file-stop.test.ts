@@ -70,7 +70,7 @@ it('reports each remaining file with its own retry fate, excluding successful st
   f.prepare.mockImplementation(async key => ({ ...scope, stop: async () => { if (key.filePath !== 'success.html') throw new Error('offline'); } }));
   const pending = f.run(scope);
   await expect(pending).rejects.toBeInstanceOf(ProjectPublicFileStopPendingError);
-  await expect(pending).rejects.toMatchObject({ message: 'PUBLIC_FILE_STOP_PENDING', shareResiduals: [
+  await expect(pending).rejects.toMatchObject({ message: 'PUBLIC_FILE_STOP_PENDING', canContinueLocalDelete: true, shareResiduals: [
     { filePath: 'retry.html', slug: 'retry.html', retrying: true },
     { filePath: 'terminal.html', slug: 'terminal.html', retrying: false },
   ] });
@@ -81,7 +81,7 @@ it('does not report an old generation queue as retrying for its replacement', as
   const f = setup(); const target = { ...scope, filePath: 'index.html', slug: 'a' };
   f.store.set(target, publication('a')); f.store.enqueueStop(target);
   f.stop.mockImplementation(async () => { f.store.set(target, publication('a')); throw new Error('old attempt'); });
-  await expect(f.run(scope)).rejects.toMatchObject({ shareResiduals: [{ filePath: 'index.html', slug: 'a', retrying: false }] });
+  await expect(f.run(scope)).rejects.toMatchObject({ canContinueLocalDelete: false, shareResiduals: [{ filePath: 'index.html', slug: 'a', retrying: false }] });
 });
 
 it('does nothing for a project without publications', async () => {
