@@ -38,3 +38,25 @@ export function currentCommentRelayPublicationMapping(
     .get(scope.resourceTeamId, scope.ownerMemberId, scope.projectId, scope.filePath, mapping.slug, mapping.token);
   return active ? mapping : undefined;
 }
+
+/** Resolve a trusted alias-scoped cloud path, never a project-wide path guess.
+ * Callers must obtain slug from the authenticated transport, not infer it from
+ * the sole current publication. Two aliases can both package index.html, and
+ * a stopped alias must never borrow another alias's surviving mapping.
+ * This is location resolution, NOT authorization: normal relay checks still apply.
+ */
+export function sourcePathForCurrentPublication(
+  db: Database.Database,
+  input: { resourceTeamId: string; ownerMemberId: string; projectId: string; slug: string; publishedPath: string },
+): string | null {
+  const rows = db.prepare(`SELECT m.file_path AS filePath
+    FROM comment_relay_publication_mappings m
+    JOIN public_file_publications p ON p.resource_team_id=m.resource_team_id
+      AND p.owner_member_id=m.owner_member_id AND p.project_id=m.project_id
+      AND p.file_path=m.file_path AND p.slug=m.slug AND p.revision=m.revision
+    WHERE m.resource_team_id=? AND m.owner_member_id=? AND m.project_id=?
+      AND m.slug=? AND m.public_file_path=? LIMIT 2`)
+    .all(input.resourceTeamId, input.ownerMemberId, input.projectId, input.slug, input.publishedPath) as Array<{ filePath: string }>;
+  if (rows.length > 1) throw new Error('SHARE_COMMENT_MAPPING_AMBIGUOUS');
+  return rows[0]?.filePath ?? null;
+}

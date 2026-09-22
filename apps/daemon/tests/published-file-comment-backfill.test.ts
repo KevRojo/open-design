@@ -9,6 +9,7 @@ import { createCommentRelayOutboxStore, commentRelayLocalBindingMatches } from '
 import { enqueuePublishedFileComments } from '../src/collab/published-file-comment-backfill.js';
 import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
 import { createShareFileMapping } from '../src/collab/share-file-mapping.js';
+import { sourcePathForCurrentPublication } from '../src/collab/comment-relay-publication-mapping.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
 import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.js';
 import { commentRelayScope } from '../src/collab/comment-relay-scope.js';
@@ -81,6 +82,46 @@ it('real recorder refuses unmapped file without replacing previously durable sta
   expect(() => record(s.scope, s.publication, other)).toThrow('SHARE_ENTRY_MAPPING_UNAVAILABLE');
   expect(s.publications.getRevision(s.scope)).toEqual(revision);
   expect(s.outbox.listDue(Date.now())).toEqual(rows);
+});
+
+it.each(['active', 'stopped', 'republished-without-mapping', 'wrong-team', 'wrong-owner', 'wrong-project', 'wrong-slug', 'wrong-path'] as const)(
+  'reverse mapping requires the exact active publication identity: %s', scenario => {
+    const s = setup(); s.publish();
+    if (scenario === 'stopped') s.publications.delete(s.scope);
+    if (scenario === 'republished-without-mapping') s.publications.set(s.scope, s.publication);
+    const path = sourcePathForCurrentPublication(s.db, {
+      resourceTeamId: scenario === 'wrong-team' ? 'other' : s.scope.resourceTeamId,
+      ownerMemberId: scenario === 'wrong-owner' ? 'other' : s.scope.ownerMemberId,
+      projectId: scenario === 'wrong-project' ? 'other' : s.scope.projectId,
+      slug: scenario === 'wrong-slug' ? 'other' : s.publication.slug,
+      publishedPath: scenario === 'wrong-path' ? 'other.html' : 'index.html',
+    });
+    expect(path).toBe(scenario === 'active' ? s.scope.filePath : null);
+  },
+);
+it('separates two aliases both packaged as index.html and never borrows the other after stop', () => {
+  const s = setup(); s.publish();
+  const otherScope = { ...s.scope, filePath: 'other.html' };
+  createPublicFilePublicationRecorder(s.db, s.publications, enqueuePublishedFileComments)(
+    otherScope, { ...s.publication, slug: 'other-alias' },
+    createShareFileMapping([{ sourcePath: otherScope.filePath, file: 'index.html' }]),
+  );
+  const input = { resourceTeamId: s.scope.resourceTeamId, ownerMemberId: s.scope.ownerMemberId,
+    projectId: s.scope.projectId, slug: s.publication.slug, publishedPath: 'index.html' };
+  expect(sourcePathForCurrentPublication(s.db, input)).toBe(s.scope.filePath);
+  expect(sourcePathForCurrentPublication(s.db, { ...input, slug: 'other-alias' })).toBe('other.html');
+  s.publications.delete(s.scope);
+  expect(sourcePathForCurrentPublication(s.db, input)).toBeNull();
+});
+it('rejects an ambiguous persisted alias instead of picking a source file', () => {
+  const s = setup(); s.publish();
+  const otherScope = { ...s.scope, filePath: 'other.html' };
+  createPublicFilePublicationRecorder(s.db, s.publications, enqueuePublishedFileComments)(
+    otherScope, s.publication, createShareFileMapping([{ sourcePath: otherScope.filePath, file: 'index.html' }]),
+  );
+  expect(() => sourcePathForCurrentPublication(s.db, { resourceTeamId: s.scope.resourceTeamId,
+    ownerMemberId: s.scope.ownerMemberId, projectId: s.scope.projectId,
+    slug: s.publication.slug, publishedPath: 'index.html' })).toThrow('SHARE_COMMENT_MAPPING_AMBIGUOUS');
 });
 
 it('includes all conversations of exactly one file, preserves ids/authors and never reauthors inbound users', () => {
