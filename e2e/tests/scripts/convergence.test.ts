@@ -1,5 +1,4 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1224,34 +1223,24 @@ print("snapshot and candidate binding passed")
     }
   });
 
-  test("keeps the balanced OD Next server partitions on separate daemon shards", () => {
+  test("pins one balanced OD Next server partition to each daemon shard", () => {
     const daemonRoot = path.join(repoRoot, "apps", "daemon");
-    const collectTests = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
-      .flatMap((entry) => {
-        const absolute = path.join(directory, entry.name);
-        if (entry.isDirectory()) return collectTests(absolute);
-        return /\.test\.(?:[cm]?js|tsx?)$/.test(entry.name) ? [absolute] : [];
-      });
-    const ranked = collectTests(path.join(daemonRoot, "tests"))
-      .map((file) => `/${path.relative(daemonRoot, file).split(path.sep).join("/")}`)
-      .map((file) => ({ file, hash: createHash("sha1").update(file).digest("hex") }))
-      .sort((left, right) => left.hash.localeCompare(right.hash));
-    const shardCount = 4;
-    const baseSize = Math.floor(ranked.length / shardCount);
-    const remainder = ranked.length % shardCount;
-    const partitionShards = new Map<string, number>();
-    let offset = 0;
-    for (let shard = 1; shard <= shardCount; shard += 1) {
-      const size = baseSize + (shard <= remainder ? 1 : 0);
-      for (const { file } of ranked.slice(offset, offset + size)) {
-        if (file.includes("/od-next-automatic-simple-server-partition-")) {
-          partitionShards.set(file, shard);
-        }
-      }
-      offset += size;
+    const partitionFiles = readdirSync(path.join(daemonRoot, "tests"))
+      .filter((file) => /^od-next-automatic-simple-server-partition-\d+\.test\.ts$/.test(file))
+      .sort();
+    expect(partitionFiles).toEqual(Array.from({ length: 4 }, (_, index) =>
+      `od-next-automatic-simple-server-partition-${index + 1}.test.ts`));
+    for (const [index, file] of partitionFiles.entries()) {
+      expect(readFileSync(path.join(daemonRoot, "tests", file), "utf8"))
+        .toContain(`registerOdNextAutomaticSimpleServerTests(${index + 1});`);
     }
-    expect(partitionShards.size).toBe(4);
-    expect(new Set(partitionShards.values())).toEqual(new Set([1, 2, 3, 4]));
+
+    const vitestConfig = readFileSync(path.join(daemonRoot, "vitest.config.ts"), "utf8");
+    const sequencer = readFileSync(path.join(daemonRoot, "vitest.sequencer.ts"), "utf8");
+    expect(vitestConfig).toContain("sequencer: DaemonTestSequencer");
+    expect(sequencer).toContain("if (shard.count !== PARTITION_COUNT)");
+    expect(sequencer).toContain("const ordinaryShard = await super.shard(ordinaryFiles)");
+    expect(sequencer).toContain("partitions.get(shard.index)!");
   });
 
   test("includes postinstall plan controls in formal release workload identities", () => {
