@@ -31,15 +31,16 @@ interface PreferenceStorage {
 }
 
 /**
- * Storage adapter only: the host supplies an opaque, stable identity key, not PII.
+ * Storage adapter only: the host supplies an stable appUserId, never workspaceMemberId, email or profile.
  * It stores no sharing history and makes no cross-device persistence promise.
  * Resolve browser storage lazily because even accessing localStorage may throw.
  */
 export function createShareGuidePreference(
   storage: () => PreferenceStorage,
-  identityKey: string | null,
+  appUserId: string | null,
 ) {
-  const key = identityKey ? `od:after-export-share-guide:v1:${encodeURIComponent(identityKey)}` : null;
+  const account = appUserId?.trim();
+  const key = account ? `od:after-export-share-guide:v1:${encodeURIComponent(account)}` : null;
   return {
     read(): boolean | null {
       if (key === null) return null;

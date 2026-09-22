@@ -4,13 +4,13 @@ import { canOfferAfterExportShareGuide, createExportSuccessGate, createShareGuid
 /** Host must derive hasEverShared from project bindings, including stopped bindings. */
 export function useAfterExportShareGuide(input: {
   scopeKey: string;
-  identityKey: string | null;
+  appUserId: string | null;
   hasEverShared: boolean | null;
   enabled: boolean;
 }) {
   const live = useRef(input);
   const epoch = useRef(0);
-  if (live.current.scopeKey !== input.scopeKey || live.current.identityKey !== input.identityKey || live.current.enabled !== input.enabled) {
+  if (live.current.scopeKey !== input.scopeKey || live.current.appUserId !== input.appUserId || live.current.enabled !== input.enabled) {
     epoch.current += 1;
   }
   live.current = input;
@@ -23,7 +23,7 @@ export function useAfterExportShareGuide(input: {
   const sequence = useRef(0);
   const dismiss = useCallback(() => setNotice(null), []);
   const neverShow = useCallback(() => {
-    const preference = createShareGuidePreference(() => window.localStorage, live.current.identityKey);
+    const preference = createShareGuidePreference(() => window.localStorage, live.current.appUserId);
     const saved = preference.suppress();
     if (saved) setNotice(null);
     return saved;
@@ -34,7 +34,7 @@ export function useAfterExportShareGuide(input: {
     return (result: 'success' | 'cancelled' | 'failed') => {
       if (!accept(result) || !mounted.current) return;
       const current = live.current;
-      const never = createShareGuidePreference(() => window.localStorage, current.identityKey).read();
+      const never = createShareGuidePreference(() => window.localStorage, current.appUserId).read();
       if (canOfferAfterExportShareGuide({
         result,
         originScope: startEpoch,

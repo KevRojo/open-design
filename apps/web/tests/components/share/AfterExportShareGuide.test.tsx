@@ -75,7 +75,7 @@ describe('after export behavior-only placeholder', () => {
 
 describe('export completion controller', () => {
   beforeEach(() => window.localStorage.clear());
-  const eligible = { scopeKey: 'account/project/file', identityKey: 'account', hasEverShared: false, enabled: true };
+  const eligible = { scopeKey: 'account/project/file', appUserId: 'account', hasEverShared: false, enabled: true };
   it('opens once per successful attempt; close permits the next attempt', () => {
     const { result } = renderHook(() => useAfterExportShareGuide(eligible));
     const complete = result.current.beginExport();
@@ -100,7 +100,7 @@ describe('export completion controller', () => {
     const second = renderHook(() => useAfterExportShareGuide(eligible));
     act(() => second.result.current.beginExport()('success'));
     expect(second.result.current.noticeId).toBeNull();
-    const other = renderHook(() => useAfterExportShareGuide({ ...eligible, identityKey: 'other-account' }));
+    const other = renderHook(() => useAfterExportShareGuide({ ...eligible, appUserId: 'other-account' }));
     act(() => other.result.current.beginExport()('success'));
     expect(other.result.current.noticeId).not.toBeNull();
   });
@@ -119,5 +119,28 @@ describe('export completion controller', () => {
     rerender(true);
     act(() => result.current.beginExport()('success'));
     expect(result.current.noticeId).toBeNull();
+  });
+});
+
+
+describe('account preference scope', () => {
+  beforeEach(() => window.localStorage.clear());
+  it.each([null, '', '   '])('does not offer or persist with missing appUserId %s', appUserId => {
+    const { result } = renderHook(() => useAfterExportShareGuide({ scopeKey: 'workspace-member-is-not-an-account', appUserId, hasEverShared: false, enabled: true }));
+    act(() => result.current.beginExport()('success'));
+    expect(result.current.noticeId).toBeNull();
+    act(() => { expect(result.current.neverShow()).toBe(false); });
+    expect(window.localStorage.length).toBe(0);
+  });
+  it('retains the same account opt-out across workspace/member/project changes', () => {
+    const input = { scopeKey: 'workspace-a/member-a/project-a/file-a', appUserId: 'app-user-1', hasEverShared: false, enabled: true };
+    const { result, rerender } = renderHook(value => useAfterExportShareGuide(value), { initialProps: input });
+    act(() => { expect(result.current.neverShow()).toBe(true); });
+    rerender({ ...input, scopeKey: 'workspace-b/member-b/project-b/file-b' });
+    act(() => result.current.beginExport()('success'));
+    expect(result.current.noticeId).toBeNull();
+    rerender({ ...input, appUserId: 'app-user-2' });
+    act(() => result.current.beginExport()('success'));
+    expect(result.current.noticeId).not.toBeNull();
   });
 });

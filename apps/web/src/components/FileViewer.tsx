@@ -2,6 +2,10 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
 import { useShareScopeKeyboard } from './share/useShareScopeKeyboard';
+import { AfterExportShareGuide } from './share/AfterExportShareGuide';
+import { useAfterExportShareGuide } from './share/useAfterExportShareGuide';
+import { useShareGuideAppUserId } from './share/useShareGuideAppUserId';
+import afterExportGuideStyles from './share/AfterExportShareGuide.module.css';
 import { SharePanelHeader } from './share/SharePanelHeader';
 import { ShareMoreMenu } from './share/ShareMoreMenu';
 import shareEntryStyles from './share/ShareEntry.module.css';
@@ -7632,7 +7636,9 @@ function HtmlViewer({
     const started = performance.now();
     const originPromise = resolveArtifactExportOrigin(context)
       .catch(() => unknownExportOrigin());
+    const completeShareGuide = afterExportGuide.beginExport();
     const finish = async (result: 'success' | 'failed' | 'cancelled', errorCode?: string) => {
+      if (toastFormats.has(format)) completeShareGuide(result);
       const originProps = await originPromise;
       trackArtifactExportResult(
         analytics.track,
@@ -15206,6 +15212,15 @@ function HtmlViewer({
   // of vanishing. `canShare`/`canDownload` keep the `&& !viewerOnly` gate that
   // guards the actual export/publish handlers.
   const rawCanShare = source !== null && isShareableArtifact;
+  const shareGuideAppUserId = useShareGuideAppUserId();
+  const afterExportGuide = useAfterExportShareGuide({
+    scopeKey: JSON.stringify([projectId, file.name, workspaceAccountScopedCacheKey(workspaceContext)]),
+    appUserId: shareGuideAppUserId,
+    // B2 dependency: replace only with the project share-state binding-existence proof.
+    // Active publication/URL/none cannot establish that a project was never shared.
+    hasEverShared: null,
+    enabled: workspaceActive && !viewerOnly && rawCanShare && !streaming,
+  });
   const rawCanDownload = source !== null && (isShareableArtifact || isMarkdownArtifact);
   const canShare = rawCanShare && !viewerOnly;
   const canDownload = rawCanDownload && !viewerOnly;
@@ -17201,6 +17216,7 @@ function HtmlViewer({
                     <span>{t('fileViewer.unifiedExportTab')}</span>
                   </button>
                 ) : null}
+                <span className={afterExportGuideStyles.anchor}>
                   <button
                     type="button"
                     className={`chrome-action chrome-action-secondary chrome-action-with-label chrome-action-text-only chrome-action-unified ${shareEntryStyles.toolbar}`}
@@ -17214,6 +17230,27 @@ function HtmlViewer({
                     <RemixIcon name="share-forward-line" size={15} />
                     <span>{shareMenuLabel}</span>
                   </button>
+                  {afterExportGuide.noticeId !== null ? (
+                    <AfterExportShareGuide
+                      key={afterExportGuide.noticeId}
+                      labels={{
+                        openShare: t('fileViewer.shareGuide.tryShare'),
+                        close: t('common.close'),
+                        neverShow: t('fileViewer.shareGuide.neverShowAgain'),
+                        awaitingDesign: t('fileViewer.shareGuide.awaitingDesign'),
+                        saveFailed: t('fileViewer.shareGuide.preferenceSaveFailed'),
+                      }}
+                      onDismiss={afterExportGuide.dismiss}
+                      onNeverShow={afterExportGuide.neverShow}
+                      onOpenShare={() => {
+                        setMenuAnchorId(null);
+                        setMenuOrigin('toolbar');
+                        setUnifiedActionTab('share');
+                        setDeployMenuOpen(true);
+                      }}
+                    />
+                  ) : null}
+                </span>
                 {deployMenuOpen && (rawCanShare || rawCanDownload) ? (
                   /*
                     * **同一块菜单,只是可能换个地方开。**
