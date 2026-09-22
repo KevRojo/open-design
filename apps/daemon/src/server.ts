@@ -1070,6 +1070,8 @@ import {
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCommentSyncStateService } from './collab/comment-sync-state.js';
 import { registerCommentSyncStateRoutes } from './routes/project/comments.js';
+import { createCommentAlignmentService, runVelaCommentAlignment } from './collab/comment-alignment.js';
+import { registerCommentAlignmentRoutes } from './routes/project/comments.js';
 import { createShareAliasReservations } from './collab/share-alias-reservation.js';
 import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
 import { publicShareViewerUrl } from './collab/public-share-viewer-url.js';
@@ -5155,6 +5157,27 @@ export async function startServer({
     req: any,
     projectId: string,
   ) => resolveProjectLocalCommentWorkspaceContext(req, projectId);
+  // Align is a read: it never resumes a share, re-enqueues an outbox, advances a
+  // cursor or writes a tombstone. The session is re-read after the comparison and
+  // a change between the two reads yields `unknown` rather than a result attributed
+  // to a session that is no longer the one that ran it.
+  const commentAlignment = createCommentAlignmentService({
+    db,
+    readCursor: (projectId, context) => collabCloud?.readMergedCommentCursor(projectId, context) ?? null,
+    compare: async (projectId, context, request) => {
+      const session = readVelaControlApiContext(process.env, configuredAmrEnv());
+      if (!session?.controlKey || !session.apiUrl) return { state: 'unknown', reason: 'unavailable' };
+      const result = await runVelaCommentAlignment({
+        projectId, workspaceId: context.workspaceId, request, session, dataRoot: RUNTIME_DATA_DIR,
+      });
+      const current = readVelaControlApiContext(process.env, configuredAmrEnv());
+      if (current?.controlKey !== session.controlKey || current?.apiUrl !== session.apiUrl) {
+        return { state: 'unknown', reason: 'unavailable' };
+      }
+      return result;
+    },
+  });
+
   registerCommentSyncStateRoutes(app, {
     db,
     authorize: resolveProjectCommentReadWorkspaceContext,
@@ -5170,7 +5193,7 @@ export async function startServer({
         && item.workspaceMemberId === scope.workspaceMemberId
         && item.memberStatus === 'active'
         && item.lifecycleState !== 'deleted' && item.lifecycleState !== 'deleting');
-    }),
+    }, { readAlign: scope => commentAlignment.read(scope) }),
   });
   const resolveFreshProjectCommentWorkspaceContext = async (
     req: any,
@@ -5193,6 +5216,12 @@ export async function startServer({
     }
     return verifiedWorkspaceContextForRequest(req, projectId);
   };
+  // Registered after the fresh-context resolver it depends on: a route wired
+  // before its authorizer exists captures `undefined` and authorizes nothing.
+  registerCommentAlignmentRoutes(app, {
+    db, alignment: commentAlignment,
+    authorize: resolveFreshProjectCommentWorkspaceContext,
+  });
   const verifiedTeamMirrorScope = async (
     scope: TeamMirrorPullScope,
   ): Promise<boolean> => {
