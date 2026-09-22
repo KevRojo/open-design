@@ -1,0 +1,109 @@
+// @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { ComponentProps } from 'react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'postcss';
+import { ShareTab } from '../../../src/components/share/ShareTab';
+
+afterEach(cleanup);
+
+type Props = ComponentProps<typeof ShareTab>;
+function props(overrides: Partial<Props> = {}): Props {
+  return {
+    menuOrigin: 'artifact-card', workspaceContext: null, t: (key) => key,
+    shareAccess: 'private', shareAccessMenuOpen: false, shareAccessBusy: false,
+    viewerOnly: false, setShareAccessMenuOpen: vi.fn(), setWorkspaceShareAccess: vi.fn(),
+    canPublishPublic: true, filePublished: true, publishedFileUrl: 'https://example.test/artifact/p/s',
+    copyPublishedFileLink: vi.fn().mockResolvedValue(undefined), publishLinkFeedback: null,
+    publishingPublicFile: false, publishProgress: null,
+    unpublishCurrentFilePublic: vi.fn().mockResolvedValue(undefined), viewerOnlyDisabledTitle: 'read only',
+    publishCurrentFilePublic: vi.fn().mockResolvedValue(undefined), publishFailureKey: null,
+    DEPLOY_PROVIDER_OPTIONS: [], streaming: false, openDeployModal: vi.fn().mockResolvedValue(undefined),
+    deployActionIconFor: () => 'pages-line', deployActionLabelFor: () => 'Deploy',
+    sharePageUrl: '', canCopyShareLink: false, shareUnavailableHint: '',
+    copyShareLink: vi.fn().mockResolvedValue(true), copyShareLinkLabel: '',
+    canOpenSharePage: false, shareLinkStatusHint: '', ...overrides,
+  };
+}
+
+const checkPath = 'm3 8 3 3 7-7';
+const linkPath = 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7';
+
+describe('S3/S4/S4-C copy-button rendering seam', () => {
+  it.each([null, 'copied', 'failed'] as const)('renders only the matching icon for feedback %s', (feedback) => {
+    render(<ShareTab {...props({ publishLinkFeedback: feedback })} />);
+    const label = feedback === 'copied' ? 'fileViewer.copied'
+      : feedback === 'failed' ? 'useEverywhere.copyFailed' : 'fileViewer.copyShareLink';
+    const button = screen.getByRole('button', { name: label });
+    expect(button.className).toContain('copyButton');
+    const icon = button.querySelector('svg')!;
+    expect(icon).toHaveAttribute('width', '13');
+    expect(icon).toHaveAttribute('height', '13');
+    expect(icon).toHaveAttribute('viewBox', feedback === 'copied' ? '0 0 16 16' : '0 0 24 24');
+    expect(icon).toHaveAttribute('fill', 'none');
+    expect(icon).toHaveAttribute('stroke', 'currentColor');
+    expect(icon).toHaveAttribute('stroke-width', '1.8');
+    expect(icon).toHaveAttribute('stroke-linecap', 'round');
+    expect(icon).toHaveAttribute('stroke-linejoin', 'round');
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(icon.querySelector('path')).toHaveAttribute('d', feedback === 'copied' ? checkPath : linkPath);
+    expect(icon.classList.toString().includes('copiedIcon')).toBe(feedback === 'copied');
+    expect(screen.getByRole('button', { name: 'fileViewer.unpublishFile' }).className).not.toContain('copyButton');
+  });
+
+  it('keeps copy and stop callbacks separate and the URL read-only', () => {
+    const input = props();
+    render(<ShareTab {...input} />);
+    fireEvent.click(screen.getByRole('button', { name: 'fileViewer.copyShareLink' }));
+    expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(1);
+    expect(input.unpublishCurrentFilePublic).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'fileViewer.unpublishFile' }));
+    expect(input.unpublishCurrentFilePublic).toHaveBeenCalledTimes(1);
+    expect(input.publishCurrentFilePublic).not.toHaveBeenCalled();
+    expect(screen.getByText(input.publishedFileUrl)).toHaveAttribute('title', input.publishedFileUrl);
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it.each([
+    { streaming: true, viewerOnly: false, publishingPublicFile: false },
+    { streaming: false, viewerOnly: true, publishingPublicFile: false },
+    { streaming: false, viewerOnly: false, publishingPublicFile: true },
+  ])('preserves disabled predicates: %j', (state) => {
+    const input = props(state);
+    render(<ShareTab {...input} />);
+    const copy = screen.getByRole('button', { name: 'fileViewer.copyShareLink' });
+    expect((copy as HTMLButtonElement).disabled).toBe(state.streaming);
+    expect(copy.getAttribute('title')).toBe(state.streaming ? 'fileViewer.shareAfterGenerationComplete' : null);
+    fireEvent.click(copy);
+    expect(input.copyPublishedFileLink).toHaveBeenCalledTimes(state.streaming ? 0 : 1);
+    expect((screen.getByRole('button', { name: 'fileViewer.unpublishFile' }) as HTMLButtonElement).disabled)
+      .toBe(state.publishingPublicFile);
+  });
+
+  it('removes the success icon when the existing feedback returns to null or fails', () => {
+    const input = props({ publishLinkFeedback: 'copied' });
+    const { rerender } = render(<ShareTab {...input} />);
+    for (const feedback of [null, 'failed'] as const) {
+      rerender(<ShareTab {...input} publishLinkFeedback={feedback} />);
+      expect(document.querySelector('path[d="' + checkPath + '"]')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'fileViewer.copied' })).toBeNull();
+    }
+  });
+
+  it('declares the canvas values locally (static CSS contract, not pixel measurement)', () => {
+    const css = parse(readFileSync(resolve(__dirname, '../../../src/components/share/ShareTab.module.css'), 'utf8'));
+    const declarations = (selector: string) => {
+      const values: Record<string, string> = {};
+      css.walkRules(selector, (rule) => { rule.walkDecls((decl) => { values[decl.prop] = decl.value; }); });
+      return values;
+    };
+    expect(declarations('button.copyButton')).toMatchObject({
+      height: '32px', 'border-radius': '6px', gap: '5px', background: '#29292B', color: '#FFFFFF',
+      'font-size': '12px', 'font-weight': '500', 'line-height': '18px', border: '0', padding: '0 8px',
+    });
+    expect(declarations('button.copyButton:hover:not(:disabled)')).toMatchObject({ background: '#29292B' });
+    expect(declarations('.copiedIcon')).toMatchObject({ color: '#82D994' });
+  });
+});

@@ -1,11 +1,21 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { workspaceContextHasTeamIdentity, type SocialShareResponse, type WorkspaceCollabContext } from '@open-design/contracts';
+import { Button } from '@open-design/components';
+import { workspaceContextHasTeamIdentity, type WorkspaceCollabContext } from '@open-design/contracts';
 import type { PublicFilePublishFailureKey } from '../../collab/public-file-publish';
 import type { useT } from '../../i18n';
 import type { WebDeployProviderId } from '../../providers/registry';
 import type { DeployProviderOption } from '../FileViewer';
 import { RemixIcon } from '../RemixIcon';
-import { SocialShareGrid } from '../SocialShareGrid';
+import styles from './ShareTab.module.css';
+
+export type SharePublishFailureKey = PublicFilePublishFailureKey | 'fileViewer.publishFileTooLarge';
+
+/** Time-based waiting feedback, not transferred bytes. Only success may reach 1. */
+export function boundedPublishProgress(elapsedMs: number, completed: boolean): number {
+  if (completed) return 1;
+  const elapsed = Number.isNaN(elapsedMs) ? 0 : Math.max(0, elapsedMs);
+  return Math.min(0.9, 0.9 * (1 - Math.exp(-elapsed / 5000)));
+}
 
 export function ShareTab({
   menuOrigin,
@@ -23,12 +33,11 @@ export function ShareTab({
   copyPublishedFileLink,
   publishLinkFeedback,
   publishingPublicFile,
+  publishProgress,
   unpublishCurrentFilePublic,
   viewerOnlyDisabledTitle,
   publishCurrentFilePublic,
   publishFailureKey,
-  activeProjectSocialShare,
-  shareableDeploymentUrl,
   DEPLOY_PROVIDER_OPTIONS,
   streaming,
   openDeployModal,
@@ -57,12 +66,11 @@ export function ShareTab({
   copyPublishedFileLink: () => Promise<void>;
   publishLinkFeedback: 'copied' | 'failed' | null;
   publishingPublicFile: boolean;
+  publishProgress: number | null;
   unpublishCurrentFilePublic: () => Promise<void>;
   viewerOnlyDisabledTitle: string;
   publishCurrentFilePublic: () => Promise<void>;
-  publishFailureKey: PublicFilePublishFailureKey | null;
-  activeProjectSocialShare: SocialShareResponse | null;
-  shareableDeploymentUrl: string;
+  publishFailureKey: SharePublishFailureKey | null;
   DEPLOY_PROVIDER_OPTIONS: DeployProviderOption[];
   streaming: boolean;
   openDeployModal: (nextProviderId?: WebDeployProviderId, intent?: 'deploy' | 'social-share') => Promise<void>;
@@ -159,53 +167,49 @@ export function ShareTab({
                         </div>
                       </>
                       ) : null}
-                      {/* Publishing is a menu row like every other action in
-                          this panel (deploy, save-as-template): same section
-                          label, same icon + label row, with a trailing "?"
-                          whose tooltip explains reach and the single-file
-                          limitation. The published state swaps the row for the
-                          link block (content, not an action). */}
                       {canPublishPublic ? (
                       <>
-                      {/* The "?" lives on the section label, not inside the publish
-                          menuitem: activating it is a help-discovery gesture, and
-                          nesting it in the row would make that gesture publish a
-                          public link (no hover-only path exists on touch). Same
-                          structure as the workspace-access help above. */}
-                      <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
-                        <span>{t('fileViewer.shareMenuPublishViaOd')}</span>
-                        <button
-                          type="button"
-                          className="share-menu-help od-tooltip"
-                          data-testid="publish-help"
-                          aria-label={t('fileViewer.publishSingleFileDescription')}
-                          data-tooltip={t('fileViewer.publishSingleFileDescription')}
-                          data-tooltip-placement="top"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <RemixIcon name="question-line" size={14} />
-                        </button>
-                      </div>
+                      {publishProgress !== null ? (
+                        <progress max={1} value={publishProgress} aria-label={t('fileViewer.publishingFile')} />
+                      ) : null}
                       {filePublished ? (
                         <div className="chrome-publish-plain">
                           <div className="chrome-publish-url" title={publishedFileUrl}>
                               {publishedFileUrl}
                             </div>
                             <div className="chrome-publish-actions">
-                              <button
+                              <Button
                                 type="button"
-                                className="chrome-publish-button"
+                                className={styles.copyButton}
+                                disabled={streaming}
+                                title={streaming ? t('fileViewer.shareAfterGenerationComplete') : undefined}
                                 onClick={() => {
                                   void copyPublishedFileLink();
                                 }}
                               >
-                                <RemixIcon name="file-copy-line" size={14} />
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox={publishLinkFeedback === 'copied' ? '0 0 16 16' : '0 0 24 24'}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  aria-hidden="true"
+                                  focusable="false"
+                                  className={publishLinkFeedback === 'copied' ? styles.copiedIcon : undefined}
+                                >
+                                  <path d={publishLinkFeedback === 'copied'
+                                    ? 'm3 8 3 3 7-7'
+                                    : 'M10 13.5a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 10.5a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.7-1.7'} />
+                                </svg>
                                 {publishLinkFeedback === 'copied'
                                   ? t('fileViewer.copied')
                                   : publishLinkFeedback === 'failed'
                                     ? t('useEverywhere.copyFailed')
                                     : t('fileViewer.copyShareLink')}
-                              </button>
+                              </Button>
                               <button
                                 type="button"
                                 className="chrome-publish-button chrome-publish-button--ghost"
@@ -219,46 +223,65 @@ export function ShareTab({
                           </div>
                         </div>
                       ) : (
-                        <button
+                        <Button
                           type="button"
-                          className="share-menu-item"
+                          className={styles.copyButton}
                           role="menuitem"
-                          disabled={viewerOnly || publishingPublicFile}
+                          disabled={streaming || viewerOnly || publishingPublicFile}
                           aria-busy={publishingPublicFile}
-                          title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
+                          title={viewerOnly ? viewerOnlyDisabledTitle : streaming ? t('fileViewer.shareAfterGenerationComplete') : undefined}
                           onClick={() => {
                             void publishCurrentFilePublic();
                           }}
                         >
-                          <span className="share-menu-icon">
-                            <RemixIcon
-                              name={publishingPublicFile ? 'loader-4-line' : 'upload-cloud-2-line'}
-                              size={15}
-                              className={publishingPublicFile ? 'icon-spin' : undefined}
-                            />
-                          </span>
-                          <span>{publishingPublicFile ? t('fileViewer.publishingFile') : t('fileViewer.publishSingleFileTitle')}</span>
-                        </button>
+                          {publishingPublicFile ? (
+                            <RemixIcon name="loader-4-line" size={15} className="icon-spin" />
+                          ) : (
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                              focusable="false"
+                            >
+                              <path d="M12 15V4m-4 4 4-4 4 4M5 20h14" />
+                            </svg>
+                          )}
+                          <span>{publishingPublicFile
+                            ? t('fileViewer.publishingFile')
+                            : publishFailureKey === 'fileViewer.publishFileFailed' || publishFailureKey === 'fileViewer.publishFileTooLarge'
+                              ? t('preview.retry')
+                              : t('fileViewer.generateAndCopyLink')}</span>
+                        </Button>
                       ) }
                       {publishFailureKey ? (
-                        <p className="chrome-publish-error" role="status">
-                          {t(publishFailureKey)}
+                        <p className={styles.publishError} role="status">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            aria-hidden="true"
+                            focusable="false"
+                          >
+                            <circle cx="8" cy="8" r="6.2" />
+                            <path d="M8 4.8v3.6M8 11h.01" />
+                          </svg>
+                          <span>{t(publishFailureKey)}</span>
                         </p>
                       ) : null}
                       </>
                       ) : null}
                       {menuOrigin === 'toolbar' ? (
                         <>
-                          {/* Icons only for a clean link. Artifact-card Share is
-                              intentionally narrower: Quick Share above only. */}
-                          {activeProjectSocialShare && (shareableDeploymentUrl || publishedFileUrl) ? (
-                            <>
-                              <div className="share-menu-section-label" role="presentation">
-                                {t('socialShare.projectSection')}
-                              </div>
-                              <SocialShareGrid share={activeProjectSocialShare} />
-                            </>
-                          ) : null}
                           <div className="share-menu-divider" />
                           <div className="share-menu-section-label" role="presentation">
                             {t('fileViewer.shareMenuPublishOnline')}

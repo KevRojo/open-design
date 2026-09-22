@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
-import { ShareTab } from './share/ShareTab';
+import { boundedPublishProgress, ShareTab, type SharePublishFailureKey } from './share/ShareTab';
 import { AnchoredMenuShell } from './chat/AnchoredMenuShell';
 import { createPortal, flushSync } from 'react-dom';
 import { Button, Input, Select } from '@open-design/components';
@@ -18,6 +18,8 @@ import {
 } from './comment-send-result';
 import {
   buildSocialSharePayload,
+  hasUnreadComments,
+  type ProjectCommentReadState,
   OPEN_DESIGN_GITHUB_REPO_URL,
   workspaceContextHasTeamIdentity,
   type CollabCloudMemberDirectoryEntry,
@@ -36,6 +38,7 @@ import {
 } from '@open-design/contracts/runtime/preview-runtime-state';
 import {
   appendResourceQuery,
+  workspaceAccountScopedCacheKey,
   workspaceIdentityCacheKey,
   workspaceProjectHeaders,
 } from '../collab/workspace-identity';
@@ -103,6 +106,7 @@ import {
   TEAM_PROJECTS_CHANGED_EVENT,
 } from '../collab/useWorkspaceContext';
 import {
+  PublicFilePublishError,
   canPublishPublicFile,
   publicFileManualRevokePublication,
   publicFilePublishFailureKey,
@@ -243,8 +247,6 @@ import {
   canDeleteComment,
   canEditComment,
   canSendCommentToAgent as canSendCommentToAgentPure,
-  commentAuthoredByViewer,
-  viewerIsProjectOwner,
   type CommentAuthorityContext,
 } from '../comments/comment-authority';
 import { RemixIcon } from './RemixIcon';
@@ -4410,20 +4412,20 @@ function commentTargetIntersectsPreview(
 // Stable avatar palette for comment authors — a member always gets the same
 // swatch (hash of their id), so the same person reads consistently across cards
 // and sessions. The demo's orange circle lives here as the first entry.
-const COMMENT_AUTHOR_AVATAR_COLORS = [
-  '#f97316',
-  '#e11d48',
-  '#7c3aed',
-  '#2563eb',
-  '#0891b2',
-  '#059669',
-  '#ca8a04',
-  '#db2777',
-  '#4f46e5',
-  '#0d9488',
+export const COMMENT_AUTHOR_AVATAR_COLORS = [
+  { bg: '#7DB7FF', fg: '#144582' }, { bg: '#FFB86B', fg: '#803D12' }, { bg: '#B19AFF', fg: '#482D80' },
+  { bg: '#6DDDB1', fg: '#155C40' }, { bg: '#FF92BC', fg: '#7D234C' }, { bg: '#F7D45B', fg: '#75560C' },
+  { bg: '#69D5F0', fg: '#155365' }, { bg: '#FF9B85', fg: '#733526' }, { bg: '#8DE56C', fg: '#285728' },
+  { bg: '#D58FFF', fg: '#5A2C6D' }, { bg: '#91A9FF', fg: '#283F75' }, { bg: '#FFC76B', fg: '#634E28' },
+  { bg: '#68DEC9', fg: '#1C5C53' }, { bg: '#FF8BC7', fg: '#702D48' }, { bg: '#BDE66A', fg: '#445D20' },
+  { bg: '#B78AFF', fg: '#442C64' }, { bg: '#5ED9B3', fg: '#1B5349' }, { bg: '#FF939D', fg: '#6E342E' },
+  { bg: '#78C7FF', fg: '#2E516A' }, { bg: '#F5CF63', fg: '#6B5118' }, { bg: '#9AE883', fg: '#375C38' },
+  { bg: '#EA8AD7', fg: '#563450' }, { bg: '#6EDA94', fg: '#274E38' }, { bg: '#9E9BFF', fg: '#363861' },
+  { bg: '#FFA277', fg: '#6C3F1D' }, { bg: '#ABE779', fg: '#3D6030' }, { bg: '#68D4E6', fg: '#285567' },
+  { bg: '#D99AFA', fg: '#63365A' }, { bg: '#FFD17C', fg: '#625034' }, { bg: '#6CDCD9', fg: '#33585E' },
 ] as const;
 
-function commentAuthorAvatarColor(seed: string): string {
+export function commentAuthorAvatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -4440,8 +4442,111 @@ function commentAuthorInitials(name: string): string {
   return (first ?? '?').toUpperCase();
 }
 
-function commentAuthorRoleLabel(role: CollabMemberRole): string {
-  return role.charAt(0).toUpperCase() + role.slice(1);
+type CommentAuthorRole = CollabMemberRole | 'sharePage';
+
+function commentAuthorRoleLabel(role: CommentAuthorRole, t: TranslateFn): string {
+  switch (role) {
+    case 'owner': return t('comment.authorRole.owner');
+    case 'admin': return t('comment.authorRole.admin');
+    case 'member': return t('comment.authorRole.member');
+    case 'sharePage': return t('comment.authorRole.sharePage');
+  }
+}
+
+function CommentAuthorIdentity({
+  comment,
+  currentUser,
+  displayNumber,
+  t,
+}: {
+  comment: PreviewComment;
+  currentUser?: CollabCloudMemberDirectoryEntry | null;
+  displayNumber: number;
+  t: TranslateFn;
+}) {
+  if (comment.authorKind === 'user') {
+    return (
+      <CommentAuthorIdentityContent
+        comment={comment}
+        displayName={comment.authorDisplayName?.trim() ?? ''}
+        displayNumber={displayNumber}
+        role="sharePage"
+        seed={comment.authorKey ?? comment.authorAppUserId ?? ''}
+        t={t}
+      />
+    );
+  }
+  return (
+    <MemberCommentAuthorIdentity
+      comment={comment}
+      currentUser={currentUser}
+      displayNumber={displayNumber}
+      t={t}
+    />
+  );
+}
+
+function MemberCommentAuthorIdentity({
+  comment,
+  currentUser,
+  displayNumber,
+  t,
+}: {
+  comment: PreviewComment;
+  currentUser?: CollabCloudMemberDirectoryEntry | null;
+  displayNumber: number;
+  t: TranslateFn;
+}) {
+  const { resolve: resolveCommentAuthor } = useTeamMembers(currentUser);
+  const directoryAuthor = resolveCommentAuthor(comment.authorMemberId);
+  return (
+    <CommentAuthorIdentityContent
+      comment={comment}
+      displayName={comment.authorDisplayName?.trim() || directoryAuthor?.displayName?.trim() || ''}
+      displayNumber={displayNumber}
+      role={directoryAuthor?.role}
+      seed={comment.authorKey ?? comment.authorMemberId ?? directoryAuthor?.memberId ?? ''}
+      t={t}
+    />
+  );
+}
+
+function CommentAuthorIdentityContent({
+  comment,
+  displayName,
+  displayNumber,
+  role,
+  seed,
+  t,
+}: {
+  comment: PreviewComment;
+  displayName: string;
+  displayNumber: number;
+  role?: CommentAuthorRole;
+  seed?: string;
+  t: TranslateFn;
+}) {
+  const avatarColor = commentAuthorAvatarColor(seed ?? '');
+  return (
+    <span className="comment-side-author" data-author-kind={comment.authorKind ?? 'member'}>
+      <span
+        className="comment-side-avatar"
+        style={{ background: avatarColor.bg, color: avatarColor.fg }}
+        aria-hidden="true"
+      >
+        {commentAuthorInitials(displayName)}
+      </span>
+      <span className="comment-side-author-copy">
+        <strong>{`${displayNumber}. ${commentDisplayLabel(comment, t)}`}</strong>
+        {displayName ? (
+          <small>
+            {displayName}
+            {role ? <> · {commentAuthorRoleLabel(role, t)}</> : null}
+          </small>
+        ) : null}
+      </span>
+    </span>
+  );
 }
 
 function commentDisplayLabel(comment: PreviewComment, t: TranslateFn): string {
@@ -4485,6 +4590,7 @@ export function CommentSidePanel({
   renderCreateForm = true,
   t,
   composer,
+  deckSlideCount,
 }: {
   comments: PreviewComment[];
   projectId?: string;
@@ -4517,15 +4623,12 @@ export function CommentSidePanel({
   renderCreateForm?: boolean;
   t: TranslateFn;
   composer?: ReactNode;
+  /** Total deck slides, when the sidebar is attached to a deck preview. */
+  deckSlideCount?: number;
 }) {
   const { workspaceContext } = useProjectCollabContext();
   const [newCommentDraft, setNewCommentDraft] = useState('');
   const [dragState, setDragState] = useState<CommentSideDragState | null>(null);
-  // Collab-cloud member directory: turns a comment's authorMemberId into a
-  // display name + role for the author line + avatar. The viewer's own identity
-  // resolves through `currentUser` even when the directory is empty; an unknown
-  // OTHER member still renders without an author line, exactly as before.
-  const { resolve: resolveCommentAuthor } = useTeamMembers(currentUser);
   const sorted = comments;
   // recvq5BVsolIxi: the inline "N." prefix must match the canvas pin number
   // (comment.pinSeq) so the two surfaces always agree, even when this panel
@@ -4682,13 +4785,7 @@ export function CommentSidePanel({
             aria-controls={panelId}
             aria-expanded={true}
             title={t('preview.hideSidebar', { label: commentsLabel })}
-            onClick={() => {
-              if (onDismiss) {
-                onDismiss();
-                return;
-              }
-              handleCollapsedChange(true, 'collapsed');
-            }}
+            onClick={() => handleCollapsedChange(true, 'collapsed')}
           >
             <Icon name="chevron-right" size={14} />
           </button>
@@ -4722,7 +4819,6 @@ export function CommentSidePanel({
           const selected = visibleSelectedIds.has(comment.id);
           const active = comment.id === activeCommentId;
           const sendable = canSend(comment);
-          const author = resolveCommentAuthor(comment.authorMemberId);
           const isDragging = dragState?.draggingId === comment.id;
           const dropClass = dragState?.overId === comment.id &&
             dragState.draggingId !== comment.id &&
@@ -4761,27 +4857,12 @@ export function CommentSidePanel({
                 >
                   <Icon name="grip-vertical" size={13} />
                 </button>
-                <span className="comment-side-author">
-                  {author ? (
-                    <span
-                      className="comment-side-avatar"
-                      style={{ background: commentAuthorAvatarColor(comment.authorMemberId ?? author.memberId) }}
-                      aria-hidden="true"
-                    >
-                      {commentAuthorInitials(author.displayName)}
-                    </span>
-                  ) : null}
-                  <span className="comment-side-author-copy">
-                    <strong>{`${displayCommentNumber(comment, index)}. ${commentDisplayLabel(comment, t)}`}</strong>
-                    {author ? (
-                      <small>
-                        {author.displayName}
-                        {' · '}
-                        {commentAuthorRoleLabel(author.role)}
-                      </small>
-                    ) : null}
-                  </span>
-                </span>
+                <CommentAuthorIdentity
+                  comment={comment}
+                  currentUser={currentUser}
+                  displayNumber={displayCommentNumber(comment, index)}
+                  t={t}
+                />
                 <span className="comment-side-time">{formatCommentTime(commentActivityAt(comment), t)}</span>
                 {sendable ? (
                   <button
@@ -4799,6 +4880,11 @@ export function CommentSidePanel({
                 ) : null}
               </div>
               <div className="comment-side-body">{comment.note}</div>
+              {typeof comment.slideIndex === 'number' && deckSlideCount && deckSlideCount > 0 ? (
+                <span className="comment-side-slide">
+                  {t('fileViewer.speakerNotesSlide', { current: comment.slideIndex + 1, total: deckSlideCount })}
+                </span>
+              ) : null}
               {projectId && comment.attachments && comment.attachments.length > 0 ? (
                 <div className="comment-side-attachments">
                   {comment.attachments.map((attachment) => {
@@ -4991,6 +5077,7 @@ function CommentSideDock({
   renderCreateForm = true,
   t,
   composer,
+  deckSlideCount,
 }: {
   comments: PreviewComment[];
   projectId?: string;
@@ -5019,6 +5106,7 @@ function CommentSideDock({
   renderCreateForm?: boolean;
   t: TranslateFn;
   composer?: ReactNode;
+  deckSlideCount?: number;
 }) {
   return (
     <div
@@ -5050,6 +5138,7 @@ function CommentSideDock({
         renderCreateForm={renderCreateForm}
         t={t}
         composer={composer}
+        deckSlideCount={deckSlideCount}
       />
     </div>
   );
@@ -5758,14 +5847,14 @@ export function applyInspectOverridesToSource(source: string, css: string): stri
   return block + out;
 }
 
-function anchorStateLabel(state: PreviewCommentAnchorState): string {
+function anchorStateLabel(state: PreviewCommentAnchorState, t: TranslateFn): string {
   switch (state) {
     case 'reanchored':
-      return 'based on an older version';
+      return t('comment.anchorState.reanchored');
     case 'stale':
-      return 'anchor may have moved';
+      return t('comment.anchorState.stale');
     case 'lost':
-      return 'anchor lost';
+      return t('comment.anchorState.lost');
     default:
       return '';
   }
@@ -5790,6 +5879,7 @@ function CommentPreviewOverlays({
   currentVersion,
   onLostAnchors,
   onOpenComment,
+  t,
 }: {
   comments: PreviewComment[];
   /** Next pin number for a brand-new comment. Computed by the caller over the
@@ -5817,6 +5907,7 @@ function CommentPreviewOverlays({
    *  ghost pin survives reload. Only fires in drift-ladder mode. */
   onLostAnchors?: (writeBacks: AnchorWriteBack[]) => void;
   onOpenComment: (comment: PreviewComment, snapshot: PreviewCommentSnapshot) => void;
+  t: TranslateFn;
 }) {
   const overlayOffset = useMemo(() => ({ x: offsetX, y: offsetY }), [offsetX, offsetY]);
   const visibleComments = useMemo(
@@ -5890,6 +5981,9 @@ function CommentPreviewOverlays({
         const bounds = overlayBoundsFromSnapshot(snapshot, scale, overlayOffset);
         const label = commentTargetDisplayName(comment);
         const drifted = anchorState !== 'anchored';
+        const tooltip = drifted
+          ? `${markerNumber}. ${label} · ${anchorStateLabel(anchorState, t)}`
+          : `${markerNumber}. ${label}: ${comment.note}`;
         return (
           <div
             key={comment.id}
@@ -5907,24 +6001,23 @@ function CommentPreviewOverlays({
             <div className="comment-saved-outline" />
             <button
               type="button"
-              className="comment-saved-pin"
+              className="comment-saved-pin od-tooltip tipd"
+              data-tooltip={tooltip}
+              data-tooltip-placement="top"
               onClick={(event) => {
                 event.stopPropagation();
                 onOpenCommentRef.current(comment, snapshot);
               }}
-              title={
-                drifted
-                  ? `${markerNumber}. ${label} · ${anchorStateLabel(anchorState)}`
-                  : `${markerNumber}. ${label}: ${comment.note}`
-              }
+              title={tooltip}
               aria-label={`Open comment for ${label}`}
+              aria-description={tooltip}
             >
               {markerNumber}
             </button>
           </div>
         );
       }),
-    [visibleComments, scale, overlayOffset],
+    [visibleComments, scale, overlayOffset, t],
   );
   const activeSavedIndex = activeExistingCommentId
     ? comments.findIndex((comment) => comment.id === activeExistingCommentId)
@@ -7874,7 +7967,7 @@ function HtmlViewer({
   // Why a publish/unpublish attempt failed, as a message key. `publishLinkFeedback`
   // only renders inside the already-published branch, so a failed FIRST publish
   // used to leave no trace on screen at all — the button simply returned to idle.
-  const [publishFailureKey, setPublishFailureKey] = useState<PublicFilePublishFailureKey | null>(null);
+  const [publishFailureKey, setPublishFailureKey] = useState<SharePublishFailureKey | null>(null);
   const filePublished = publishedFileUrl.length > 0;
   // Public links need a signed-in workspace (any type); see canPublishPublicFile.
   const canPublishPublic = canPublishPublicFile(workspaceContext);
@@ -7980,7 +8073,50 @@ function HtmlViewer({
     if (!deployMenuOpen) setShareAccessMenuOpen(false);
   }, [deployMenuOpen]);
 
+  // Sharing actions require complete content; inspecting the menu does not.
+  // Async publish completions must also observe the current streaming state.
+  const shareContentStreamingRef = useRef(streaming);
+  shareContentStreamingRef.current = streaming;
+
+  // Owned by the viewer: closing ShareTab neither cancels nor restarts a publish.
+  const [publishProgress, setPublishProgress] = useState<number | null>(null);
+  const publicFileProgressTimerRef = useRef<number | null>(null);
+  const publicFileProgressCompletionRef = useRef<number | null>(null);
+
+  function clearPublicFileProgressTimers() {
+    if (publicFileProgressTimerRef.current !== null) {
+      window.clearInterval(publicFileProgressTimerRef.current);
+      publicFileProgressTimerRef.current = null;
+    }
+    if (publicFileProgressCompletionRef.current !== null) {
+      window.clearTimeout(publicFileProgressCompletionRef.current);
+      publicFileProgressCompletionRef.current = null;
+    }
+  }
+
+  const publicFileCopySeqRef = useRef(0);
+  const publicFileCopyTimerRef = useRef<number | null>(null);
+
+  // Each clipboard completion and timer belongs to one operation, not just
+  // to its feedback label: two successive successful copies both say "copied".
+  function invalidatePublicFileCopy() {
+    ++publicFileCopySeqRef.current;
+    if (publicFileCopyTimerRef.current !== null) {
+      window.clearTimeout(publicFileCopyTimerRef.current);
+      publicFileCopyTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => () => {
+    ++publicFileRequestSeqRef.current;
+    clearPublicFileProgressTimers();
+    invalidatePublicFileCopy();
+  }, []);
+
   useEffect(() => {
+    clearPublicFileProgressTimers();
+    setPublishProgress(null);
+    invalidatePublicFileCopy();
     publicFileIdentityRef.current = { projectId, fileName: file.name };
     const requestSeq = ++publicFileRequestSeqRef.current;
     let cancelled = false;
@@ -8078,12 +8214,20 @@ function HtmlViewer({
   };
 
   async function publishCurrentFilePublic() {
-    if (viewerOnly || publishingPublicFile) return;
+    if (streaming || viewerOnly || publishingPublicFile) return;
     const requestProjectId = projectId;
     const requestFileName = file.name;
     const requestSeq = ++publicFileRequestSeqRef.current;
+    invalidatePublicFileCopy();
+    clearPublicFileProgressTimers();
+    setPublishProgress(boundedPublishProgress(0, false));
     firePublishFlowClick('publish_file');
     const publishStarted = performance.now();
+    publicFileProgressTimerRef.current = window.setInterval(() => {
+      if (publicFileRequestSeqRef.current !== requestSeq) return;
+      setPublishProgress((previous) => Math.max(previous ?? 0,
+        boundedPublishProgress(performance.now() - publishStarted, false)));
+    }, 250);
     setPublishingPublicFile(true);
     setPublishLinkFeedback(null);
     setPublishFailureKey(null);
@@ -8104,6 +8248,17 @@ function HtmlViewer({
       }
       setPublishedFileUrl(response.url);
       setPublishedFileSlug(response.slug);
+      clearPublicFileProgressTimers();
+      setPublishProgress(boundedPublishProgress(0, true));
+      // Keep success observable without delaying the link or S3's clipboard window.
+      publicFileProgressCompletionRef.current = window.setTimeout(() => {
+        if (publicFileRequestSeqRef.current !== requestSeq) return;
+        publicFileProgressCompletionRef.current = null;
+        setPublishProgress(null);
+      }, 1000);
+      // Copy this response, not the previous render's URL. Clipboard failure
+      // is not publication failure, and automatic copy is not a user click.
+      void copyPublicFileUrl(response.url);
     } catch (error) {
       console.warn('[FileViewer] failed to publish public file', error);
       const recoveryPublication = publicFileManualRevokePublication(error);
@@ -8114,6 +8269,8 @@ function HtmlViewer({
         publish_duration_ms: Math.round(performance.now() - publishStarted),
       });
       if (publicFileRequestSeqRef.current === requestSeq) {
+        clearPublicFileProgressTimers();
+        setPublishProgress(null);
         if (recoveryPublication) {
           setPublishedFileUrl(recoveryPublication.url);
           setPublishedFileSlug(recoveryPublication.slug);
@@ -8121,7 +8278,11 @@ function HtmlViewer({
           setPublishFailureKey(null);
         } else {
           setPublishLinkFeedback('failed');
-          setPublishFailureKey(publicFilePublishFailureKey(error));
+          // The provider preserves status/code, but not the plan's byte totals.
+          setPublishFailureKey(error instanceof PublicFilePublishError
+            && error.status === 413 && error.code === 'too_large'
+            ? 'fileViewer.publishFileTooLarge'
+            : publicFilePublishFailureKey(error));
         }
       }
     } finally {
@@ -8135,6 +8296,9 @@ function HtmlViewer({
     const requestFileName = file.name;
     const requestSlug = publishedFileSlug;
     const requestSeq = ++publicFileRequestSeqRef.current;
+    invalidatePublicFileCopy();
+    clearPublicFileProgressTimers();
+    setPublishProgress(null);
     const unpublishStarted = performance.now();
     setPublishingPublicFile(true);
     setPublishLinkFeedback(null);
@@ -8173,22 +8337,35 @@ function HtmlViewer({
     }
   }
 
-  async function copyPublishedFileLink() {
-    firePublishFlowClick('copy_publish_link');
+  async function copyPublicFileUrl(url: string) {
+    if (shareContentStreamingRef.current) return;
+    invalidatePublicFileCopy();
+    const copySeq = publicFileCopySeqRef.current;
+    const requestSeq = publicFileRequestSeqRef.current;
+    const isCurrent = () => publicFileCopySeqRef.current === copySeq &&
+      publicFileRequestSeqRef.current === requestSeq;
+    setPublishLinkFeedback(null);
     let ok = false;
     try {
-      if (publishedFileUrl && typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(publishedFileUrl);
+      if (url && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
         ok = true;
       }
     } catch {
       ok = false;
     }
-    const feedback = ok ? 'copied' : 'failed';
-    setPublishLinkFeedback(feedback);
-    window.setTimeout(() => {
-      setPublishLinkFeedback((current) => (current === feedback ? null : current));
+    if (!isCurrent()) return;
+    setPublishLinkFeedback(ok ? 'copied' : 'failed');
+    publicFileCopyTimerRef.current = window.setTimeout(() => {
+      if (!isCurrent()) return;
+      publicFileCopyTimerRef.current = null;
+      setPublishLinkFeedback(null);
     }, 1800);
+  }
+
+  async function copyPublishedFileLink() {
+    firePublishFlowClick('copy_publish_link');
+    await copyPublicFileUrl(publishedFileUrl);
   }
   // Same shared 转入/移出团队空间 confirmation as the project grid — see the
   // ReactComponentViewer copy above for the rationale.
@@ -8253,6 +8430,11 @@ function HtmlViewer({
   const [urlPreviewFirstLoadPending, setUrlPreviewFirstLoadPending] = useState(false);
   const [boardMode, setBoardMode] = useState(false);
   const [commentPanelOpen, setCommentPanelOpen] = useState(false);
+  const [commentReadState, setCommentReadState] = useState<ProjectCommentReadState | null>(null);
+  // The marker is scoped to the authenticated account as well as the project.
+  // A late response from a previous account must never become this viewer's state.
+  const commentReadScopeKey = `${projectId}\u0000${workspaceAccountScopedCacheKey(workspaceContext)}`;
+  const commentReadScopeRef = useRef(commentReadScopeKey);
   const commentPanelToggleRef = useRef<HTMLButtonElement | null>(null);
   const commentPanelReturnFocusRef = useRef<HTMLElement | null>(null);
   const pendingCommentPanelFocusRef = useRef<HTMLElement | null>(null);
@@ -15709,6 +15891,67 @@ function HtmlViewer({
       ),
     [creationSortedSideComments],
   );
+  // A member id is a trusted current identity only when the workspace context
+  // supplies one. Never let two absent ids compare equal and accidentally
+  // classify an unattributed external comment as the viewer's own.
+  const viewerMemberId = workspaceContext?.workspaceMemberId?.trim() || null;
+  const unreadSideComments = useMemo(() => visibleSideComments.filter((comment) => (
+    !viewerMemberId || comment.authorMemberId !== viewerMemberId
+  )), [viewerMemberId, visibleSideComments]);
+  const latestVisibleSideCommentCreatedAt = useMemo(
+    () => unreadSideComments.reduce((latest, comment) => Math.max(latest, comment.createdAt), 0),
+    [unreadSideComments],
+  );
+  const mergeReadState = useCallback((scopeKey: string, state: ProjectCommentReadState) => {
+    if (commentReadScopeRef.current !== scopeKey || state.projectId !== projectId) return;
+    setCommentReadState((current) => {
+      if (!current || current.projectId !== state.projectId) return state;
+      const currentReadAt = current.lastReadAt ?? Number.NEGATIVE_INFINITY;
+      const nextReadAt = state.lastReadAt ?? Number.NEGATIVE_INFINITY;
+      return nextReadAt > currentReadAt ? state : current;
+    });
+  }, [projectId]);
+  useEffect(() => {
+    const scopeKey = commentReadScopeKey;
+    commentReadScopeRef.current = scopeKey;
+    setCommentReadState(null);
+    let cancelled = false;
+    void fetch(`/api/projects/${encodeURIComponent(projectId)}/comments/read`, {
+      headers: workspaceContext ? workspaceProjectHeaders(workspaceContext) : undefined,
+    }).then(async (response) => {
+      if (!response.ok || cancelled) return;
+      mergeReadState(scopeKey, await response.json() as ProjectCommentReadState);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [commentReadScopeKey, mergeReadState, projectId, workspaceContext]);
+  useEffect(() => {
+    if (!commentPanelOpen || commentSidePanelCollapsed) return;
+    const scopeKey = commentReadScopeKey;
+    let cancelled = false;
+    // The daemon clamps this client timestamp and returns its authoritative,
+    // monotonic marker. Do not optimistically commit a browser clock value:
+    // a future clock or failed PUT must not hide comments.
+    void fetch(`/api/projects/${encodeURIComponent(projectId)}/comments/read`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}) },
+      body: JSON.stringify({ readAt: Date.now() }),
+    }).then(async (response) => {
+      if (!response.ok || cancelled) return;
+      mergeReadState(scopeKey, await response.json() as ProjectCommentReadState);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [commentPanelOpen, commentReadScopeKey, commentSidePanelCollapsed, latestVisibleSideCommentCreatedAt, mergeReadState, projectId, workspaceContext]);
+  // Do not fabricate an authorKey from a member id. This client has no trusted
+  // personal authorKey input, so only the verified member identity is excluded
+  // here; external-account self recognition remains a server/identity seam.
+  const hasUnreadSideComments = hasUnreadComments({
+    readState: commentReadState,
+    comments: unreadSideComments.map((comment) => ({
+      createdAt: comment.createdAt,
+      author: { authorKey: comment.authorKey },
+    })),
+    viewerAuthorKey: null,
+  });
   const activeSideCommentId = activePreviewCommentId;
   const activeCommentTargetVisible = commentTargetIntersectsPreview(
     activeCommentTarget,
@@ -15953,7 +16196,6 @@ function HtmlViewer({
     && manualEditExitHandoffPending
     && useUrlLoadPreview
     && manualEditUrlHandoffEligible;
-  const boardAvailable = mode === 'preview' && source !== null;
   const showPreviewToolbarControls = mode === 'preview';
   // Independent of the rail's lazy per-slide documents so a collapsed rail
   // (which unmounts DeckThumbnailRail entirely) still renders its toggle.
@@ -16093,9 +16335,6 @@ function HtmlViewer({
     collabEnabled: collab.enabled,
     isProjectOwner: collab.isOwner,
   };
-  const iAmProjectOwner = viewerIsProjectOwner(commentAuthority);
-  const commentAuthoredByMe = (comment: PreviewComment | null | undefined): boolean =>
-    commentAuthoredByViewer(comment, commentAuthority);
   const canSendCommentToAgent = (comment: PreviewComment | null | undefined): boolean =>
     canSendCommentToAgentPure(comment, commentAuthority);
   const canEditActiveComment = canEditComment(activeComposerComment, commentAuthority);
@@ -16242,6 +16481,7 @@ function HtmlViewer({
     <CommentSideDock
       comments={visibleSideComments}
       projectId={projectId}
+      deckSlideCount={effectiveDeck ? slideState?.count : undefined}
       selectedIds={selectedSideCommentIds}
       activeCommentId={activeSideCommentId}
       // The panel used to be pinned open whenever it was portaled (it docked
@@ -16250,10 +16490,8 @@ function HtmlViewer({
       // collapse — forcing `false` here made every click a no-op.
       collapsed={commentSidePanelCollapsed}
       onCollapsedChange={setCommentSidePanelCollapsed}
-      // On a floating card, collapse closes the card and mirrors the toolbar
-      // toggle's OFF branch so one click reopens it. Closing only the panel
-      // would leave create/board mode on and consume that next click. The local
-      // dock keeps its collapse-to-rail behaviour.
+      // Escape remains the explicit floating-card close path. The header
+      // disclosure always preserves this mounted dock as a reversible rail.
       onDismiss={commentPortalHost ? dismissFloatingCommentPanel : undefined}
       onToggleSelect={(commentId) => {
         setSelectedSideCommentIds((current) => {
@@ -16615,6 +16853,7 @@ function HtmlViewer({
               >
                 <RemixIcon name="message-3-line" size={15} />
                 <span className="viewer-comment-count" aria-hidden>{visibleSideComments.length}</span>
+                {!commentPanelOpen && hasUnreadSideComments ? <span className="viewer-comment-unread-badge" data-testid="comment-unread-dot" aria-hidden>{visibleSideComments.length}</span> : null}
               </button>
               {source !== null && mode === 'preview' ? (
                 <div className="zoom-menu viewer-toolbar-zoom" ref={zoomMenuRef}>
@@ -16913,7 +17152,6 @@ function HtmlViewer({
               <RemixIcon name="history-line" size={15} />
             </button>
           ) : null}
-          {rawCanShare || rawCanDownload ? (
             <div className="chrome-file-action-menus">
               {/* Outside-click dismissal is scoped to the Share/Export pair —
                   the handoff split button next door must count as "outside" so
@@ -16945,21 +17183,19 @@ function HtmlViewer({
                     <span>{t('fileViewer.unifiedExportTab')}</span>
                   </button>
                 ) : null}
-                {rawCanShare ? (
                   <button
                     type="button"
                     className="chrome-action chrome-action-secondary chrome-action-with-label chrome-action-text-only chrome-action-unified"
                     aria-haspopup="menu"
                     aria-expanded={deployMenuOpen && unifiedActionTab === 'share'}
                     aria-label={shareMenuLabel}
-                    disabled={viewerOnly}
-                    title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
+                    disabled={viewerOnly || !rawCanShare}
+                    title={viewerOnly ? viewerOnlyDisabledTitle : !rawCanShare || streaming ? shareUnavailableHint : undefined}
                     onClick={openShareMenu}
                   >
                     <RemixIcon name="share-forward-line" size={15} />
                     <span>{shareMenuLabel}</span>
                   </button>
-                ) : null}
                 {deployMenuOpen && (rawCanShare || rawCanDownload) ? (
                   /*
                     * **同一块菜单,只是可能换个地方开。**
@@ -17004,12 +17240,11 @@ function HtmlViewer({
                         copyPublishedFileLink={copyPublishedFileLink}
                         publishLinkFeedback={publishLinkFeedback}
                         publishingPublicFile={publishingPublicFile}
+                        publishProgress={publishProgress}
                         unpublishCurrentFilePublic={unpublishCurrentFilePublic}
                         viewerOnlyDisabledTitle={viewerOnlyDisabledTitle}
                         publishCurrentFilePublic={publishCurrentFilePublic}
                         publishFailureKey={publishFailureKey}
-                        activeProjectSocialShare={activeProjectSocialShare}
-                        shareableDeploymentUrl={shareableDeploymentUrl}
                         DEPLOY_PROVIDER_OPTIONS={DEPLOY_PROVIDER_OPTIONS}
                         streaming={streaming}
                         openDeployModal={openDeployModal}
@@ -17114,7 +17349,7 @@ function HtmlViewer({
                   </AnchoredMenuShell>
                 ) : null}
               </div>
-              {viewerOnly ? null : (
+              {viewerOnly || !(rawCanShare || rawCanDownload) ? null : (
                 <HandoffButton
                   projectId={projectId}
                   projectKind={projectKind}
@@ -17128,7 +17363,6 @@ function HtmlViewer({
                 />
               )}
             </div>
-          ) : null}
       </>)}
       <div className="viewer-body" ref={previewBodyRef}>
         {initialPreviewLoading ? (
@@ -17451,6 +17685,7 @@ function HtmlViewer({
                 <CommentPreviewOverlays
                   comments={commentCreateMode ? creationSortedSideComments : []}
                   provisionalPinNumber={nextProvisionalPinNumber}
+                  t={t}
                   driftLadder={collab.enabled}
                   currentVersion={collab.publishedVersion ?? undefined}
                   {...(collab.onLostAnchors ? { onLostAnchors: collab.onLostAnchors } : {})}

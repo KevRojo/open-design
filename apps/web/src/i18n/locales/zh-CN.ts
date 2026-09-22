@@ -3418,6 +3418,7 @@ export const zhCN: Dict = {
   "fileViewer.workspaceAccessPrivate": "仅自己",
   "fileViewer.workspaceAccessMembers": "工作空间成员",
   "fileViewer.publishSingleFileTitle": "生成分享链接",
+  "fileViewer.generateAndCopyLink": "生成并复制链接",
   "fileViewer.publishSingleFileDescription": "任何拿到链接的人都可在线查看。目前仅支持分享单个文件，内嵌图片等本地资源暂不支持。",
   "fileViewer.openFileRequired": "打开文件后可用。",
   "fileViewer.publishFile": "发布文件",
@@ -3430,6 +3431,7 @@ export const zhCN: Dict = {
 
   "fileViewer.publishFileRequiresTeam": "发布公开链接需要团队工作区。请切换到团队工作区，或使用「部署」发布此文件。",
   "fileViewer.publishFileRequiresWorkspace": "生成分享链接需要登录工作区。请登录 OpenDesign Cloud，或改用「部署」分享此文件。",
+  "fileViewer.publishFileTooLarge": "项目超过 20 MiB 分享上限。请减小 HTML 和引用资源的总大小后重试。",
   "fileViewer.publishFileFailed": "生成分享链接失败，请稍后重试，或改用下方的部署方式。",
   "fileViewer.workspaceShareSuccess": "已分享给工作空间成员",
   "fileViewer.workspaceShareFailed": "分享到工作空间失败",
@@ -5838,4 +5840,11 @@ export const zhCN: Dict = {
   'chat.record.canceled': "已取消",
   'chat.record.pending': "未开始",
   'chat.record.unfinished': "未完成",
+  'comment.authorRole.owner': '所有者',
+  'comment.authorRole.admin': '管理员',
+  'comment.authorRole.member': '成员',
+  'comment.authorRole.sharePage': '分享页',
+  'comment.anchorState.reanchored': '基于旧版本',
+  'comment.anchorState.stale': '锚点可能已移动',
+  'comment.anchorState.lost': '锚点已丢失',
 };

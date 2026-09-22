@@ -624,6 +624,43 @@ test('[P1] HTML preview toolbar exposes comments, mark, and edit workflows', asy
   await expect(page.getByRole('button', { name: /^Save$/ })).toBeVisible();
 });
 
+test('[P1] comment selection falls back from an empty od-id to its screen label in Chromium', async ({ page }) => {
+  await routeMockAgents(page);
+  const projectId = await createEmptyProject(page, 'Empty annotated selector');
+  await seedHtmlArtifact(page, projectId, 'empty-annotated-selector.html', emptyOdIdScreenLabelHtml());
+  const conversationId = await latestConversationId(page, projectId);
+  await page.goto(`/projects/${projectId}/conversations/${conversationId}/files/empty-annotated-selector.html`);
+  await openDesignFile(page, 'empty-annotated-selector.html');
+
+  await clickPreviewToolbarAction(page, 'board-mode-toggle', /^Comment$/);
+  const frame = artifactPreviewFrame(page);
+  const target = frame.locator('[data-screen-label="Home"]');
+  await expect(target).toBeVisible();
+  expect(await target.evaluate((element) => (
+    document.querySelector('[data-screen-label="Home"]') === element
+  ))).toBe(true);
+
+  await target.click();
+  const popover = page.getByTestId('comment-popover');
+  await expect(popover).toBeVisible();
+  await popover.getByTestId('comment-popover-input').fill('Keep this screen label anchored');
+  const savedRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return request.method() === 'POST' && url.pathname.endsWith(`/conversations/${conversationId}/comments`);
+  });
+  const savedResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === 'POST' && url.pathname.endsWith(`/conversations/${conversationId}/comments`);
+  });
+  await popover.getByRole('button', { name: /^Comment$/ }).click();
+  expect((await savedResponse).ok()).toBe(true);
+  const body = (await savedRequest).postDataJSON() as { target?: { elementId?: string; selector?: string } };
+  expect(body.target).toMatchObject({
+    elementId: 'Home',
+    selector: '[data-screen-label="Home"]',
+  });
+});
+
 test('[P1] draw annotation composer floats near the selected mark and can be queued', async ({ page }) => {
   test.setTimeout(60_000);
 
@@ -1293,6 +1330,19 @@ function tabBySuffix(page: Page, name: string) {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function emptyOdIdScreenLabelHtml(): string {
+  return `<!doctype html>
+<html>
+  <body>
+    <main>
+      <section data-od-id="" data-screen-label="Home" style="width:320px;min-height:80px;padding:24px">
+        Empty id, Home screen label
+      </section>
+    </main>
+  </body>
+</html>`;
 }
 
 function manualEditHtml(): string {

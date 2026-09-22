@@ -172,14 +172,14 @@ function reactComponentFile(): ProjectFile {
 // The publish trigger is the Share panel's `role="menuitem"` row labelled by
 // `fileViewer.publishSingleFileTitle`; once published it is replaced by the
 // copy-link / `fileViewer.unpublishFile` pair.
-const PUBLISH_ROW = /get a share link/i;
+const PUBLISH_ROW = /generate and copy link|get a share link/i;
 const UNPUBLISH_ROW = /stop sharing/i;
 // `fileViewer.publishingFile` — the row's in-flight label, and therefore the
 // state the publish handler leaves behind only once its `finally` has run.
 const BUSY_PUBLISH_ROW = /creating link/i;
 // Either settled shape of the panel: the idle publish row, or the copy-link
 // control that replaces it once a published URL is committed.
-const SETTLED_PUBLISH_PANEL = /get a share link|copy share link/i;
+const SETTLED_PUBLISH_PANEL = /generate and copy link|get a share link|copy share link/i;
 
 async function openPublishPanel() {
   renderProjectFileViewer(teamWorkspaceContext(), {

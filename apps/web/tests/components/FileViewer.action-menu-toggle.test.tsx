@@ -76,7 +76,7 @@ function renderViewer() {
 }
 
 /** 展开时才存在的分享行。 */
-const sharePanel = () => screen.queryByRole('menuitem', { name: /Get a share link|Deploy to Cloudflare Pages/i });
+const sharePanel = () => screen.queryByRole('menuitem', { name: /Generate and copy link|Deploy to Cloudflare Pages/i });
 /** 展开时才存在的导出行。 */
 const exportPanel = () => screen.queryByRole('menuitem', { name: /Export as PDF/i });
 /** 整块面板 —— 用来数「有没有叠出第二块」。 */

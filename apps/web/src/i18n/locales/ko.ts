@@ -3246,6 +3246,7 @@ export const ko: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': '공유 링크 만들기',
+  "fileViewer.generateAndCopyLink": "링크 생성 및 복사",
   'fileViewer.publishSingleFileDescription': '링크가 있는 사람은 누구나 온라인으로 볼 수 있습니다. 현재는 단일 파일만 공유할 수 있으며, 이미지 등 내장 로컬 리소스는 아직 지원되지 않습니다.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const ko: Dict = {
 
   'fileViewer.publishFileRequiresTeam': '공개 링크를 게시하려면 팀 워크스페이스가 필요합니다. 팀 워크스페이스로 전환하거나 배포를 사용해 이 파일을 게시하세요.',
   'fileViewer.publishFileRequiresWorkspace': '공유 링크를 만들려면 로그인된 워크스페이스가 필요합니다. OpenDesign Cloud에 로그인하거나 배포로 이 파일을 공유하세요.',
+  'fileViewer.publishFileTooLarge': "프로젝트가 공유 한도인 20 MiB를 초과합니다. HTML 및 참조 리소스의 크기를 줄인 후 다시 시도하세요.",
   'fileViewer.publishFileFailed': '공유 링크를 만들지 못했습니다. 다시 시도하거나 아래 배포 옵션을 이용하세요.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const ko: Dict = {
   'chat.record.canceled': "취소됨",
   'chat.record.pending': "시작 전",
   'chat.record.unfinished': "미완료",
+  'comment.authorRole.owner': '소유자',
+  'comment.authorRole.admin': '관리자',
+  'comment.authorRole.member': '구성원',
+  'comment.authorRole.sharePage': '공유 페이지',
+  'comment.anchorState.reanchored': '이전 버전을 기준으로 함',
+  'comment.anchorState.stale': '앵커가 이동했을 수 있습니다',
+  'comment.anchorState.lost': '앵커를 찾을 수 없습니다',
 };

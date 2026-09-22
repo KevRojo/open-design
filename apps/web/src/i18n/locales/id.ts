@@ -3246,6 +3246,7 @@ export const id: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Dapatkan tautan berbagi',
+  "fileViewer.generateAndCopyLink": "Buat dan salin tautan",
   'fileViewer.publishSingleFileDescription': 'Siapa pun dengan tautan dapat melihatnya secara online. Saat ini hanya satu file yang dapat dibagikan — aset lokal tersemat seperti gambar belum didukung.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const id: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'Menerbitkan tautan publik memerlukan ruang kerja tim. Beralihlah ke ruang kerja tim, atau gunakan Deploy untuk menerbitkan berkas ini.',
   'fileViewer.publishFileRequiresWorkspace': 'Tautan berbagi memerlukan workspace yang masuk. Masuk ke OpenDesign Cloud atau bagikan file ini lewat deploy.',
+  'fileViewer.publishFileTooLarge': "Proyek ini melebihi batas berbagi 20 MiB. Kurangi ukuran HTML dan sumber daya yang dirujuk, lalu coba lagi.",
   'fileViewer.publishFileFailed': 'Tidak dapat membuat tautan berbagi. Coba lagi atau gunakan opsi deploy di bawah.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const id: Dict = {
   'chat.record.canceled': "Dibatalkan",
   'chat.record.pending': "Belum dimulai",
   'chat.record.unfinished': "Belum selesai",
+  'comment.authorRole.owner': 'Pemilik',
+  'comment.authorRole.admin': 'Admin',
+  'comment.authorRole.member': 'Anggota',
+  'comment.authorRole.sharePage': 'Halaman berbagi',
+  'comment.anchorState.reanchored': 'berdasarkan versi lama',
+  'comment.anchorState.stale': 'jangkar mungkin telah berpindah',
+  'comment.anchorState.lost': 'jangkar hilang',
 };

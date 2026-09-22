@@ -3246,6 +3246,7 @@ export const ptBR: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Obter link de compartilhamento',
+  "fileViewer.generateAndCopyLink": "Gerar e copiar link",
   'fileViewer.publishSingleFileDescription': 'Qualquer pessoa com o link pode vê-lo online. Por enquanto só é possível compartilhar um único arquivo — recursos locais incorporados, como imagens, ainda não são suportados.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const ptBR: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'Publicar um link público exige um espaço de trabalho de equipe. Mude para um espaço de equipe ou use Implantar para publicar este arquivo.',
   'fileViewer.publishFileRequiresWorkspace': 'Um link de compartilhamento exige um workspace conectado. Entre no OpenDesign Cloud ou compartilhe este arquivo por deploy.',
+  'fileViewer.publishFileTooLarge': "Este projeto excede o limite de compartilhamento de 20 MiB. Reduza o HTML e os recursos referenciados e tente novamente.",
   'fileViewer.publishFileFailed': 'Não foi possível criar o link de compartilhamento. Tente novamente ou use uma opção de deploy abaixo.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const ptBR: Dict = {
   'chat.record.canceled': "Cancelado",
   'chat.record.pending': "Não iniciado",
   'chat.record.unfinished': "Não concluído",
+  'comment.authorRole.owner': 'Proprietário',
+  'comment.authorRole.admin': 'Administrador',
+  'comment.authorRole.member': 'Membro',
+  'comment.authorRole.sharePage': 'Página compartilhada',
+  'comment.anchorState.reanchored': 'com base em uma versão anterior',
+  'comment.anchorState.stale': 'a âncora pode ter sido movida',
+  'comment.anchorState.lost': 'âncora perdida',
 };

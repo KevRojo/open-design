@@ -3246,6 +3246,7 @@ export const uk: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Отримати посилання для доступу',
+  "fileViewer.generateAndCopyLink": "Створити й скопіювати посилання",
   'fileViewer.publishSingleFileDescription': 'Будь-хто з посиланням може переглянути онлайн. Наразі можна поділитися лише одним файлом — вбудовані локальні ресурси, як-от зображення, ще не підтримуються.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const uk: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'Щоб опублікувати загальнодоступне посилання, потрібен командний робочий простір. Перейдіть до командного простору або скористайтеся «Розгорнути».',
   'fileViewer.publishFileRequiresWorkspace': 'Для посилання потрібен вхід у робочий простір. Увійдіть в OpenDesign Cloud або поділіться файлом через деплой.',
+  'fileViewer.publishFileTooLarge': "Проєкт перевищує ліміт поширення 20 MiB. Зменште розмір HTML і пов’язаних ресурсів та спробуйте ще раз.",
   'fileViewer.publishFileFailed': 'Не вдалося створити посилання. Повторіть спробу або скористайтеся варіантом деплою нижче.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const uk: Dict = {
   'chat.record.canceled': "Скасовано",
   'chat.record.pending': "Не розпочато",
   'chat.record.unfinished': "Не завершено",
+  'comment.authorRole.owner': 'Власник',
+  'comment.authorRole.admin': 'Адміністратор',
+  'comment.authorRole.member': 'Учасник',
+  'comment.authorRole.sharePage': 'Спільна сторінка',
+  'comment.anchorState.reanchored': 'на основі старішої версії',
+  'comment.anchorState.stale': 'якір міг переміститися',
+  'comment.anchorState.lost': 'якір втрачено',
 };

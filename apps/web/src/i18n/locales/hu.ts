@@ -3246,6 +3246,7 @@ export const hu: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Megosztási link létrehozása',
+  "fileViewer.generateAndCopyLink": "Link létrehozása és másolása",
   'fileViewer.publishSingleFileDescription': 'A linkkel bárki megtekintheti online. Egyelőre csak egyetlen fájl osztható meg — a beágyazott helyi erőforrások, például képek, még nem támogatottak.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const hu: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'A nyilvános hivatkozás közzétételéhez csapatmunkaterület szükséges. Válts csapatmunkaterületre, vagy tedd közzé a fájlt a Közzététel funkcióval.',
   'fileViewer.publishFileRequiresWorkspace': 'A megosztási linkhez bejelentkezett munkaterület szükséges. Jelentkezz be az OpenDesign Cloudba, vagy oszd meg a fájlt telepítéssel.',
+  'fileViewer.publishFileTooLarge': "A projekt meghaladja a 20 MiB megosztási korlátot. Csökkentsd a HTML és a hivatkozott erőforrások méretét, majd próbáld újra.",
   'fileViewer.publishFileFailed': 'Nem sikerült létrehozni a megosztási linket. Próbáld újra, vagy használd a lenti telepítési lehetőségeket.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const hu: Dict = {
   'chat.record.canceled': "Megszakítva",
   'chat.record.pending': "Nincs elindítva",
   'chat.record.unfinished': "Befejezetlen",
+  'comment.authorRole.owner': 'Tulajdonos',
+  'comment.authorRole.admin': 'Rendszergazda',
+  'comment.authorRole.member': 'Tag',
+  'comment.authorRole.sharePage': 'Megosztási oldal',
+  'comment.anchorState.reanchored': 'egy korábbi verzió alapján',
+  'comment.anchorState.stale': 'a horgony elmozdulhatott',
+  'comment.anchorState.lost': 'a horgony elveszett',
 };

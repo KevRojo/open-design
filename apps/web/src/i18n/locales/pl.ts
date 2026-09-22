@@ -3246,6 +3246,7 @@ export const pl: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Uzyskaj link do udostępniania',
+  "fileViewer.generateAndCopyLink": "Wygeneruj i skopiuj link",
   'fileViewer.publishSingleFileDescription': 'Każdy z linkiem może obejrzeć online. Na razie można udostępnić tylko pojedynczy plik — osadzone zasoby lokalne, np. obrazy, nie są jeszcze obsługiwane.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const pl: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'Opublikowanie linku publicznego wymaga zespołowej przestrzeni roboczej. Przełącz się na przestrzeń zespołu lub użyj Wdróż, aby opublikować ten plik.',
   'fileViewer.publishFileRequiresWorkspace': 'Link do udostępniania wymaga zalogowanego obszaru roboczego. Zaloguj się do OpenDesign Cloud lub udostępnij ten plik przez wdrożenie.',
+  'fileViewer.publishFileTooLarge': "Projekt przekracza limit udostępniania 20 MiB. Zmniejsz rozmiar HTML i powiązanych zasobów, a następnie spróbuj ponownie.",
   'fileViewer.publishFileFailed': 'Nie udało się utworzyć linku. Spróbuj ponownie lub użyj opcji wdrożenia poniżej.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const pl: Dict = {
   'chat.record.canceled': "Anulowano",
   'chat.record.pending': "Nie rozpoczęto",
   'chat.record.unfinished': "Nieukończone",
+  'comment.authorRole.owner': 'Właściciel',
+  'comment.authorRole.admin': 'Administrator',
+  'comment.authorRole.member': 'Członek',
+  'comment.authorRole.sharePage': 'Udostępniona strona',
+  'comment.anchorState.reanchored': 'na podstawie starszej wersji',
+  'comment.anchorState.stale': 'kotwica mogła zostać przeniesiona',
+  'comment.anchorState.lost': 'kotwica utracona',
 };

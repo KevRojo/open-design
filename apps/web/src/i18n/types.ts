@@ -1143,6 +1143,13 @@ export interface Dict {
   'collabPresence.roleOwner': string;
   'collabPresence.roleAdmin': string;
   'collabPresence.roleMember': string;
+  'comment.authorRole.owner': string;
+  'comment.authorRole.admin': string;
+  'comment.authorRole.member': string;
+  'comment.authorRole.sharePage': string;
+  'comment.anchorState.reanchored': string;
+  'comment.anchorState.stale': string;
+  'comment.anchorState.lost': string;
   'collabPresence.viewingFileSelf': string;
   'collabPresence.viewingFileOther': string;
   'collabPresence.viewingProjectSelf': string;
@@ -4154,6 +4161,7 @@ export interface Dict {
   'fileViewer.workspaceAccessPrivate': string;
   'fileViewer.workspaceAccessMembers': string;
   'fileViewer.publishSingleFileTitle': string;
+  'fileViewer.generateAndCopyLink': string;
   'fileViewer.publishSingleFileDescription': string;
   'fileViewer.openFileRequired': string;
   'fileViewer.publishFile': string;
@@ -4181,6 +4189,7 @@ export interface Dict {
   'fileViewer.publishFileRequiresTeam': string;
   'fileViewer.publishFileRequiresWorkspace': string;
   'fileViewer.publishFileFailed': string;
+  'fileViewer.publishFileTooLarge': string;
   'fileViewer.workspaceShareSuccess': string;
   'fileViewer.workspaceShareFailed': string;
   'fileViewer.workspaceUnshareSuccess': string;

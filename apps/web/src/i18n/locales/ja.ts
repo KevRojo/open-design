@@ -3246,6 +3246,7 @@ export const ja: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': '共有リンクを作成',
+  "fileViewer.generateAndCopyLink": "リンクを作成してコピー",
   'fileViewer.publishSingleFileDescription': 'リンクを知っている人は誰でもオンラインで閲覧できます。現在は単一ファイルのみ共有でき、画像などの埋め込みローカルアセットには未対応です。',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const ja: Dict = {
 
   'fileViewer.publishFileRequiresTeam': '公開リンクの発行にはチームワークスペースが必要です。チームワークスペースに切り替えるか、デプロイでこのファイルを公開してください。',
   'fileViewer.publishFileRequiresWorkspace': '共有リンクの作成にはサインイン済みのワークスペースが必要です。OpenDesign Cloud にサインインするか、デプロイでこのファイルを共有してください。',
+  'fileViewer.publishFileTooLarge': "プロジェクトが共有上限の 20 MiB を超えています。HTML と参照リソースの合計サイズを減らしてから再試行してください。",
   'fileViewer.publishFileFailed': '共有リンクを作成できませんでした。再試行するか、下のデプロイ方法をお試しください。',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const ja: Dict = {
   'chat.record.canceled': "キャンセル済み",
   'chat.record.pending': "未開始",
   'chat.record.unfinished': "未完了",
+  'comment.authorRole.owner': 'オーナー',
+  'comment.authorRole.admin': '管理者',
+  'comment.authorRole.member': 'メンバー',
+  'comment.authorRole.sharePage': '共有ページ',
+  'comment.anchorState.reanchored': '古いバージョンに基づく',
+  'comment.anchorState.stale': 'アンカーが移動した可能性があります',
+  'comment.anchorState.lost': 'アンカーが失われました',
 };

@@ -3246,6 +3246,7 @@ export const it: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Ottieni un link di condivisione',
+  "fileViewer.generateAndCopyLink": "Genera e copia il link",
   'fileViewer.publishSingleFileDescription': 'Chiunque abbia il link può vederlo online. Per ora è possibile condividere solo un singolo file — le risorse locali incorporate come le immagini non sono ancora supportate.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const it: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'La pubblicazione di un link pubblico richiede uno spazio di lavoro del team. Passa a uno spazio del team o usa Distribuisci per pubblicare questo file.',
   'fileViewer.publishFileRequiresWorkspace': 'Un link di condivisione richiede uno spazio di lavoro con accesso effettuato. Accedi a OpenDesign Cloud oppure condividi questo file tramite un deploy.',
+  'fileViewer.publishFileTooLarge': "Questo progetto supera il limite di condivisione di 20 MiB. Riduci HTML e risorse referenziate, poi riprova.",
   'fileViewer.publishFileFailed': 'Impossibile creare il link di condivisione. Riprova o usa un\'opzione di deploy qui sotto.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const it: Dict = {
   'chat.record.canceled': "Annullato",
   'chat.record.pending': "Non avviato",
   'chat.record.unfinished': "Non completato",
+  'comment.authorRole.owner': 'Proprietario',
+  'comment.authorRole.admin': 'Amministratore',
+  'comment.authorRole.member': 'Membro',
+  'comment.authorRole.sharePage': 'Pagina condivisa',
+  'comment.anchorState.reanchored': 'basato su una versione precedente',
+  'comment.anchorState.stale': 'l’ancora potrebbe essere stata spostata',
+  'comment.anchorState.lost': 'ancora persa',
 };

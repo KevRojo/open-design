@@ -3246,6 +3246,7 @@ export const tr: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Paylaşım bağlantısı al',
+  "fileViewer.generateAndCopyLink": "Bağlantı oluştur ve kopyala",
   'fileViewer.publishSingleFileDescription': 'Bağlantıya sahip olan herkes çevrimiçi görüntüleyebilir. Şimdilik yalnızca tek bir dosya paylaşılabilir; görseller gibi gömülü yerel kaynaklar henüz desteklenmiyor.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const tr: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'Herkese açık bağlantı yayınlamak için ekip çalışma alanı gerekir. Bir ekip çalışma alanına geçin veya bu dosyayı Dağıt ile yayınlayın.',
   'fileViewer.publishFileRequiresWorkspace': 'Paylaşım bağlantısı için oturum açılmış bir çalışma alanı gerekir. OpenDesign Cloud\'da oturum açın veya bu dosyayı bir dağıtımla paylaşın.',
+  'fileViewer.publishFileTooLarge': "Bu proje 20 MiB paylaşım sınırını aşıyor. HTML ve başvurulan kaynakların boyutunu küçültüp yeniden deneyin.",
   'fileViewer.publishFileFailed': 'Paylaşım bağlantısı oluşturulamadı. Tekrar deneyin veya aşağıdaki dağıtım seçeneklerini kullanın.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const tr: Dict = {
   'chat.record.canceled': "İptal edildi",
   'chat.record.pending': "Başlatılmadı",
   'chat.record.unfinished': "Tamamlanmadı",
+  'comment.authorRole.owner': 'Sahip',
+  'comment.authorRole.admin': 'Yönetici',
+  'comment.authorRole.member': 'Üye',
+  'comment.authorRole.sharePage': 'Paylaşım sayfası',
+  'comment.anchorState.reanchored': 'eski bir sürüme göre',
+  'comment.anchorState.stale': 'bağlantı noktası taşınmış olabilir',
+  'comment.anchorState.lost': 'bağlantı noktası kayboldu',
 };

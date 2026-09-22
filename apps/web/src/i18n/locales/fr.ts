@@ -3246,6 +3246,7 @@ export const fr: Dict = {
   'fileViewer.workspaceAccessPrivate': 'Only me',
   'fileViewer.workspaceAccessMembers': 'Workspace members',
   'fileViewer.publishSingleFileTitle': 'Obtenir un lien de partage',
+  "fileViewer.generateAndCopyLink": "Générer et copier le lien",
   'fileViewer.publishSingleFileDescription': 'Toute personne disposant du lien peut la voir en ligne. Pour l\'instant, seul un fichier unique peut être partagé — les ressources locales intégrées comme les images ne sont pas encore prises en charge.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
@@ -3258,6 +3259,7 @@ export const fr: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'La publication d’un lien public nécessite un espace de travail d’équipe. Passez à un espace d’équipe ou utilisez Déployer pour publier ce fichier.',
   'fileViewer.publishFileRequiresWorkspace': 'Un lien de partage nécessite un espace de travail connecté. Connectez-vous à OpenDesign Cloud ou partagez ce fichier via un déploiement.',
+  'fileViewer.publishFileTooLarge': "Ce projet dépasse la limite de partage de 20 MiB. Réduisez le HTML et les ressources référencées, puis réessayez.",
   'fileViewer.publishFileFailed': 'Impossible de créer le lien de partage. Réessayez ou utilisez une option de déploiement ci-dessous.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
@@ -5392,4 +5394,11 @@ export const fr: Dict = {
   'chat.record.canceled': "Annulé",
   'chat.record.pending': "Non commencé",
   'chat.record.unfinished': "Inachevé",
+  'comment.authorRole.owner': 'Propriétaire',
+  'comment.authorRole.admin': 'Administrateur',
+  'comment.authorRole.member': 'Membre',
+  'comment.authorRole.sharePage': 'Page partagée',
+  'comment.anchorState.reanchored': 'basé sur une version antérieure',
+  'comment.anchorState.stale': 'l’ancre a peut-être été déplacée',
+  'comment.anchorState.lost': 'ancre perdue',
 };

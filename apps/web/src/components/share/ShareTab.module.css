@@ -1,0 +1,54 @@
+/* Publish/copy seam: outrank the shared Button base without changing stop/deploy. */
+button.copyButton {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: #29292B;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+/* The generic Button hover must not wash the canvas's dark fill to white. */
+button.copyButton:hover:not(:disabled) {
+  background: #29292B;
+}
+
+/* Preserve the existing disabled theme feedback and native interaction. */
+button.copyButton:disabled {
+  background: var(--bg-subtle);
+  color: var(--text-faint);
+}
+
+.copyButton > svg {
+  flex-shrink: 0;
+}
+
+.copiedIcon {
+  color: #82D994;
+}
+
+/* S7/S15 warning only; legacy renderer and deployment errors keep their styles. */
+p.publishError {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: #C94E4E;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.publishError > svg {
+  flex: none;
+  margin-top: 2px;
+}
