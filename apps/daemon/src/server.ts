@@ -1072,6 +1072,7 @@ import { createShareAliasReservations } from './collab/share-alias-reservation.j
 import { createSharePublicationCompletion } from './collab/share-publication-completion.js';
 import { publicShareViewerUrl } from './collab/public-share-viewer-url.js';
 import { createVelaProjectShareState } from './collab/vela-project-share-state.js';
+import { registerPublicFileStopRetryRoutes } from './routes/public-file-stop-retry.js';
 import { runPinnedVelaCommand } from './collab/vela-pinned-command.js';
 import {
   fetchBillingCheckoutUrl,
@@ -5224,6 +5225,13 @@ export async function startServer({
       && stop.projectId === task.projectId && stop.filePath === task.receipt.filePath
       && stop.slug === task.receipt.slug
       && (!stop.publicationRevision || stop.publicationRevision === task.publicationRevision)),
+  });
+  registerPublicFileStopRetryRoutes(app, {
+    // No projectId: the original project may have been deleted already.
+    verify: req => verifiedWorkspaceContextForRequest(req),
+    store: publicFilePublicationStore,
+    prepare: createVelaPublicFileStop({ configuredEnv: configuredAmrEnv, dataRoot: RUNTIME_DATA_DIR }),
+    mutations: publicFileMutations,
   });
   const retryPublicFileStopsAtStartup = createPublicFileStopStartup(
     publicFilePublicationStore,
