@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import type { ShareContentFingerprints } from '../collab/share-content-fingerprint.js';
 import { publicFileMutationHandler } from './public-file-mutation-handler.js';
 import type { PublicFileMutations } from '../collab/public-file-mutations.js';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -226,6 +227,7 @@ export interface RegisterCollabSyncRoutesDeps {
   resolveProjectDir?: (projectId: string) => string | Promise<string>;
   /** Durable publication metadata used to restore public links after restart. */
   publicFilePublicationStore?: PublicFilePublicationStore;
+  shareContentFingerprints?: ShareContentFingerprints;
   publicFileMutations?: PublicFileMutations;
   resolvePullDir?: (projectId: string) => string;
   /** Read the durable local materialization cursor for this exact team mirror. */
@@ -1395,6 +1397,19 @@ export function registerCollabSyncRoutes(
           return res.status(502).json(recoveryResponse);
         }
         throw persistenceError;
+      }
+      // This evidence is advisory, unlike the publication itself. Failure must
+      // leave the confirmed link intact; reads without evidence say unknown.
+      if (deps.shareContentFingerprints) {
+        try {
+          const scope = publicFilePublicationScope(projectId, filePath, principal);
+          const revision = publicFilePublicationStore.getRevision(scope);
+          if (revision?.slug === publication.slug) {
+            deps.shareContentFingerprints.remember(scope, revision, sharePlan.files);
+          }
+        } catch {
+          console.warn('[od] public file content fingerprint unavailable');
+        }
       }
       return res.json(publication);
     } catch (error) {
