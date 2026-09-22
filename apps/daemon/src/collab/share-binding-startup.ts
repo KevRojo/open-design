@@ -1,3 +1,4 @@
+import type { PublicFilePublicationStore } from './public-file-publication-store.js';
 import type { PublicFileMutations } from './public-file-mutations.js';
 import type { ShareBindingOutbox, ShareBindingTask } from './share-binding-outbox.js';
 
@@ -10,8 +11,9 @@ export interface PreparedShareBinding {
 export type PrepareShareBinding = (task: Readonly<ShareBindingTask>) => Promise<PreparedShareBinding | null>;
 export interface ShareBindingStartupOptions {
   prepare: PrepareShareBinding | null;
-  /** Must verify a current authoritative local publication witness, not just the queue. */
-  isCurrent(task: ShareBindingTask): boolean;
+  publications: Pick<PublicFilePublicationStore, 'getRevision'>;
+  /** Optional extra host restrictions; cannot override the durable witness. */
+  isCurrent?(task: ShareBindingTask): boolean;
   mutations: PublicFileMutations;
 }
 export interface ShareBindingStartupResult { bound: number; failed: number; deferred: number; persistenceFailures: number }
@@ -30,8 +32,15 @@ export function createShareBindingStartup(outbox: ShareBindingOutbox, options: S
         await options.mutations.run(task.projectId, async () => {
           const current = () => {
             const queued = outbox.list().find(item => item.id === task.id);
+            const witness = options.publications.getRevision({
+              resourceTeamId: task.resourceTeamId, ownerMemberId: task.ownerMemberId,
+              projectId: task.projectId, filePath: task.receipt.filePath,
+            });
             return queued?.publicationRevision === task.publicationRevision
-              && queued.failureCount === task.failureCount && options.isCurrent(task);
+              && queued.failureCount === task.failureCount
+              && Boolean(task.publicationRevision.trim())
+              && witness?.slug === task.receipt.slug && witness.token === task.publicationRevision
+              && (options.isCurrent?.(task) ?? true);
           };
           if (!current()) { result.deferred++; return; }
           let operation: PreparedShareBinding | null = null;
