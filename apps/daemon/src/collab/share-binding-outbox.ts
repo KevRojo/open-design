@@ -17,7 +17,8 @@ export interface ShareBindingOutbox {
   complete(task: ShareBindingTask): void;
 }
 
-function confirmedReceipt(value: SharePublishReceipt): SharePublishReceipt {
+/** Validate and copy only the public, confirmed immutable publication fields. */
+export function confirmedReceipt(value: SharePublishReceipt): SharePublishReceipt {
   if (!value || [value.filePath, value.slug, value.versionId, value.entryPath].some(v => typeof v !== 'string' || !v.trim())
     || !Number.isSafeInteger(value.version) || value.version < 1
     || !Number.isSafeInteger(value.publishedAt) || value.publishedAt < 0) throw new Error('SHARE_RECEIPT_REQUIRED');
