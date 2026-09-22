@@ -6,7 +6,7 @@ import type { PreparePublicFileStop, PublicFilePublicationScope, StopQueuePublic
  */
 export class ProjectPublicFileStopPendingError extends Error {
   readonly shareResiduals: ReadonlyArray<ProjectDeleteShareResidual>;
-  constructor(residuals: ReadonlyArray<ProjectDeleteShareResidual>) {
+  constructor(residuals: ReadonlyArray<ProjectDeleteShareResidual>, readonly canContinueLocalDelete = false) {
     super('PUBLIC_FILE_STOP_PENDING');
     this.name = 'ProjectPublicFileStopPendingError';
     this.shareResiduals = Object.freeze(residuals.map(item => Object.freeze({ ...item })));
@@ -55,8 +55,16 @@ export function createProjectPublicFileStop(store: StopQueuePublicFilePublicatio
     const remaining = store.listByProject(scope);
     if (pending || remaining.length > 0) {
       const retryable = store.listRetryableStops();
+      const durableTasks = store.listStops();
+      let canContinueLocalDelete = remaining.length > 0;
       const residuals: ProjectDeleteShareResidual[] = remaining.map(file => {
         const revision = store.getRevision({ ...scope, filePath: file.filePath });
+        const original = targets.find(target => target.key.filePath === file.filePath);
+        const hasDurableIntent = revision?.slug === file.slug && durableTasks.some(task =>
+          task.resourceTeamId === scope.resourceTeamId && task.ownerMemberId === scope.ownerMemberId
+          && task.projectId === scope.projectId && task.filePath === file.filePath
+          && task.slug === file.slug && task.publicationRevision === revision.token);
+        if (!hasDurableIntent || original?.revision?.token !== revision?.token) canContinueLocalDelete = false;
         return {
           filePath: file.filePath,
           slug: file.slug,
@@ -69,7 +77,7 @@ export function createProjectPublicFileStop(store: StopQueuePublicFilePublicatio
             && task.publicationRevision === revision.token),
         };
       });
-      throw new ProjectPublicFileStopPendingError(residuals);
+      throw new ProjectPublicFileStopPendingError(residuals, canContinueLocalDelete);
     }
   };
 }

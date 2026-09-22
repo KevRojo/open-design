@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { ProjectPublicFileStopPendingError } from '../../collab/project-public-file-stop.js';
+import type { ProjectDeleteResponse } from '@open-design/contracts';
 import { publicFileMutationHandler } from '../public-file-mutation-handler.js';
 import type { PublicFileMutations } from '../../collab/public-file-mutations.js';
 import { rm } from 'node:fs/promises';
@@ -5482,7 +5484,17 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         project.id,
         'delete',
       )) return;
-      await ctx.stopPublicFilesBeforeDelete?.(project.id);
+      let shareResiduals: ProjectDeleteResponse['shareResiduals'];
+      try {
+        await ctx.stopPublicFilesBeforeDelete?.(project.id);
+      } catch (error) {
+        // Only a durable, unchanged stop intent permits local-only deletion.
+        // Team removal retains its existing unshare/catalog safety boundary.
+        if (!(error instanceof ProjectPublicFileStopPendingError)
+          || !error.canContinueLocalDelete
+          || getWorkspaceProjectByProjectId(db, project.id)?.visibility !== 'personal') throw error;
+        shareResiduals = error.shareResiduals;
+      }
       // spec 04 §11: a team-visible project must be unshared from the hub
       // BEFORE it disappears locally — mirrors the 'personal' branch of
       // /move's `requestTeamVisibility`, the one other place this daemon
@@ -5520,8 +5532,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       await cancelRunsOwnedBy(design.runs, { projectId: project.id });
       dbDeleteProject(db, req.params.id);
       await removeProjectDir(PROJECTS_DIR, req.params.id).catch(() => {});
-      /** @type {import('@open-design/contracts').OkResponse} */
-      const body = { ok: true };
+      const body: ProjectDeleteResponse = { ok: true, ...(shareResiduals?.length ? { shareResiduals } : {}) };
       res.json(body);
     } catch (err: any) {
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
