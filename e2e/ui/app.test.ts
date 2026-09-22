@@ -461,6 +461,20 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await captureLane4CommentState(page, 'r-entry-selected-hover');
   await page.getByTestId('comment-popover-view-all').click();
   await expect(sidePanel).toBeVisible();
+  for (const dismiss of ['escape', 'button'] as const) {
+    await note.fill(`Discard this ${dismiss} draft.`);
+    await expect(page.getByTestId('comment-popover-save')).toBeEnabled();
+    if (dismiss === 'escape') await note.press('Escape');
+    else await floatingComposer.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(floatingComposer).toHaveCount(0);
+    await expect(sidePanel.getByTestId('comment-side-item')).toHaveCount(0);
+    await expect(page.getByTestId('comment-saved-marker-hero-title')).toHaveCount(0);
+    await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
+    await expect(floatingComposer).toBeVisible();
+    await expect(note).toHaveValue('');
+    await expect(page.getByTestId('comment-popover-save')).toBeDisabled();
+    await expect(titleLabel).toHaveText(longCommentTag);
+  }
   await page.setViewportSize({ width: 1280, height: 480 });
   await expect.poll(() => composerBody.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
   await expect(composerBody).toHaveCSS('overflow-y', 'auto');
