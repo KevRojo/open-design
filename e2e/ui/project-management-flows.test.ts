@@ -3166,6 +3166,7 @@ test('[P1] S10 failed stop preserves the share link and retries without republis
 });
 
 test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the card menu focused', async ({ page }) => {
+  await page.clock.install();
   await mockWritablePersonalProjectScope(page);
   const { projectId, conversationId } = await seedProjectWithRepeatedArtifactCards(page);
 
@@ -3358,6 +3359,8 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   expect(publishAttempts).toBe(3); // Retrying copy must not publish again.
 
   // S4-C: hold only the external clipboard boundary; the real host settles feedback.
+  // Pause before the copy creates its feedback timer; assert the actual boundary.
+  await page.clock.pauseAt(new Date());
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -3386,7 +3389,11 @@ test('[P1] repeated artifact cards anchor Share to the clicked turn and keep the
   await expect(copied).toBeVisible();
   await expect(copied).toBeEnabled();
   await expect(copied).not.toHaveAttribute('aria-busy');
+  await page.clock.runFor(1799);
+  await expect(copied).toBeVisible();
+  await page.clock.runFor(1);
   await expect(failedCopy).toBeVisible(); // Existing host feedback timer restores the action.
+  await page.clock.resume();
   expect(publishAttempts).toBe(3);
 
   // The same real cards become disabled through the workspace permission boundary.
