@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import Database from 'better-sqlite3';
+import { createShareBindingOutbox } from '../src/collab/share-binding-outbox.js';
+import { publishReservedVelaShareVersion } from '../src/collab/vela-share-publish.js';
 import { createPublicFilePublicationRecorder } from '../src/collab/public-file-publication-recording.js';
 import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
 import http from 'node:http';
@@ -72,6 +74,11 @@ vi.mock('../src/collab/vela-cli-resource-adapter.js', async (importOriginal) => 
 
 vi.mock('../src/integrations/vela.js', () => ({
   readVelaControlApiContext: vi.fn(() => null),
+}));
+
+vi.mock('../src/collab/vela-share-publish.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/collab/vela-share-publish.js')>(),
+  publishReservedVelaShareVersion: vi.fn(),
 }));
 
 /** In-memory project store standing in for the daemon's SQLite-backed store, so
@@ -1815,6 +1822,44 @@ describe('collab sync routes', () => {
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('WORKSPACE_PROJECT_UNSHARE_DENIED');
+  });
+
+  it.each(['published', 'binding_pending'] as const)('22/23 real HTTP returns the Viewer entry only when bound; outcome=%s', async status => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-share-entry-'));
+    tempDirs.push(dir);
+    await writeFile(path.join(dir, 'index.html'), '<h1>Public file</h1>');
+    const db = new Database(':memory:');
+    try {
+      migratePublicFilePublications(db);
+      const store = createSqlitePublicFilePublicationStore(db);
+      const outbox = createShareBindingOutbox(db);
+      const receipt = { filePath: 'index.html', entryPath: 'index.html', slug: 'a863b8d7-cc55-465a-a359-435bd3ef4919', versionId: 'immutable-upload-1', version: 1, publishedAt: 1 };
+      vi.mocked(readVelaControlApiContext).mockReturnValue({ profile: 'test', apiUrl: 'https://api.example.test', controlKey: 'synthetic', user: null, configMtimeMs: null });
+      vi.mocked(publishReservedVelaShareVersion).mockResolvedValue(status === 'published'
+        ? { status, receipt } : { status, receipt, binding: { retrying: false } });
+      vi.mocked(runVelaResourceCommand).mockImplementation(async args => JSON.stringify(args[0] === 'snapshot'
+        ? { slug: 'legacy-snapshot', name: 'index.html', kind: 'project', versionId: receipt.versionId, createdAt: new Date(1).toISOString() }
+        : { id: receipt.versionId, version: 1 }));
+      const api = await startSyncServer(personalContextProvider(), {
+        resolveProjectDir: () => dir, resolveSharedProject: async () => null,
+        publicFilePublicationStore: store,
+        recordPublicFilePublication: createPublicFilePublicationRecorder(db, store, () => ({ enqueued: 0, skippedInbound: 0 })),
+      });
+      const response = await api.json('/api/projects/p1/files/index.html/publish-public', { method: 'POST' });
+      expect.soft(response.status).toBe(200);
+      if (status === 'published') {
+        expect.soft(new URL(response.body.url).pathname).toMatch(/\/artifact\/p1\/a863b8d7-cc55-465a-a359-435bd3ef4919$/u);
+        expect.soft(new URL(response.body.url).origin).not.toBe('https://api.example.test');
+        expect.soft(outbox.list()).toHaveLength(0);
+      } else {
+        expect.soft(response.body).not.toHaveProperty('url');
+        expect.soft(response.body.binding?.retrying).toBe(true);
+        expect.soft(outbox.list()).toHaveLength(1);
+      }
+      expect.soft(response.body.status).toBe(status);
+      expect.soft(response.body.receipt).toEqual(receipt);
+      expect.soft(publishReservedVelaShareVersion).toHaveBeenCalledTimes(1);
+    } finally { db.close(); }
   });
 
   it.each([false, true])('records planner mapping and publication in the HTTP transaction; enqueue failure=%s', async fail => {
