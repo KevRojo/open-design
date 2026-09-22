@@ -1736,14 +1736,25 @@ describe("ProductionCampaignModal device impressions", () => {
 	 * real asynchronous crypto which no amount of fake time can hurry. A single
 	 * fixed advance can therefore run out before the frame is even asked for.
 	 *
-	 * So advance in small steps until the marker lands. Each step yields to the
-	 * real microtask queue, which is what lets the crypto finish, and the frame
-	 * that follows then fires on fake time rather than on the wall clock.
+	 * So step until the marker lands, and keep the two waits inside a step
+	 * separate. The real queue has to TURN for the crypto to finish; fake time
+	 * has to MOVE for the frame that records the impression to fire. Advancing
+	 * alone couples them — a step would buy exactly one turn of the real queue,
+	 * so a box that is slow at the crypto runs out of steps long before it runs
+	 * out of fake milliseconds. Yielding first decouples them. A healthy mount
+	 * leaves on the first step, so the budget is only ever paid by a mount that
+	 * is genuinely stuck, and the assertion then names that as the cause.
 	 */
 	const advanceToRecordedImpression = async (subject = "user-a", activity = "campaign-1") => {
-		for (let step = 0; step < 100 && localStorage.getItem(marker(subject, activity)) === null; step += 1)
-			await act(async () => { await vi.advanceTimersByTimeAsync(16); });
-		expect(localStorage.getItem(marker(subject, activity))).toBe("1");
+		for (let step = 0; step < 300 && localStorage.getItem(marker(subject, activity)) === null; step += 1)
+			await act(async () => {
+				for (let turn = 0; turn < 8; turn += 1) await new Promise(resolve => setImmediate(resolve));
+				await vi.advanceTimersByTimeAsync(16);
+			});
+		expect(
+			localStorage.getItem(marker(subject, activity)),
+			"impression never recorded — the mount it follows most likely never resolved",
+		).toBe("1");
 	};
 	beforeEach(() => {
 		(globalThis as CampaignHostGlobal).__openDesignCampaignTestHost = {
@@ -1976,16 +1987,19 @@ describe("ProductionCampaignModal device impressions", () => {
 		// and retries inside the same cycle. The presentation has to survive with
 		// it, or the recovering poll reads the device impression and closes the
 		// activity that never left the screen.
-		vi.useFakeTimers({
-			toFake: [
-				"Date",
-				"performance",
-				"setTimeout",
-				"clearTimeout",
-				"setInterval",
-				"clearInterval",
-			],
-		});
+		//
+		// The impression this case needs has to be the REAL one. Writing the
+		// marker by hand reads like a shortcut past an unfaked frame, but it
+		// manufactures a state the product cannot produce: `openPresentation` is
+		// assigned when `mountTouchpoint` resolves and the marker only in the
+		// frame after that, so "impression recorded, nothing open" exists in the
+		// test and nowhere else. It is also precisely the `{kind:"clear"}` branch
+		// of the load callback — meaning the case tore its own host down whenever
+		// the real SHA-256 behind the mount had not finished inside the fixed
+		// advance above. Idle machine: green. Loaded CI box: `expected null not
+		// to be null`. Waiting for the marker instead is a mount barrier, because
+		// nothing can write it until the presentation is open.
+		vi.useFakeTimers({ toFake: [...IMPRESSION_TIMERS] });
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		let calls = 0;
 		const fetchMock = vi.fn(async () => {
@@ -1996,12 +2010,11 @@ describe("ProductionCampaignModal device impressions", () => {
 		vi.stubGlobal("fetch", fetchMock);
 		render(<ProductionCampaignModal authenticated sessionSubject="user-a" />);
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(10);
+			await vi.advanceTimersByTimeAsync(16);
 		});
 		expect(document.querySelector("opend-touchpoint")).not.toBeNull();
-		// Fake timers do not drive jsdom's animation frames, so record the
-		// impression the paint would have recorded.
-		localStorage.setItem(marker(), "1");
+		await advanceToRecordedImpression();
+		const callsBeforeFailure = calls;
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(30_000);
 		});
@@ -2009,7 +2022,9 @@ describe("ProductionCampaignModal device impressions", () => {
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(1_500);
 		});
-		expect(calls).toBeGreaterThanOrEqual(3);
+		// The failing poll and its retry both have to have happened, or the two
+		// surviving hosts below would only mean nothing ever disturbed them.
+		expect(calls).toBeGreaterThanOrEqual(callsBeforeFailure + 2);
 		expect(document.querySelector("opend-touchpoint")).not.toBeNull();
 		expect(screen.queryByRole("dialog")).not.toBeNull();
 	});
