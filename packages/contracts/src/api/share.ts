@@ -779,3 +779,111 @@ export interface ProjectDeleteResponse {
    */
   shareResiduals?: ReadonlyArray<ProjectDeleteShareResidual>;
 }
+
+/* ------------------------------------------------------------------ *
+ * Publishing: content and binding can succeed separately
+ * ------------------------------------------------------------------ */
+
+/**
+ * What a publish confirmed, as the SERVER reported it.
+ *
+ * Every field here is a fact the server sent back. None of it may be
+ * reconstructed from a child process's exit code: a nonzero exit proves that
+ * something failed, NOT that the alias is unchanged. A publish that timed out
+ * may well have landed. Reconciliation reads this receipt or asks the server
+ * again; it never infers pointer state from a failure.
+ */
+export interface SharePublishReceipt {
+  /** The file that was published, in the same spelling the rest of this module uses. */
+  filePath: string;
+  /** The stable public alias. */
+  slug: string;
+  /** Epoch ms of this publish. */
+  publishedAt: number;
+  /** Alias generation: which publish this link now points at. */
+  version: number;
+  /** The immutable version the alias was pointed at, so a retry cannot drift. */
+  versionId: string;
+  /** Entry file inside the published package, e.g. the rewritten `index.html`. */
+  entryPath: string;
+}
+
+/**
+ * Publishing is two effects, and the second one can fail alone.
+ *
+ * `od` uploads the content and advances the alias, then registers the share
+ * binding that makes the link serve. The registration crosses the network
+ * separately, so there is a real outcome in the middle: **the content is
+ * published and the alias has moved, but the link is not bound yet.**
+ *
+ * ## Why this needs its own status rather than an error
+ *
+ * Reporting it as a failure is a lie the user pays for twice: the content DID
+ * upload, and the alias DID advance, so a retry of the whole publish would
+ * push the pointer forward again for nothing. Reporting it as success is
+ * worse — the person is handed a link that does not serve.
+ *
+ * Collapsing it also loses the receipt. `share.go` returns its binding error
+ * before it writes the share receipt to stdout, which is exactly how the
+ * daemon came to lose a confirmed publish; that is a defect against this
+ * contract, not a shape this contract accommodates.
+ *
+ * ## Retry means binding only
+ *
+ * A `binding_pending` publish is resumed by registering the binding again for
+ * the same project, slug and `versionId` under the original identity. It must
+ * NOT re-run the publish: that advances the alias and invents a new version
+ * nobody asked for. The queue that carries these retries must also be
+ * distinct from the stop queue — a binding task misfiled as a stop would
+ * revoke the very share it was meant to complete.
+ *
+ * ## A failure BEFORE the content lands is still an ordinary error
+ *
+ * This union covers outcomes where a receipt exists. A publish that failed
+ * before confirming anything keeps the existing error response; do not dress
+ * it up as `binding_pending` with an empty receipt.
+ */
+export type SharePublishResult =
+  | {
+      status: 'published';
+      receipt: SharePublishReceipt;
+      /** Absent on purpose: a bound share has nothing pending to warn about. */
+      binding?: never;
+    }
+  | {
+      status: 'binding_pending';
+      receipt: SharePublishReceipt;
+      binding: SharePublishBindingPending;
+    };
+
+/**
+ * Why the link is not serving yet, and whether anyone will fix it.
+ *
+ * `retrying` is the DAEMON's fact and only the daemon may assert it: it is
+ * true once a durable enqueue has succeeded, and false otherwise — including
+ * when the enqueue itself failed. The vela CLI cannot fill this in, because it
+ * does not own the queue; a CLI result that claims it is reporting something
+ * it cannot know.
+ *
+ * A failed enqueue is therefore still `binding_pending`, with
+ * `retrying: false`. It is never full success (the link does not serve) and
+ * never a generic publish failure (the content is up). That combination is
+ * the one that needs a person, which is precisely why it must stay sayable.
+ */
+export interface SharePublishBindingPending {
+  /** Will the daemon keep trying on its own? */
+  retrying: boolean;
+  /** The binding failure's error code, sanitized for a public response. */
+  code?: string;
+}
+
+/**
+ * Owner, workspace, resource ids and queue revision tokens stay OUT of the
+ * public publish response.
+ *
+ * The daemon needs every one of them to retry a binding under the original
+ * identity and generation, and it already holds them. Echoing them to a
+ * caller would publish internal identifiers to buy nothing, and a token in a
+ * response is a token in a log.
+ */
+export const SHARE_PUBLISH_RESPONSE_OMITS_INTERNAL_IDS = true;
