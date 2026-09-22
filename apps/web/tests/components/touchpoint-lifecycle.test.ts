@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { mountTouchpoint, PRODUCTION_MAX_LEASE_MS, REQUEST_TIMEOUT_MS, touchpointLeaseValue, resolveAuthorizationDeadline, RETRY_BACKOFF_MS, useTouchpointLifecycle, type TouchpointLifecycleLoad, type TouchpointLifecycleOptions } from "../../src/components/touchpoint-lifecycle";
+import { mountTouchpoint, REQUEST_TIMEOUT_MS, TEST_MAX_AUTHORIZATION_MS, touchpointLeaseValue, resolveAuthorizationDeadline, RETRY_BACKOFF_MS, useTouchpointLifecycle, type TouchpointLifecycleLoad, type TouchpointLifecycleOptions } from "../../src/components/touchpoint-lifecycle";
 import * as host from "../../src/components/touchpoint-component";
 
 const content: host.WebTouchpointContent = {
@@ -229,27 +229,32 @@ const timing = {
 };
 
 describe("resolveAuthorizationDeadline", () => {
-	it("keeps production's five-minute safety bound without treating it as a server rejection", () => {
-		expect(resolveAuthorizationDeadline(timing, 5 * 60_000)).toBe(Date.parse(timing.endsAt));
+	// Production passes no maximum at all, so the activity end is the only thing
+	// that can shorten a grant. There used to be a client cap in this minimum;
+	// the helper's docblock records why no value for it was ever correct.
+	it("bounds a production authorization by the activity end and nothing else", () => {
+		expect(resolveAuthorizationDeadline(timing)).toBe(Date.parse(timing.endsAt));
 	});
 	it("rejects Test authorization beyond its sixty-second contract or activity window", () => {
-		expect(resolveAuthorizationDeadline(timing, 60_000, true)).toBeNull();
-		expect(resolveAuthorizationDeadline({ ...timing, endsAt: "2030-01-01T00:00:10.000Z", authorizationExpiresAt: "2030-01-01T00:00:30.000Z" }, 60_000, true)).toBeNull();
+		expect(resolveAuthorizationDeadline(timing, TEST_MAX_AUTHORIZATION_MS)).toBeNull();
+		expect(resolveAuthorizationDeadline({ ...timing, endsAt: "2030-01-01T00:00:10.000Z", authorizationExpiresAt: "2030-01-01T00:00:30.000Z" }, TEST_MAX_AUTHORIZATION_MS)).toBeNull();
 	});
+	// The Test contract REJECTS an oversized grant; it never shortens one. That
+	// distinction is the whole reason a maximum may still appear in this
+	// signature at all.
 	it("expires at a valid authorization before the activity end", () => {
-		expect(resolveAuthorizationDeadline({ ...timing, authorizationExpiresAt: "2030-01-01T00:00:30.000Z" }, 60_000, true)).toBe(Date.parse("2030-01-01T00:00:30.000Z"));
+		expect(resolveAuthorizationDeadline({ ...timing, authorizationExpiresAt: "2030-01-01T00:00:30.000Z" }, TEST_MAX_AUTHORIZATION_MS)).toBe(Date.parse("2030-01-01T00:00:30.000Z"));
 	});
-	// OPEND-3366. Until A3 the server never granted more than a minute, so no
-	// case existed for an authorization longer than the client's own cap — the
-	// cap simply truncated it, silently, back to five minutes.
+	// OPEND-3366, first tier. Until A3 the server never granted more than a
+	// minute, so no case existed for an authorization longer than the client's
+	// own cap — five minutes, the POLL interval, simply truncated it in silence.
 	it("keeps a server authorization that outlives the old five-minute client cap", () => {
 		const long = { serverTime: "2030-01-01T00:00:00.000Z", endsAt: "2030-01-01T06:00:00.000Z", authorizationExpiresAt: "2030-01-01T02:00:00.000Z" };
-		expect(resolveAuthorizationDeadline(long, 5 * 60_000)).toBe(Date.parse("2030-01-01T00:05:00.000Z"));
-		expect(resolveAuthorizationDeadline(long, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(long.authorizationExpiresAt));
+		expect(resolveAuthorizationDeadline(long)).toBe(Date.parse(long.authorizationExpiresAt));
 	});
 	it("never lets an authorization outlive the activity itself", () => {
 		const past = { serverTime: "2030-01-01T00:00:00.000Z", endsAt: "2030-01-01T00:20:00.000Z", authorizationExpiresAt: "2030-01-01T06:00:00.000Z" };
-		expect(resolveAuthorizationDeadline(past, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(past.endsAt));
+		expect(resolveAuthorizationDeadline(past)).toBe(Date.parse(past.endsAt));
 	});
 	// OPEND-3366, second tier. What a single `setTimeout` can name bounds one
 	// timer SEGMENT, which `armExpiry` already handles; it says nothing about how
@@ -258,31 +263,50 @@ describe("resolveAuthorizationDeadline", () => {
 	// a schedule longer than ~24.9 days came back silently truncated, so a device
 	// that could not reach the server for that long treated the wake as a new
 	// presentation and the device impression retired a campaign the server was
-	// still running. The server enforces no maximum schedule length — its own
-	// production-runtime fixtures use multi-year windows — so the cap may not
-	// impose one either.
+	// still running.
 	it("does not truncate a schedule longer than a single timer can name", () => {
 		const twoMonths = { serverTime: "2030-01-01T00:00:00.000Z", endsAt: "2030-03-01T00:00:00.000Z", authorizationExpiresAt: "2030-03-01T00:00:00.000Z" };
-		expect(resolveAuthorizationDeadline(twoMonths, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(twoMonths.endsAt));
+		expect(resolveAuthorizationDeadline(twoMonths)).toBe(Date.parse(twoMonths.endsAt));
 	});
-	// The other half of the same contract: the cap has to stay a real backstop.
-	// `endsAt` cannot catch a server clock that has fallen behind, because it is
-	// what the skew is measured against — `validForMs` is `deadline - serverTime`,
-	// so a `serverTime` lagging by a month buys a month of display. An infinite
-	// or absent cap would let that through.
-	it("still bounds an authorization granted by a server clock that has fallen behind", () => {
+	// OPEND-3366, third tier, and the case this regression matrix was missing.
+	// Ten years was picked as "far enough that no operator's schedule reaches
+	// it". These are the server's OWN production-runtime fixture bounds
+	// (`touchpoints-runtime-attribution.test.ts`: 2020-01-01 -> 2100-01-01), so
+	// the premise was false the day it was written: a real schedule reached it,
+	// and the client would have withdrawn a campaign the server still
+	// authorized. The numbers here are the fixture's, not ours.
+	it("does not truncate the multi-year schedules the server actually runs", () => {
+		const fixture = { serverTime: "2026-01-01T00:00:00.000Z", endsAt: "2100-01-01T00:00:00.000Z", authorizationExpiresAt: "2100-01-01T00:00:00.000Z" };
+		expect(resolveAuthorizationDeadline(fixture)).toBe(Date.parse(fixture.endsAt));
+	});
+	// The clause the cap used to justify itself with. A lagging `serverTime`
+	// does inflate `validForMs` (`deadline - serverTime`), and `endsAt` cannot
+	// catch it. A duration cap cannot either: it only ever sees the SUM of the
+	// skew and the schedule, so every value small enough to matter truncated a
+	// real campaign. The grant therefore stands, and the two terms that DO
+	// survive skew carry it — the credential window, whose offset cancels
+	// because both readings come off the same clock, and the already-ended
+	// check.
+	it("does not shorten a grant from a server clock that has fallen behind", () => {
 		const skewed = { serverTime: "2020-01-01T00:00:00.000Z", endsAt: "2099-01-01T00:00:00.000Z", authorizationExpiresAt: "2099-01-01T00:00:00.000Z" };
-		expect(resolveAuthorizationDeadline(skewed, PRODUCTION_MAX_LEASE_MS)).toBe(Date.parse(skewed.serverTime) + PRODUCTION_MAX_LEASE_MS);
-		expect(Number.isFinite(PRODUCTION_MAX_LEASE_MS)).toBe(true);
+		expect(resolveAuthorizationDeadline(skewed)).toBe(Date.parse(skewed.endsAt));
 	});
-	// The cap is one value, in one place, because three copies of it is exactly
-	// how the Badge and the Hover kept a five-minute lease after the Modal was
-	// fixed. Deleting this case means re-opening that door.
-	it("bounds all three production placements with the one shared cap", () => {
+	it("cancels clock offset out of a credential window and still refuses an ended activity", () => {
+		const credential = { serverTime: "2020-01-01T00:00:00.000Z", endsAt: "2099-01-01T00:00:00.000Z", authorizationExpiresAt: "2020-01-01T00:01:00.000Z" };
+		expect(resolveAuthorizationDeadline(credential)! - Date.parse(credential.serverTime)).toBe(60_000);
+		expect(resolveAuthorizationDeadline({ serverTime: "2030-01-01T00:00:00.000Z", endsAt: "2029-12-31T23:59:00.000Z", authorizationExpiresAt: "2030-01-01T00:01:00.000Z" })).toBeNull();
+	});
+	// Three copies of a cap is exactly how the Badge and the Hover kept a
+	// five-minute lease after the Modal was fixed. There is no shared cap left
+	// to drift now, so the invariant is stronger: production hands this helper a
+	// timing and nothing else. A second argument in any of these files is a
+	// fourth attempt at the number the docblock explains away.
+	it("passes no lease bound from any of the three production placements", () => {
 		for (const file of ["ProductionCampaignModal.tsx", "ProductionCampaignBadge.tsx", "ProductionCampaignHover.tsx"]) {
 			const source = readFileSync(resolve(process.cwd(), "src/components", file), "utf8");
-			expect(source, `${file} must not redeclare a local lease cap`).not.toMatch(/const\s+MAX_LEASE_MS\s*=/u);
-			expect(source, `${file} must take the shared cap`).toContain("PRODUCTION_MAX_LEASE_MS");
+			expect(source, `${file} must not redeclare a local lease cap`).not.toMatch(/const\s+\w*MAX_LEASE\w*\s*=/u);
+			expect(source, `${file} must not resurrect the shared production cap`).not.toContain("PRODUCTION_MAX_LEASE_MS");
+			expect(source, `${file} must call resolveAuthorizationDeadline with no maximum`).not.toMatch(/resolveAuthorizationDeadline\([^()]*,/u);
 		}
 	});
 });

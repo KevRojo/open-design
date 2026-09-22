@@ -23,7 +23,6 @@ import {
 	loadProductionTouchpointDecision,
 } from "./production-touchpoint-loader";
 import {
-	PRODUCTION_MAX_LEASE_MS,
 	resolveAuthorizationDeadline,
 	touchpointContentIdentity,
 	touchpointLeaseValue,
@@ -291,7 +290,7 @@ export function ProductionCampaignModal({
 				return active ? { kind: "retain" } : { kind: "clear" };
 			}
 			const next = loaded.value as Decision;
-			const deadline = resolveAuthorizationDeadline(next, PRODUCTION_MAX_LEASE_MS);
+			const deadline = resolveAuthorizationDeadline(next);
 			const serverTime = Date.parse(next.serverTime);
 			if (!next.activityId || !next.touchpointDecisionId || !next.deploymentId || !next.content?.id || next.placementKey !== PLACEMENT || next.content?.placementKey !== PLACEMENT || deadline === null || !Number.isFinite(serverTime) || !supportsWebTouchpointCapabilities(next.content, next.requiredCapabilities, supportedCapabilities)) {
 				clearOpenPresentation();

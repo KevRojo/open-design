@@ -22,7 +22,6 @@ import {
 	loadProductionTouchpointDecision,
 } from "./production-touchpoint-loader";
 import {
-	PRODUCTION_MAX_LEASE_MS,
 	resolveAuthorizationDeadline,
 	touchpointContentIdentity,
 	touchpointLeaseValue,
@@ -64,7 +63,7 @@ function validDecision(
 ): { valid: ValidDecision; validForMs: number } | null {
 	if (!value || typeof value !== "object") return null;
 	const decision = value as RuntimeDecision;
-	const deadline = resolveAuthorizationDeadline(decision, PRODUCTION_MAX_LEASE_MS);
+	const deadline = resolveAuthorizationDeadline(decision);
 	if (
 		!decision.activityId ||
 		!decision.touchpointDecisionId ||

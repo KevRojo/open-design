@@ -19,13 +19,85 @@ export type AuthorizationTiming = Readonly<{
 	authorizationExpiresAt: string;
 }>;
 
-/** The server grants display authority; clients may only shorten it. */
-export function resolveAuthorizationDeadline(timing: AuthorizationTiming, maximumLeaseMs: number, rejectOversizedAuthorization = false): number | null {
+/**
+ * The Test runtime's authorization contract: it may not grant display for
+ * longer than this at a time. It is a property of that runtime's protocol, not
+ * a duration anyone chose as "long enough" — production has no counterpart and
+ * must not be given one. See {@link resolveAuthorizationDeadline}.
+ */
+export const TEST_MAX_AUTHORIZATION_MS = 60_000;
+
+/**
+ * The server grants display authority. A client may REFUSE a grant its own
+ * runtime contract forbids; it may never quietly shorten one.
+ *
+ * `maximumAuthorizationMs` is that contract, and it is a rejection threshold
+ * rather than a ceiling: an authorization longer than it yields `null` — no
+ * decision at all — never a silently shortened deadline. Only the Test runtime
+ * has such a contract ({@link TEST_MAX_AUTHORIZATION_MS}). Production passes
+ * nothing, because the server enforces no maximum schedule length and its own
+ * production-runtime fixtures run windows of 2020-01-01 to 2100-01-01.
+ *
+ * The minimum used to carry a third term, `serverTime + maximum`, and three
+ * times running that term was given a number which answered some OTHER question
+ * and thereby became the binding answer to this one:
+ *
+ *  - Five minutes, the interval between polls. Every longer authorization came
+ *    back as five minutes, so a client that could not reach the server went
+ *    blank in the middle of an activity that was still running.
+ *  - `MAX_TIMER_MS`, the reach of one `setTimeout`. Every schedule longer than
+ *    ~24.9 days came back truncated. `armExpiry` already segments a longer
+ *    wait, so the timer limit was never the lease's problem to solve; borrowing
+ *    it moved the same defect up a tier, and a device offline past that point
+ *    woke to what looked like a new presentation whose impression retired a
+ *    campaign the server was still running.
+ *  - Ten years, a guess at "far enough that no operator's schedule reaches it".
+ *    The fixtures above reach it. (It was not even ten years: 10 * 365 days
+ *    lands two days short, which is its own small sign that the number was
+ *    never derived from anything.)
+ *
+ * Every one of the three was defended as a backstop against a server clock that
+ * has fallen behind — `validForMs` is `deadline - serverTime`, so a lagging
+ * `serverTime` inflates the window, and `endsAt` cannot catch that because it
+ * is the very thing the lag is measured against. The defence does not survive
+ * the arithmetic. A duration cap sees only the SUM of the skew and the
+ * schedule, so it cannot bound one without binding the other: a value small
+ * enough to catch a month of skew truncates every multi-year campaign, and a
+ * value large enough to clear a 74-year schedule catches no skew worth the
+ * name. The two requirements are mutually exclusive by construction — which is
+ * precisely why each number picked for the skew question turned into the
+ * binding term for the schedule question. There is no fourth value to try, and
+ * the term is gone rather than widened.
+ *
+ * What answers the skew question instead:
+ *
+ *  - The minimum still contains `authorizationExpiresAt`. Whenever the server
+ *    issues a clock-derived credential window, `deadline - serverTime` is two
+ *    readings of the SAME clock, so a uniform offset cancels out exactly.
+ *  - `endsAt <= serverTime` still refuses an activity already over on the
+ *    server's own clock.
+ *  - `POLL_MS`. A successful response REPLACES `validForMs` outright, so an
+ *    inflated window is only ever spent by a client that cannot reach the
+ *    server for the whole of it; reconnecting, or a corrected server clock,
+ *    supersedes it at the next poll.
+ *
+ * What is left is accepted deliberately: a server clock wrong by a month
+ * over-displays by a month — the error is the size of the SKEW, not the size of
+ * the lease, so it does not grow with the schedule — and a server in that state
+ * is mis-deciding `startsAt` and `endsAt` for every client at once, which is
+ * not a fault a client can repair by shortening its own lease. Do NOT reach for
+ * the obvious replacement and compare `serverTime` against the device's
+ * `Date.now()`: the device clock is the least reliable clock in this system,
+ * and refusing a grant the server made because a user's laptop is wrong is
+ * OPEND-3366 once more, from a new source.
+ */
+export function resolveAuthorizationDeadline(timing: AuthorizationTiming, maximumAuthorizationMs?: number): number | null {
 	const serverTime = Date.parse(timing.serverTime);
 	const endsAt = Date.parse(timing.endsAt);
 	const authorizationExpiresAt = Date.parse(timing.authorizationExpiresAt);
-	if (!Number.isFinite(serverTime) || !Number.isFinite(endsAt) || !Number.isFinite(authorizationExpiresAt) || endsAt <= serverTime || (rejectOversizedAuthorization && (authorizationExpiresAt > serverTime + maximumLeaseMs || authorizationExpiresAt > endsAt))) return null;
-	return Math.min(authorizationExpiresAt, endsAt, serverTime + maximumLeaseMs);
+	if (!Number.isFinite(serverTime) || !Number.isFinite(endsAt) || !Number.isFinite(authorizationExpiresAt) || endsAt <= serverTime) return null;
+	if (maximumAuthorizationMs !== undefined && (authorizationExpiresAt > serverTime + maximumAuthorizationMs || authorizationExpiresAt > endsAt)) return null;
+	return Math.min(authorizationExpiresAt, endsAt);
 }
 
 /**
@@ -170,41 +242,11 @@ export const RETRY_BACKOFF_MS = [1_000, 3_000] as const;
  *
  * It is NOT a bound on how long display may be authorized. Those are two
  * different questions, and the whole of OPEND-3366 is what happens when one
- * answer is used for both.
+ * answer is used for both. There is no lease bound left for it to be mistaken
+ * for — {@link resolveAuthorizationDeadline} explains why none can exist — and
+ * this value must not acquire a second job to become one again.
  */
 const MAX_TIMER_MS = 2_147_483_647;
-/**
- * The client's own bound on production display authority, shared by every
- * production placement so the three of them can never drift apart.
- *
- * It is a backstop against a server clock that grants past the activity, not a
- * policy: `resolveAuthorizationDeadline` already takes the minimum of the
- * authorization, `endsAt` and this. What the backstop is for is skew, and only
- * skew — `validForMs` is `deadline - serverTime`, so a `serverTime` that has
- * fallen a month behind buys a month of display that `endsAt` cannot catch,
- * because `endsAt` is the very thing the lag is measured against. Hence a
- * finite value, rather than dropping the term.
- *
- * Twice now this constant has been given a number that answered a different
- * question and so became the binding term instead:
- *
- *  - Five minutes, which is an interval between polls, truncated every longer
- *    authorization to five minutes; a client that could not reach the server
- *    went blank in the middle of an activity that was still running.
- *  - `MAX_TIMER_MS`, which is the reach of one timer, truncated every schedule
- *    longer than ~24.9 days. `armExpiry` already segments a longer wait, so the
- *    timer limit was never the lease's problem to solve; borrowing it merely
- *    moved the same defect up a tier. A device offline past that point woke to
- *    what looked like a new presentation, and the device impression retired a
- *    campaign the server was still running — permanently, for that device.
- *
- * So the value has to answer its own question: a duration no operator's
- * schedule can plausibly reach, which therefore never binds in practice, while
- * still finite enough to cap a badly skewed clock. The server enforces no
- * maximum schedule length at all, and its own production-runtime fixtures run
- * multi-year windows, so "plausible" here is measured in years.
- */
-export const PRODUCTION_MAX_LEASE_MS = 10 * 365 * 24 * 60 * 60_000;
 /** Only a failure carrying the server's own withdrawal may end a live lease. */
 export const touchpointWithdrawsDisplay = (error: unknown) =>
 	typeof error === "object" && error !== null && (error as { touchpointWithdrawal?: unknown }).touchpointWithdrawal === true;

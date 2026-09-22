@@ -17,7 +17,7 @@ import {
 } from "./touchpoint-static-actions";
 import { dispatchProductionCampaignAction } from "./ProductionCampaignModal";
 import { emitProductionTouchpointLoadDiagnostic, loadProductionTouchpointDecision } from "./production-touchpoint-loader";
-import { PRODUCTION_MAX_LEASE_MS, resolveAuthorizationDeadline, touchpointContentIdentity, touchpointLeaseValue, type TouchpointLeaseValue, type TouchpointLifecycleLoad, useTouchpointLifecycle } from "./touchpoint-lifecycle";
+import { resolveAuthorizationDeadline, touchpointContentIdentity, touchpointLeaseValue, type TouchpointLeaseValue, type TouchpointLifecycleLoad, useTouchpointLifecycle } from "./touchpoint-lifecycle";
 import {
 	TestTouchpointMount,
 	recordVisibleTestTouchpoint,
@@ -74,7 +74,7 @@ export function ProductionCampaignBadge({
 		}
 		if (loaded.kind === "no-decision") return active ? { kind: "retain" } : { kind: "clear" };
 		const next = loaded.value as Decision;
-		const deadline = resolveAuthorizationDeadline(next, PRODUCTION_MAX_LEASE_MS);
+		const deadline = resolveAuthorizationDeadline(next);
 		if (!next.activityId || !next.touchpointDecisionId || !next.deploymentId || !next.content?.id || next.placementKey !== PLACEMENT || next.content?.placementKey !== PLACEMENT || deadline === null || !Number.isFinite(deadline)) {
 			if (next.placementKey !== PLACEMENT || next.content?.placementKey !== PLACEMENT) emitWebTouchpointDiagnostic({ code: "touchpoint_decision_mismatch" });
 			return { kind: "clear" };
