@@ -15,6 +15,7 @@ type CacheState = {
   remote: RemoteCacheEntry | null;
   inFlight: Promise<void> | null;
   lastRemoteError: string | null;
+  pendingReads: number;
 };
 
 // The AMR model catalog changes rarely (new models land on the order of days),
@@ -33,7 +34,16 @@ function errorMessage(error: unknown): string {
 export class AmrModelLoadingCache {
   private readonly states = new Map<string, CacheState>();
 
-  constructor(private readonly refreshIntervalMs = DEFAULT_REMOTE_REFRESH_INTERVAL_MS) {}
+  private activeProbes = 0;
+
+  constructor(
+    private readonly refreshIntervalMs = DEFAULT_REMOTE_REFRESH_INTERVAL_MS,
+    private readonly maxEntries = 64,
+  ) {
+    if (!Number.isInteger(maxEntries) || maxEntries < 1) {
+      throw new Error('AMR model cache capacity must be a positive integer');
+    }
+  }
 
   async get(cacheKey: string, fetchers: Fetchers): Promise<AmrModelsResponse> {
     const state = this.stateFor(cacheKey);
@@ -50,7 +60,18 @@ export class AmrModelLoadingCache {
       };
     }
 
-    const preset = await fetchers.fetchPreset();
+    if (this.activeProbes >= this.maxEntries) {
+      throw new Error('AMR model cache is busy; retry later');
+    }
+    state.pendingReads += 1;
+    this.activeProbes += 1;
+    let preset: RuntimeModelOption[];
+    try {
+      preset = await fetchers.fetchPreset();
+    } finally {
+      state.pendingReads -= 1;
+      this.activeProbes -= 1;
+    }
     this.startRefresh(state, fetchers.fetchRemote);
     return {
       source: 'preset',
@@ -87,18 +108,34 @@ export class AmrModelLoadingCache {
 
   private stateFor(cacheKey: string): CacheState {
     const existing = this.states.get(cacheKey);
-    if (existing) return existing;
+    if (existing) {
+      this.states.delete(cacheKey);
+      this.states.set(cacheKey, existing);
+      return existing;
+    }
+    // Invalidation may detach active probes; keep counting them until they
+    // finish so cache churn cannot bypass the subprocess budget.
+    if (this.activeProbes >= this.maxEntries) {
+      throw new Error('AMR model cache is busy; retry later');
+    }
+    if (this.states.size >= this.maxEntries) {
+      const idle = [...this.states].find(([, state]) => !state.inFlight && state.pendingReads === 0);
+      if (!idle) throw new Error('AMR model cache is busy; retry later');
+      this.states.delete(idle[0]);
+    }
     const created: CacheState = {
       remote: null,
       inFlight: null,
       lastRemoteError: null,
+      pendingReads: 0,
     };
     this.states.set(cacheKey, created);
     return created;
   }
 
   private startRefresh(state: CacheState, fetchRemote: () => Promise<RuntimeModelOption[]>): void {
-    if (state.inFlight) return;
+    if (state.inFlight || this.activeProbes >= this.maxEntries) return;
+    this.activeProbes += 1;
     state.inFlight = (async () => {
       try {
         const models = await fetchRemote();
@@ -111,6 +148,7 @@ export class AmrModelLoadingCache {
         state.lastRemoteError = errorMessage(error);
       } finally {
         state.inFlight = null;
+        this.activeProbes -= 1;
       }
     })();
   }

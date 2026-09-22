@@ -642,9 +642,8 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
       // headerless callers; that keeps personal-default Link behavior.
       const workspaceId = headerValue(req, 'x-od-workspace-id');
       // Reject malformed workspace ids before they enter AmrModelLoadingCache
-      // or spawn `vela model list`. Per-key cache states have no age eviction;
-      // unbounded header values would otherwise create persistent entries and
-      // subprocess work. Same pattern as the AMR API proxy boundary above.
+      // or spawn `vela model list`. Valid scopes are separately bounded by
+      // the cache capacity and probe budget. Same syntax policy as the proxy.
       if (workspaceId !== null && !VELA_WORKSPACE_ID_PATTERN.test(workspaceId)) {
         res.status(400).json({ error: 'invalid_workspace_id' });
         return;
