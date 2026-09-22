@@ -3272,6 +3272,7 @@ export const fa: Dict = {
   'fileViewer.publishFileRequiresTeam': 'انتشار پیوند عمومی به فضای کاری تیمی نیاز دارد. به یک فضای کاری تیمی بروید یا این فایل را با «استقرار» منتشر کنید.',
   'fileViewer.publishFileRequiresWorkspace': 'ایجاد پیوند اشتراک‌گذاری نیازمند ورود به فضای کاری است. به OpenDesign Cloud وارد شوید یا این فایل را از طریق استقرار به اشتراک بگذارید.',
   'fileViewer.publishFileTooLarge': "این پروژه از سقف اشتراک‌گذاری 20 MiB بیشتر است. حجم HTML و منابع ارجاع‌شده را کاهش دهید و دوباره تلاش کنید.",
+  "fileViewer.unpublishFileFailed": "غیرفعال کردن پیوند ناموفق بود. لطفاً دوباره تلاش کنید.",
   "fileViewer.publishFileFailed": "ایجاد پیوند اشتراک‌گذاری ناموفق بود. لطفاً بعداً دوباره تلاش کنید.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

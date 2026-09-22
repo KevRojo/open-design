@@ -6,7 +6,7 @@ import type { useT } from '../../i18n';
 import { RemixIcon } from '../RemixIcon';
 import styles from './ShareTab.module.css';
 
-export type SharePublishFailureKey = PublicFilePublishFailureKey | 'fileViewer.publishFileTooLarge';
+export type SharePublishFailureKey = PublicFilePublishFailureKey | 'fileViewer.publishFileTooLarge' | 'fileViewer.unpublishFileFailed';
 
 /** Time-based waiting feedback, not transferred bytes. Only success may reach 1. */
 export function boundedPublishProgress(elapsedMs: number, completed: boolean): number {

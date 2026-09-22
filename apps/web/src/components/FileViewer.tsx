@@ -8338,8 +8338,12 @@ function HtmlViewer({
         publish_duration_ms: Math.round(performance.now() - unpublishStarted),
       });
       if (publicFileRequestSeqRef.current === requestSeq) {
-        setPublishLinkFeedback('failed');
-        setPublishFailureKey(publicFilePublishFailureKey(error));
+        // Stopping a link is not a clipboard operation. Keep the URL and copy
+        // feedback independent while preserving actionable identity failures.
+        const failureKey = publicFilePublishFailureKey(error);
+        setPublishFailureKey(failureKey === 'fileViewer.publishFileFailed'
+          ? 'fileViewer.unpublishFileFailed'
+          : failureKey);
       }
     } finally {
       if (publicFileRequestSeqRef.current === requestSeq) setPublishingPublicFile(false);

@@ -3265,6 +3265,7 @@ export const ko: Dict = {
   'fileViewer.publishFileRequiresTeam': '공개 링크를 게시하려면 팀 워크스페이스가 필요합니다. 팀 워크스페이스로 전환하거나 배포를 사용해 이 파일을 게시하세요.',
   'fileViewer.publishFileRequiresWorkspace': '공유 링크를 만들려면 로그인된 워크스페이스가 필요합니다. OpenDesign Cloud에 로그인하거나 배포로 이 파일을 공유하세요.',
   'fileViewer.publishFileTooLarge': "프로젝트가 공유 한도인 20 MiB를 초과합니다. HTML 및 참조 리소스의 크기를 줄인 후 다시 시도하세요.",
+  "fileViewer.unpublishFileFailed": "링크를 비활성화하지 못했습니다. 다시 시도해 주세요.",
   "fileViewer.publishFileFailed": "공유 링크를 만들지 못했습니다. 나중에 다시 시도해 주세요.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

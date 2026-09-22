@@ -3265,6 +3265,7 @@ export const tr: Dict = {
   'fileViewer.publishFileRequiresTeam': 'Herkese açık bağlantı yayınlamak için ekip çalışma alanı gerekir. Bir ekip çalışma alanına geçin veya bu dosyayı Dağıt ile yayınlayın.',
   'fileViewer.publishFileRequiresWorkspace': 'Paylaşım bağlantısı için oturum açılmış bir çalışma alanı gerekir. OpenDesign Cloud\'da oturum açın veya bu dosyayı bir dağıtımla paylaşın.',
   'fileViewer.publishFileTooLarge': "Bu proje 20 MiB paylaşım sınırını aşıyor. HTML ve başvurulan kaynakların boyutunu küçültüp yeniden deneyin.",
+  "fileViewer.unpublishFileFailed": "Bağlantı devre dışı bırakılamadı. Lütfen tekrar deneyin.",
   "fileViewer.publishFileFailed": "Paylaşım bağlantısı oluşturulamadı. Lütfen daha sonra tekrar deneyin.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

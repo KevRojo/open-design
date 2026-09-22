@@ -3265,6 +3265,7 @@ export const th: Dict = {
   'fileViewer.publishFileRequiresTeam': 'การเผยแพร่ลิงก์สาธารณะต้องใช้พื้นที่ทำงานแบบทีม สลับไปยังพื้นที่ทำงานแบบทีม หรือใช้ Deploy เพื่อเผยแพร่ไฟล์นี้',
   'fileViewer.publishFileRequiresWorkspace': 'การสร้างลิงก์แชร์ต้องเข้าสู่ระบบเวิร์กสเปซ เข้าสู่ระบบ OpenDesign Cloud หรือแชร์ไฟล์นี้ผ่านการดีพลอย',
   'fileViewer.publishFileTooLarge': "โปรเจกต์นี้เกินขีดจำกัดการแชร์ 20 MiB โปรดลดขนาด HTML และทรัพยากรที่อ้างอิง แล้วลองอีกครั้ง",
+  "fileViewer.unpublishFileFailed": "ปิดใช้งานลิงก์ไม่สำเร็จ โปรดลองอีกครั้ง",
   "fileViewer.publishFileFailed": "สร้างลิงก์แชร์ไม่สำเร็จ โปรดลองอีกครั้งในภายหลัง",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

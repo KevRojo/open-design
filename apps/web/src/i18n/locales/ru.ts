@@ -3265,6 +3265,7 @@ export const ru: Dict = {
   'fileViewer.publishFileRequiresTeam': 'Для публикации общедоступной ссылки нужно командное рабочее пространство. Переключитесь на командное пространство или опубликуйте файл через «Развернуть».',
   'fileViewer.publishFileRequiresWorkspace': 'Для ссылки нужен вход в рабочее пространство. Войдите в OpenDesign Cloud или поделитесь файлом через деплой.',
   'fileViewer.publishFileTooLarge': "Проект превышает лимит публикации 20 MiB. Уменьшите размер HTML и связанных ресурсов и повторите попытку.",
+  "fileViewer.unpublishFileFailed": "Не удалось отключить ссылку. Повторите попытку.",
   "fileViewer.publishFileFailed": "Не удалось создать ссылку. Повторите попытку позже.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

@@ -132,7 +132,7 @@ function stubFetch(
         const body =
           unpublishStatus === 200
             ? { ok: true, slug: 'slug-1', fileName: 'index.html' }
-            : { error: { message: 'WORKSPACE_IDENTITY_REQUIRED' } };
+            : { error: { message: unpublishStatus === 403 ? 'WORKSPACE_IDENTITY_REQUIRED' : 'stop unavailable' } };
         return new Response(JSON.stringify(body), { status: unpublishStatus });
       }
       return new Response(JSON.stringify({ publication: null }), { status: 200 });
@@ -290,6 +290,25 @@ describe('publish flow analytics', () => {
         }),
       );
     });
+  });
+
+  it('S10 keeps the link and retry action without claiming a clipboard failure when stopping fails', async () => {
+    const fetchMock = stubFetch({ unpublishStatus: 500 });
+    fireEvent.click(await openPublishPanel());
+    const stop = await screen.findByRole('button', { name: UNPUBLISH_ROW });
+    fireEvent.click(stop);
+    await screen.findByText('Could not turn off the link. Please try again.');
+    expect(stop).toBeEnabled();
+    expect(screen.getByRole('button', { name: /copy share link/i })).toBeEnabled();
+    expect(screen.getByText('https://open-design.ai/p/slug-1')).toBeVisible();
+    expect(screen.queryByText(/please manually copy/i)).toBeNull();
+    expect(screen.queryByText(/failed to generate/i)).toBeNull();
+    const stops = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+    expect(stops()).toHaveLength(1);
+    fireEvent.click(stop);
+    await waitFor(() => expect(stops()).toHaveLength(2));
+    await screen.findByText('Could not turn off the link. Please try again.');
+    expect(stop).toBeEnabled();
   });
 
   it('reports a failed unpublish with the workspace-identity error code', async () => {

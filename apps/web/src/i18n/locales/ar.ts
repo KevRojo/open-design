@@ -3272,6 +3272,7 @@ export const ar: Dict = {
   'fileViewer.publishFileRequiresTeam': 'يتطلب نشر رابط عام مساحة عمل جماعية. بدّل إلى مساحة عمل جماعية، أو استخدم النشر لإتاحة هذا الملف.',
   'fileViewer.publishFileRequiresWorkspace': 'يتطلب رابط المشاركة مساحة عمل مسجّلة الدخول. سجّل الدخول إلى OpenDesign Cloud أو شارك هذا الملف عبر النشر.',
   'fileViewer.publishFileTooLarge': "يتجاوز هذا المشروع حد المشاركة البالغ 20 MiB. قلّل حجم HTML والموارد المشار إليها، ثم أعد المحاولة.",
+  "fileViewer.unpublishFileFailed": "تعذّر إيقاف الرابط. حاول مجددًا.",
   "fileViewer.publishFileFailed": "تعذّر إنشاء رابط المشاركة. حاول مجددًا لاحقًا.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

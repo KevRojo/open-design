@@ -3437,6 +3437,7 @@ export const zhCN: Dict = {
   "fileViewer.publishFileRequiresTeam": "发布公开链接需要团队工作区。请切换到团队工作区，或使用「部署」发布此文件。",
   "fileViewer.publishFileRequiresWorkspace": "生成分享链接需要登录工作区。请登录 OpenDesign Cloud，或改用「部署」分享此文件。",
   "fileViewer.publishFileTooLarge": "项目超过 20 MiB 分享上限。请减小 HTML 和引用资源的总大小后重试。",
+  "fileViewer.unpublishFileFailed": "关闭链接失败，请重试。",
   "fileViewer.publishFileFailed": "生成分享链接失败，请稍后重试。",
   "fileViewer.workspaceShareSuccess": "已分享给工作空间成员",
   "fileViewer.workspaceShareFailed": "分享到工作空间失败",

@@ -3265,6 +3265,7 @@ export const hu: Dict = {
   'fileViewer.publishFileRequiresTeam': 'A nyilvános hivatkozás közzétételéhez csapatmunkaterület szükséges. Válts csapatmunkaterületre, vagy tedd közzé a fájlt a Közzététel funkcióval.',
   'fileViewer.publishFileRequiresWorkspace': 'A megosztási linkhez bejelentkezett munkaterület szükséges. Jelentkezz be az OpenDesign Cloudba, vagy oszd meg a fájlt telepítéssel.',
   'fileViewer.publishFileTooLarge': "A projekt meghaladja a 20 MiB megosztási korlátot. Csökkentsd a HTML és a hivatkozott erőforrások méretét, majd próbáld újra.",
+  "fileViewer.unpublishFileFailed": "Nem sikerült kikapcsolni a linket. Próbáld újra.",
   "fileViewer.publishFileFailed": "Nem sikerült létrehozni a megosztási linket. Próbáld újra később.",
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

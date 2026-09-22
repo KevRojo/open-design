@@ -3446,6 +3446,7 @@ export const zhTW: Dict = {
   "fileViewer.publishFileRequiresTeam": "發布公開連結需要團隊工作區。請切換到團隊工作區，或使用「部署」發布此檔案。",
   "fileViewer.publishFileRequiresWorkspace": "產生分享連結需要登入工作區。請登入 OpenDesign Cloud，或改用「部署」分享此檔案。",
   "fileViewer.publishFileTooLarge": "專案超過 20 MiB 分享上限。請減小 HTML 和引用資源的總大小後重試。",
+  "fileViewer.unpublishFileFailed": "關閉連結失敗，請重試。",
   "fileViewer.publishFileFailed": "產生分享連結失敗，請稍後重試。",
   "fileViewer.workspaceShareSuccess": "已分享給工作空間成員",
   "fileViewer.workspaceShareFailed": "分享到工作空間失敗",
