@@ -28,6 +28,40 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.use({ screenshot: 'off', video: 'off', trace: 'off' });
+test('B2 real export opens the history-gated share guide', async ({ page }, testInfo) => {
+  await routeMockAgents(page);
+  const projectId = await createEmptyProject(page, 'B2 export guide');
+  await seedHtmlArtifact(page, projectId, 'guide.html', '<!doctype html><html><head><title>B2 export</title></head><body><h1>B2 export fixture</h1></body></html>');
+  await page.route('**/api/integrations/vela/status*', route => route.fulfill({ json: {
+    loggedIn: true, profile: 'test', configPath: '', user: { id: 'b2-browser-account', email: 'fixture@example.invalid' },
+  } }));
+  await page.route(`**/api/projects/${projectId}/share-state`, route => route.fulfill({ json: {
+    projectId, bindingExists: false, hasEverShared: false, publications: [],
+  } }));
+  await page.goto(`/projects/${projectId}/files/guide.html`);
+  await openDesignFile(page, 'guide.html');
+  await expect(artifactPreview(page)).toBeVisible();
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const downloaded = page.waitForEvent('download').catch(() => null);
+  const exported = page.waitForResponse(response => response.url().endsWith(`/api/projects/${projectId}/export/html`) && response.request().method() === 'POST');
+  await page.getByRole('menuitem', { name: /Export as standalone HTML/i }).click();
+  const exportResponse = await exported;
+  expect(exportResponse.ok(), `export ${exportResponse.status()}: ${(await exportResponse.text()).slice(0, 1000)}`).toBe(true);
+  expect(await downloaded).not.toBeNull();
+  const guide = page.getByRole('region', { name: 'Try sharing', exact: true });
+  await expect(guide).toBeVisible();
+  await guide.hover();
+  await expect(guide).toHaveCSS('border-radius', '10px');
+  await expect(guide).not.toContainText('Awaiting');
+  const capture = testInfo.outputPath('b2-guide.png');
+  await page.screenshot({ path: capture });
+  await testInfo.attach('B2 real export entry', { path: capture, contentType: 'image/png' });
+  await guide.getByRole('button', { name: 'Try sharing', exact: true }).click();
+  await expect(guide).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('menu').getByRole('heading', { name: 'Share', exact: true })).toBeVisible();
+});
+
 test.describe('K8 scoped comment sync banner', () => {
   test('real preview entry reads sync state and clears the banner after login refresh', async ({ page }) => {
     await routeMockAgents(page);

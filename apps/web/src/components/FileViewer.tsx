@@ -6,6 +6,7 @@ import { AfterExportShareGuide } from './share/AfterExportShareGuide';
 import { CommentSyncBanner } from './share/CommentSyncBanner';
 import { useAfterExportShareGuide } from './share/useAfterExportShareGuide';
 import { useShareGuideAppUserId } from './share/useShareGuideAppUserId';
+import { useProjectShareHistory } from './share/useProjectShareHistory';
 import { SharePanelHeader } from './share/SharePanelHeader';
 import { ShareMoreMenu } from './share/ShareMoreMenu';
 import shareEntryStyles from './share/ShareEntry.module.css';
@@ -15208,12 +15209,12 @@ function HtmlViewer({
   // guards the actual export/publish handlers.
   const rawCanShare = source !== null && isShareableArtifact;
   const shareGuideAppUserId = useShareGuideAppUserId();
+  const projectShareHistory = useProjectShareHistory(projectId, workspaceContext, JSON.stringify([file.name, publishedFileUrl]));
   const afterExportGuide = useAfterExportShareGuide({
     scopeKey: JSON.stringify([projectId, file.name, workspaceAccountScopedCacheKey(workspaceContext)]),
     appUserId: shareGuideAppUserId,
-    // B2 dependency: replace only with the project share-state binding-existence proof.
-    // Active publication/URL/none cannot establish that a project was never shared.
-    hasEverShared: null,
+    // The URL only invalidates the read; it never establishes binding history.
+    hasEverShared: projectShareHistory?.hasEverShared ?? null,
     enabled: workspaceActive && !viewerOnly && rawCanShare && !streaming,
   });
   const rawCanDownload = source !== null && (isShareableArtifact || isMarkdownArtifact);
