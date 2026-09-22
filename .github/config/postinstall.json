@@ -75,11 +75,11 @@
     },
     "ci-e2e": {
       "installProfile": "workspace",
-      "requestedTargets": ["packages/contracts", "tools/dev", "tools/pack", "tools/release", "tools/serve"]
+      "requestedTargets": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack", "tools/release", "tools/serve"]
     },
     "ci-ui": {
       "installProfile": "workspace",
-      "requestedTargets": ["packages/contracts", "tools/dev", "tools/pack"]
+      "requestedTargets": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack"]
     }
   }
 }

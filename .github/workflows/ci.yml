@@ -293,15 +293,11 @@ jobs:
           postinstall-intent: workspace
           runner-labels: ${{ toJSON(fromJSON(needs.runners.outputs.runs_on).general_medium) }}
 
-      # `scripts/postinstall.mjs` only prebuilds package/tool entrypoints that
-      # are needed immediately after install for linked bins and shared
-      # sidecar/platform imports. It intentionally skips app outputs because
-      # building all apps would make every install run a Next/Electron-adjacent
-      # app build, even when a developer only needs packages/tools.
+      # The workspace postinstall plan builds the daemon and its package
+      # dependency closure. Desktop and Web sidecar declarations remain explicit
+      # because those app outputs are outside the postinstall target catalog.
       #
       # Fresh CI typecheck/test still need these specific generated declarations:
-      #   - `apps/daemon/dist/*.d.ts` for packaged/runtime consumers of the daemon
-      #     package export
       #   - `apps/desktop/dist/main/index.d.ts` for `apps/packaged` imports of
       #     `@open-design/desktop/main`
       #   - `apps/web/dist/sidecar/index.d.ts` for `apps/packaged` imports of
@@ -311,7 +307,6 @@ jobs:
       - name: Prebuild workspace type declarations
         if: ${{ fromJSON(needs.plan.outputs.scopes).run_preflight_typecheck }}
         run: |
-          pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
           pnpm --filter @open-design/web build:sidecar
 
@@ -473,7 +468,6 @@ jobs:
 
       - name: Prebuild workspace type declarations
         run: |
-          pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
           pnpm --filter @open-design/web build:sidecar
 
@@ -517,7 +511,6 @@ jobs:
 
       - name: Prebuild workspace type declarations
         run: |
-          pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
           pnpm --filter @open-design/web build:sidecar
 
@@ -561,7 +554,6 @@ jobs:
 
       - name: Prebuild workspace type declarations
         run: |
-          pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
           pnpm --filter @open-design/web build:sidecar
 
@@ -634,7 +626,6 @@ jobs:
 
       - name: Prebuild workspace type declarations
         run: |
-          pnpm --filter @open-design/daemon build
           pnpm --filter @open-design/desktop build
           pnpm --filter @open-design/web build:sidecar
 

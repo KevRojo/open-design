@@ -417,7 +417,11 @@ describe("packaged smoke workflow", () => {
       playwright_visual: "ci-ui",
     };
     for (const [jobName, intent] of Object.entries(ciIntents)) {
-      expect(workflowJob(ci, jobName)).toContain(`postinstall-intent: ${intent}`);
+      const job = workflowJob(ci, jobName);
+      expect(job).toContain(`postinstall-intent: ${intent}`);
+      if (["preflight", "e2e_vitest", "playwright_critical", "ui_p0", "playwright_visual"].includes(jobName)) {
+        expect(job).not.toContain("pnpm --filter @open-design/daemon build");
+      }
     }
     expect(ci.match(/uses: \.\/\.github\/actions\/setup-workspace/g)).toHaveLength(
       ci.match(/postinstall-intent:/g)?.length ?? 0,

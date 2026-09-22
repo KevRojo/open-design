@@ -282,8 +282,8 @@ describe("postinstall script contract", () => {
         ],
         "ci-windows-tools-pack": ["tools/pack"],
         "ci-daemon": ["packages/contracts", "apps/daemon"],
-        "ci-e2e": ["packages/contracts", "tools/dev", "tools/pack", "tools/release", "tools/serve"],
-        "ci-ui": ["packages/contracts", "tools/dev", "tools/pack"],
+        "ci-e2e": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack", "tools/release", "tools/serve"],
+        "ci-ui": ["packages/contracts", "apps/daemon", "tools/dev", "tools/pack"],
       };
       for (const [intent, requestedTargets] of Object.entries(exactWorkflowTargets)) {
         const result = spawnSync("python3", [
