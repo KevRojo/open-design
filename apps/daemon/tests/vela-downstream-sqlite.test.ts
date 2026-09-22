@@ -7,6 +7,8 @@ import { buildWorkspacePermissions, buildWorkspaceSeatSummary, type WorkspaceCol
 import { closeDatabase, insertProject, insertConversation, openDatabase, mergeSyncedPreviewComment, listPreviewComments, getProjectPreviewComment } from '../src/db.js';
 import { createVelaCliCollabClient } from '../src/collab/vela-cli-collab-client.js';
 import { createCollabCloudService } from '../src/collab/collab-cloud-service.js';
+import { createSqlitePublicFilePublicationStore, migratePublicFilePublications } from '../src/collab/public-file-publication-store.js';
+import { migrateCommentRelayPublicationMappings, recordCommentRelayPublicationMapping, sourcePathForCurrentPublication } from '../src/collab/comment-relay-publication-mapping.js';
 
 let root: string | undefined;
 afterEach(() => { closeDatabase(); if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
@@ -80,6 +82,63 @@ it.each(['team', 'personal'] as const)('replays unmodified Vela cb44e7597d HTTP 
       ['--since-seq', '0', '--author-kinds', 'member,user'],
       ['--since-seq', '4', '--author-kinds', 'member,user'],
     ]);
+  } finally { service.dispose(); }
+});
+
+it.each(['team', 'personal', 'stopped', 'lookup-error'] as const)('replays e9e4564dc server-asserted alias into actual local source rows: %s', async scenario => {
+  const wire = readFileSync(new URL('./fixtures/vela-share-downstream-e9e4564dc.json', import.meta.url), 'utf8');
+  const captured = JSON.parse(wire);
+  expect(captured.comments[0].publicationSlug).toBe('share-management-slug');
+  expect(captured.comments[2]).not.toHaveProperty('publicationSlug');
+  expect(captured.comments[3]).not.toHaveProperty('publicationSlug');
+  root = mkdtempSync(join(tmpdir(), 'od-alias-wire-'));
+  const db = openDatabase(root);
+  const projectId = 'share-management-project';
+  insertProject(db, { id: projectId, name: 'Capture', createdAt: 1, updatedAt: 1 });
+  insertConversation(db, { id: 'local', projectId, title: 'Local', createdAt: 1, updatedAt: 1 });
+  migratePublicFilePublications(db); migrateCommentRelayPublicationMappings(db);
+  const publications = createSqlitePublicFilePublicationStore(db);
+  const scope = { resourceTeamId: 'fixture-space', ownerMemberId: 'member-owner', projectId, filePath: 'pages/source.html' };
+  db.transaction(() => {
+    publications.set(scope, { slug: 'share-management-slug', url: 'https://example.test/s/share-management-slug', fileName: scope.filePath });
+    recordCommentRelayPublicationMapping(db, scope, { ...publications.getRevision(scope)!, publicFilePath: 'index.html' });
+  })();
+  if (scenario === 'stopped') publications.delete(scope);
+  const context: WorkspaceCollabContext = {
+    workspaceId: 'fixture-space', workspaceType: scenario === 'team' ? 'team' : 'personal', workspaceMemberId: 'member-owner',
+    role: 'owner', memberStatus: 'active', lifecycleState: 'active', billingState: 'active',
+    planId: null, providerMode: 'platform_credits', teamId: 'fixture-space',
+    seatSummary: buildWorkspaceSeatSummary({ seatLimit: 5, usedSeats: 1 }),
+    permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
+  };
+  const calls: string[][] = [];
+  const service = createCollabCloudService({
+    client: createVelaCliCollabClient({ run: async args => { calls.push(args); return wire; } }),
+    listProjectIds: () => [], resolveLocalConversationId: () => 'local',
+    resolveProjectWorkspaceContext: async () => context,
+    listPersonalCommentRelayFilePaths: () => new Set([scope.filePath]),
+    resolvePublishedCommentSourcePath: ({ publicationSlug, publishedPath }) => {
+      if (scenario === 'lookup-error') throw new Error('mapping unavailable');
+      return sourcePathForCurrentPublication(db, { ...scope, slug: publicationSlug, publishedPath });
+    },
+    resolveStoredCommentLocation: (id, commentId) => {
+      const stored = getProjectPreviewComment(db, id, commentId);
+      return stored ? { found: true, filePath: stored.filePath } : { found: false };
+    },
+    mergeComment: ({ projectId: id, conversationId, comment }) => mergeSyncedPreviewComment(db, id, conversationId, comment),
+  });
+  try {
+    expect(await service.pullProject(projectId, context)).toBe(scenario !== 'lookup-error');
+    const rows = listPreviewComments(db, projectId, 'local');
+    if (scenario === 'stopped' || scenario === 'lookup-error') expect(rows).toEqual([]);
+    else {
+      expect(rows.find(row => row.id === captured.comments[0].id)).toMatchObject({ filePath: scope.filePath, authorKind: 'user', authorAppUserId: 'share-fixture-viewer-app' });
+      expect(rows.some(row => row.id === captured.comments[1].id)).toBe(false);
+      // Historical member has no publication identity: never guess its source.
+      expect(rows.find(row => row.id === 'capture-member')?.filePath).toBe(scenario === 'team' ? 'index.html' : undefined);
+    }
+    await service.pullProject(projectId, context);
+    expect(calls[1]?.slice(3, 5)).toEqual(['--since-seq', scenario === 'lookup-error' ? '0' : '4']);
   } finally { service.dispose(); }
 });
 

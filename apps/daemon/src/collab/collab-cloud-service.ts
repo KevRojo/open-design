@@ -92,6 +92,14 @@ export interface CollabCloudServiceDeps {
     projectId: string,
     commentId: string,
   ) => { found: false } | { found: true; filePath: string | null };
+  /** Resolve a server-asserted publication identity to a currently published local path.
+   * null is an unknown/stopped alias; errors retain the batch cursor for retry.
+   * This does not authorize a merge: existing identity/file checks still apply.
+   */
+  resolvePublishedCommentSourcePath?: (input: {
+    projectId: string; publicationSlug: string; publishedPath: string;
+    context: WorkspaceCollabContext;
+  }) => string | null;
   /** Local binding witness captured synchronously when the mutation commits. */
   resolveLocalProjectRelayBinding?: (projectId: string) => {
     workspaceId: string;
@@ -824,7 +832,23 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
       return true;
     }
     let inserted = 0;
-    for (const comment of comments) {
+    for (const incoming of comments) {
+      let comment = incoming;
+      // Tombstones intentionally have no publication identity: their trusted
+      // project-scoped stored target remains the deletion authority below.
+      if (!incoming.deleted && 'publicationSlug' in incoming) {
+        const publicationSlug = incoming.publicationSlug;
+        if (typeof publicationSlug !== 'string' || !publicationSlug.trim()) {
+          throw new Error('Invalid server publication identity');
+        }
+        if (!deps.resolvePublishedCommentSourcePath) throw new Error('Publication mapping lookup is unavailable');
+        const filePath = deps.resolvePublishedCommentSourcePath({
+          projectId, publicationSlug, publishedPath: incoming.filePath,
+          context: requestContext,
+        });
+        if (filePath === null) continue;
+        comment = { ...incoming, filePath };
+      }
       if (responseIdentity.relayScope === 'personal') {
         const allowed = responseIdentity.allowedFilePaths!;
         if (comment.deleted) {
