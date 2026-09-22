@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 
-import { requestJsonIpc } from "@open-design/sidecar";
+import { SidecarFactory } from "@open-design/sidecar";
 import {
-  SIDECAR_ENV,
-  SIDECAR_MESSAGES,
+  APP_KEYS,
   type DaemonStatusSnapshot,
 } from "@open-design/sidecar-proto";
 
@@ -66,6 +65,7 @@ export function planMcpDaemonBootstrap(
 }
 
 interface EnsureMcpDaemonUrlOptions {
+  connectInherited?: typeof SidecarFactory.connectInherited;
   discoverTargetDaemonUrl?: (
     env: NodeJS.ProcessEnv,
     timeoutMs: number,
@@ -74,6 +74,7 @@ interface EnsureMcpDaemonUrlOptions {
   flagUrl?: string | null;
   probeDaemon?: (url: string) => Promise<boolean>;
   resolveDaemonUrl?: (options: {
+    allowLegacyDefault?: boolean;
     env: NodeJS.ProcessEnv;
     flagUrl?: string | null;
     timeoutMs?: number;
@@ -93,7 +94,8 @@ export async function ensureMcpDaemonUrl(
   const flagUrl = options.flagUrl ?? null;
   const resolveDaemonUrl = options.resolveDaemonUrl ?? resolveDaemonUrlDefault;
   const discoverTargetDaemonUrl =
-    options.discoverTargetDaemonUrl ?? discoverDaemonUrlFromRegisteredIpc;
+    options.discoverTargetDaemonUrl ?? discoverDaemonUrlFromInheritedClient;
+  const connectInherited = options.connectInherited ?? SidecarFactory.connectInherited;
   const probeDaemon = options.probeDaemon ?? probeDaemonHealth;
   const sleep = options.sleep ?? delay;
   const spawnBootstrap = options.spawnBootstrap ?? spawnBootstrapDetached;
@@ -101,18 +103,16 @@ export async function ensureMcpDaemonUrl(
   const explicitDaemonUrl =
     (flagUrl != null && flagUrl.length > 0)
     || (env.OD_DAEMON_URL != null && env.OD_DAEMON_URL.length > 0);
-  const registeredBootstrapTarget =
-    !explicitDaemonUrl
-    && env[SIDECAR_ENV.IPC_PATH] != null
-    && env[SIDECAR_ENV.IPC_PATH]!.length > 0
-    && env.OD_MCP_BOOTSTRAP_COMMAND != null
-    && env.OD_MCP_BOOTSTRAP_COMMAND.length > 0
-    && env.OD_MCP_BOOTSTRAP_ARGS != null
-    && env.OD_MCP_BOOTSTRAP_ARGS.length > 0;
+  const registeredBootstrapTarget = !explicitDaemonUrl && connectInherited(env) != null;
+  if (!explicitDaemonUrl && !registeredBootstrapTarget
+    && (env.OD_MCP_BOOTSTRAP_COMMAND || env.OD_MCP_BOOTSTRAP_ARGS)) {
+    throw new Error("The Open Design MCP registration is missing its runtime connection. Open the app and refresh the MCP registration, then restart this MCP session.");
+  }
 
   let daemonUrl: string | null = registeredBootstrapTarget
     ? await discoverTargetDaemonUrl(env, 800)
     : await resolveDaemonUrl({
+        allowLegacyDefault: false,
         env,
         flagUrl,
         timeoutMs: 800,
@@ -125,9 +125,9 @@ export async function ensureMcpDaemonUrl(
     explicitDaemonUrl,
   });
   if (plan.action === "none") {
-    if (daemonUrl != null) return daemonUrl;
+    if (daemonUrl != null && (daemonReachable || explicitDaemonUrl)) return daemonUrl;
     throw new Error(
-      `The registered Open Design runtime is unavailable and cannot be launched (${plan.reason}).`,
+      `The registered OpenDesign runtime is unavailable and cannot be launched (${plan.reason}).`,
     );
   }
 
@@ -138,6 +138,7 @@ export async function ensureMcpDaemonUrl(
     daemonUrl = registeredBootstrapTarget
       ? await discoverTargetDaemonUrl(env, 300)
       : await resolveDaemonUrl({
+          allowLegacyDefault: false,
           env,
           flagUrl: null,
           timeoutMs: 300,
@@ -145,22 +146,18 @@ export async function ensureMcpDaemonUrl(
     if (daemonUrl != null && await probeDaemon(daemonUrl)) return daemonUrl;
   }
   throw new Error(
-    `Open Design was launched headlessly but its daemon did not become ready within ${timeoutMs}ms.`,
+    `OpenDesign was launched headlessly but its daemon did not become ready within ${timeoutMs}ms.`,
   );
 }
 
-async function discoverDaemonUrlFromRegisteredIpc(
+async function discoverDaemonUrlFromInheritedClient(
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
 ): Promise<string | null> {
-  const socketPath = env[SIDECAR_ENV.IPC_PATH];
-  if (socketPath == null || socketPath.length === 0) return null;
+  const client = SidecarFactory.connectInherited(env);
+  if (client == null) return null;
   try {
-    const status = await requestJsonIpc<DaemonStatusSnapshot>(
-      socketPath,
-      { type: SIDECAR_MESSAGES.STATUS },
-      { timeoutMs },
-    );
+    const status = await client.status<DaemonStatusSnapshot>(APP_KEYS.DAEMON, { timeoutMs });
     return status.url;
   } catch {
     return null;

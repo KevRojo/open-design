@@ -31,6 +31,14 @@ export const uiP0Groups = {
     files: [
       "ui/entry-chrome-flows.test.ts",
       "ui/entry-configuration-flows.test.ts",
+      "ui/home-hero-rail.test.ts",
+      // Enrolled 2026-09-18: the Home → project hand-off specs (OPEND-2614 /
+      // 2170 / 3207) pin what only a running browser can see — the optimistic
+      // frame's timing, the balance dialog's placement and the split width.
+      // They were merged without enrollment, so no merge lane had executed them.
+      "ui/home-amr-pending.test.ts",
+      "ui/home-send-single-loading.test.ts",
+      "ui/home-send-split-width.test.ts",
       "ui/amr-onboarding.test.ts",
       "ui/api-empty-response.test.ts",
       "ui/settings-api-protocol.test.ts",
@@ -39,16 +47,12 @@ export const uiP0Groups = {
       "ui/workspace-team-interactions.test.ts",
     ],
   },
-  "entry-automations": {
-    grep: String.raw`\[P0\]`,
-    workers: 1,
-    files: ["ui/automations-page.test.ts"],
-  },
   "project-workspace": {
     grep: String.raw`\[P0\]`,
     workers: 1,
     files: [
       "ui/app.test.ts",
+      "ui/fork-note-ellipsis.test.ts",
       "ui/project-management-flows.test.ts",
       "ui/workspace-keyboard-flows.test.ts",
     ],
@@ -94,7 +98,6 @@ export type UiP0GroupName = keyof typeof uiP0Groups;
 
 export const uiP0CiMatrix = [
   { name: "entry-settings", shard: "entry-settings" },
-  { name: "entry-automations", shard: "entry-automations" },
   { name: "project-workspace", shard: "project-workspace" },
   { name: "project-workspace-editor", shard: "project-workspace-editor" },
   { name: "project-collab", shard: "project-collab" },
@@ -116,10 +119,11 @@ const uiP0CoverageFiles = [
   "ui/app-manual-edit.test.ts",
   "ui/app-restoration.test.ts",
   "ui/app.test.ts",
-  "ui/automations-page.test.ts",
   "ui/critical-smoke.test.ts",
   "ui/entry-chrome-flows.test.ts",
   "ui/entry-configuration-flows.test.ts",
+  "ui/fork-note-ellipsis.test.ts",
+  "ui/home-hero-rail.test.ts",
   "ui/project-management-flows.test.ts",
   "ui/real-daemon-run.test.ts",
   "ui/settings-api-protocol.test.ts",
@@ -144,7 +148,10 @@ export function validatePlaywrightSuiteTopology(): string[] {
   const errors: string[] = [];
   const knownGroups = new Set(Object.keys(uiP0Groups));
   const coverageFiles = sortedUnique(uiP0CoverageFiles);
-  const ciFiles = filesForUiP0Groups(uiP0CiMatrix.map((entry) => entry.shard));
+  const ciFileAssignments = uiP0CiMatrix.flatMap(
+    (entry) => uiP0Groups[entry.shard as UiP0GroupName]?.files ?? [],
+  );
+  const ciFiles = sortedUnique(ciFileAssignments);
 
   for (const entry of uiP0CiMatrix) {
     if (!knownGroups.has(entry.shard)) {
@@ -160,6 +167,14 @@ export function validatePlaywrightSuiteTopology(): string[] {
     errors.push(`UI P0 CI matrix unexpectedly covers ${file}`);
   }
 
+  const seenFiles = new Set<string>();
+  for (const file of ciFileAssignments) {
+    if (seenFiles.has(file)) {
+      errors.push(`UI P0 CI matrix covers ${file} more than once`);
+    }
+    seenFiles.add(file);
+  }
+
   for (const entry of visualCiMatrix) {
     if (entry.files.trim().length === 0) {
       errors.push(`Visual CI matrix entry ${entry.name} has no files`);
@@ -167,10 +182,6 @@ export function validatePlaywrightSuiteTopology(): string[] {
   }
 
   return errors;
-}
-
-function filesForUiP0Groups(names: readonly string[]): string[] {
-  return sortedUnique(names.flatMap((name) => uiP0Groups[name as UiP0GroupName]?.files ?? []));
 }
 
 function difference(left: readonly string[], right: readonly string[]): string[] {

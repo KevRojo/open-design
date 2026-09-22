@@ -12,13 +12,17 @@ import type {
   AmrAuthStageResult,
   AmrEntryAttribution,
   TrackingAmrEntrySource,
+  TrackingCampaignConversionSource,
+  TrackingCampaignId,
   TrackingPageName,
 } from '@open-design/contracts/analytics';
+import type { AmrSessionState } from '@open-design/contracts';
 
 import { resolveAgentLaunch } from '../runtimes/launch.js';
 import { spawnEnvForAgent } from '../runtimes/env.js';
 import { getAgentDef } from '../runtimes/registry.js';
 import { resolveAmrProfile } from './vela-profile.js';
+import { resolveEffectiveVelaConsoleOrigin } from './vela-console-origin.js';
 
 export { resolveAmrProfile } from './vela-profile.js';
 
@@ -37,6 +41,8 @@ const AMR_ENTRY_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'chat_error_recharge',
   'chat_error_upgrade',
   'chat_balance_gate_upgrade',
+  'chat_upgrade_card',
+  'chat_upgrade_card_auto_recharge',
   'home_balance_gate_upgrade',
   'chat_low_balance_warn_recharge',
   'home_low_balance_warn_recharge',
@@ -48,6 +54,10 @@ const AMR_ENTRY_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'generation_preview_switch_retry_card',
   'settings_amr_upgrade',
   'inline_amr_upgrade',
+  'go_plan_sunset_modal',
+  'deepseek_unpaid_modal',
+  'deepseek_workbench_badge',
+  'deepseek_model_switcher_upgrade',
   'avatar_amr_upgrade',
   'avatar_amr_agent_card',
   'artifact_success_upgrade',
@@ -78,6 +88,27 @@ const AMR_ENTRY_SOURCE_PAGES: ReadonlySet<AmrEntrySourcePageName> = new Set([
   'home',
 ]);
 
+// Fail-closed: an id missing here voids the WHOLE entry, not just its campaign
+// field, so a live campaign left out loses every attributed entry it produces.
+// Both are listed because entries minted during the finished free week can
+// still arrive within their attribution window.
+const AMR_ENTRY_CAMPAIGN_IDS: ReadonlySet<TrackingCampaignId> = new Set([
+  'deepseek_v4_flash',
+  'deepseek_v4_pro',
+  'go_plan_sunset_202608',
+]);
+
+const AMR_ENTRY_CAMPAIGN_CONVERSION_SOURCES: ReadonlySet<TrackingCampaignConversionSource> =
+  new Set([
+    'go_plan_sunset_modal',
+    'deepseek_unpaid_modal',
+    'deepseek_workbench_badge',
+    'deepseek_model_switcher_upgrade',
+    'landing_home_banner',
+    'landing_pricing_personal_plan',
+    'landing_pricing_team_plan',
+  ]);
+
 const AMR_ENTRY_SOURCE_PAGE_BY_SOURCE: Record<
   TrackingAmrEntrySource,
   AmrEntrySourcePageName
@@ -96,6 +127,8 @@ const AMR_ENTRY_SOURCE_PAGE_BY_SOURCE: Record<
   chat_error_recharge: 'chat_panel',
   chat_error_upgrade: 'chat_panel',
   chat_balance_gate_upgrade: 'chat_panel',
+  chat_upgrade_card: 'chat_panel',
+  chat_upgrade_card_auto_recharge: 'chat_panel',
   home_balance_gate_upgrade: 'home',
   chat_low_balance_warn_recharge: 'chat_panel',
   home_low_balance_warn_recharge: 'home',
@@ -107,6 +140,10 @@ const AMR_ENTRY_SOURCE_PAGE_BY_SOURCE: Record<
   generation_preview_switch_retry_card: 'file_manager',
   settings_amr_upgrade: 'settings',
   inline_amr_upgrade: 'chat_panel',
+  go_plan_sunset_modal: 'home',
+  deepseek_unpaid_modal: 'home',
+  deepseek_workbench_badge: 'home',
+  deepseek_model_switcher_upgrade: 'chat_panel',
   avatar_amr_upgrade: 'chat_panel',
   avatar_amr_agent_card: 'chat_panel',
   artifact_success_upgrade: 'artifact',
@@ -137,6 +174,10 @@ export interface AmrEntryAnalyticsPayload {
   sourceProduct: 'open_design';
   sourceDetail: TrackingAmrEntrySource;
   entryOccurredAt: string;
+  // Campaign dimensions mirrored from the web consent-gated channel so the
+  // AMR ingest body matches the local PostHog + redirect URL envelope.
+  campaignId?: TrackingCampaignId;
+  conversionSource?: TrackingCampaignConversionSource;
   // Optional self-reported onboarding profile, forwarded to AMR for paid-
   // conversion segmentation. Open strings (not a union) so a new onboarding
   // option never forces a contract bump on either side. useCase is multi-select.
@@ -214,6 +255,8 @@ export interface VelaUser {
 
 export interface VelaLoginStatus {
   loggedIn: boolean;
+  sessionState?: AmrSessionState;
+  credentialRevision?: string;
   loginInFlight: boolean;
   profile: string;
   user: VelaUser | null;
@@ -256,15 +299,15 @@ export interface VelaLoginStatus {
  * Non-prod AMR environments are internal deployments, so their hostnames are
  * not literals in this public repository: packaging injects the origin from a
  * CI secret and the packaged runtime forwards it as `OD_VELA_WEB_URL`. Reporting
- * it on the login status is how the web client learns which console to link to
- * without needing a hostname table of its own. Undefined for prod and fork
- * builds, where the client falls back to the public product console.
+ * it on the login status is how the web client learns which console to link to.
+ * The resolver combines that packaged origin with the settings-selected AMR
+ * profile, so a runtime switch cannot keep linking to the package's backend.
  */
 export function resolveVelaConsoleOrigin(
   env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
 ): string | undefined {
-  const origin = env.OD_VELA_WEB_URL?.trim().replace(/\/+$/, '') ?? '';
-  return origin.length > 0 ? origin : undefined;
+  return resolveEffectiveVelaConsoleOrigin(env, configuredEnv);
 }
 
 export interface VelaLoginAuthStage {
@@ -331,7 +374,9 @@ export interface VelaCredentialRevision {
    * in app-config, not just process env). Env-backed sessions report
    * `user: null`, so without this an account switch that only rewrites the
    * Settings-backed env (leaving `~/.amr/config.json` untouched) would reuse the
-   * previous account's cached plan/balance. Empty for non-env auth.
+   * previous account's cached plan/balance. File-backed sessions fingerprint
+   * the stored keys as well, so a successful login is recognized even when a
+   * filesystem preserves the config mtime.
    */
   credentialFingerprint: string;
 }
@@ -420,6 +465,32 @@ export function readVelaLoginStatus(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
 ): VelaLoginStatus {
+  const rawStatus = readRawVelaLoginStatus(env, configuredEnv);
+  const credentialRevision = velaCredentialRevisionDigest(
+    readRawVelaCredentialRevision(env, configuredEnv, rawStatus),
+  );
+  let sessionState: AmrSessionState = 'authenticated';
+  if (!rawStatus.loggedIn) {
+    sessionState = 'signed_out';
+  } else if (expiredVelaCredentialRevisions.has(credentialRevision)) {
+    sessionState = 'reauth_required';
+  }
+  return {
+    ...rawStatus,
+    // `loggedIn` remains the backwards-compatible "credential is present"
+    // projection. Routing must not treat an expired credential like a brand
+    // new user and throw them back into first-run onboarding; new callers use
+    // `sessionState` for authoritative validity.
+    loggedIn: rawStatus.loggedIn,
+    sessionState,
+    credentialRevision,
+  };
+}
+
+function readRawVelaLoginStatus(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+): Omit<VelaLoginStatus, 'sessionState' | 'credentialRevision'> {
   const mergedEnv = mergeVelaEnv(env, configuredEnv);
   const profile = resolveAmrProfile(mergedEnv);
   const configPath = amrConfigPath();
@@ -585,21 +656,40 @@ export function readVelaCredentialRevision(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
 ): VelaCredentialRevision {
+  return readRawVelaCredentialRevision(
+    env,
+    configuredEnv,
+    readRawVelaLoginStatus(env, configuredEnv),
+  );
+}
+
+function readRawVelaCredentialRevision(
+  env: NodeJS.ProcessEnv,
+  configuredEnv: Record<string, string>,
+  status: Omit<VelaLoginStatus, 'sessionState' | 'credentialRevision'>,
+): VelaCredentialRevision {
   const mergedEnv = mergeVelaEnv(env, configuredEnv);
-  const status = readVelaLoginStatus(env, configuredEnv);
   const hasEnvCredentials =
     (mergedEnv.VELA_RUNTIME_KEY?.trim() ?? '').length > 0 &&
     (mergedEnv.VELA_LINK_URL?.trim() ?? '').length > 0;
   // One-way hash (never the raw key) so the cache key distinguishes env-backed
   // accounts whose only difference is the configured runtime credential.
-  const credentialFingerprint = hasEnvCredentials
-    ? createHash('sha256')
-        .update(
-          `${mergedEnv.VELA_RUNTIME_KEY ?? ''}\n${mergedEnv.VELA_LINK_URL ?? ''}`,
-        )
-        .digest('hex')
-        .slice(0, 16)
-    : '';
+  const fileProfile = hasEnvCredentials
+    ? undefined
+    : readConfigFile()?.profiles?.[status.profile];
+  const credentialFingerprint = createHash('sha256')
+    .update(
+      hasEnvCredentials
+        ? `${mergedEnv.VELA_RUNTIME_KEY ?? ''}\n${mergedEnv.VELA_LINK_URL ?? ''}`
+        : [
+            fileProfile?.runtimeKey ?? '',
+            fileProfile?.controlKey ?? '',
+            fileProfile?.linkUrl ?? '',
+            fileProfile?.apiUrl ?? '',
+          ].join('\n'),
+    )
+    .digest('hex')
+    .slice(0, 16);
   return {
     authSource: hasEnvCredentials ? 'env' : status.loggedIn ? 'file' : 'none',
     profile: status.profile,
@@ -618,7 +708,51 @@ export function readVelaCredentialRevision(
   };
 }
 
+const expiredVelaCredentialRevisions = new Set<string>();
+const expiredVelaControlKeys = new Set<string>();
+
+function velaCredentialRevisionDigest(revision: VelaCredentialRevision): string {
+  return createHash('sha256')
+    .update(JSON.stringify(revision))
+    .digest('hex')
+    .slice(0, 20);
+}
+
+/** Mark only the currently-active credential revision as rejected upstream. */
+export function markVelaAuthorizationExpired(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+): string {
+  const revision = velaCredentialRevisionDigest(readVelaCredentialRevision(env, configuredEnv));
+  expiredVelaCredentialRevisions.add(revision);
+  const control = readRawVelaControlApiContext(env, configuredEnv);
+  if (control) expiredVelaControlKeys.add(velaControlKeyDigest(control.controlKey));
+  return revision;
+}
+
+/** Test/logout seam. A rotated credential naturally has a different revision. */
+export function clearVelaAuthorizationState(): void {
+  expiredVelaCredentialRevisions.clear();
+  expiredVelaControlKeys.clear();
+}
+
+function velaControlKeyDigest(controlKey: string): string {
+  return createHash('sha256').update(controlKey).digest('hex').slice(0, 20);
+}
+
 export function readVelaControlApiContext(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+): VelaControlApiContext | null {
+  const context = readRawVelaControlApiContext(env, configuredEnv);
+  if (
+    context
+    && expiredVelaControlKeys.has(velaControlKeyDigest(context.controlKey))
+  ) return null;
+  return context;
+}
+
+function readRawVelaControlApiContext(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
 ): VelaControlApiContext | null {
@@ -627,7 +761,7 @@ export function readVelaControlApiContext(
   const envControlKey = mergedEnv.VELA_CONTROL_KEY?.trim() ?? '';
   const envApiUrl = mergedEnv.VELA_API_URL?.trim() ?? '';
   if (envControlKey) {
-    const status = readVelaLoginStatus(env, configuredEnv);
+    const status = readRawVelaLoginStatus(env, configuredEnv);
     return {
       profile,
       apiUrl: envApiUrl || 'https://amr-api.open-design.ai',
@@ -1454,6 +1588,10 @@ export function parseAmrEntryAnalyticsPayload(
   const sourceProduct = raw.sourceProduct;
   const sourceDetail = raw.sourceDetail;
   const entryOccurredAt = raw.entryOccurredAt;
+  const campaignId = raw.campaignId;
+  const conversionSource = raw.conversionSource;
+  const hasCampaignId = campaignId !== undefined;
+  const hasConversionSource = conversionSource !== undefined;
   const odRole = sanitizeOptionalProfileValue(raw.odRole);
   const odOrgSize = sanitizeOptionalProfileValue(raw.odOrgSize);
   const odSource = sanitizeOptionalProfileValue(raw.odSource);
@@ -1476,6 +1614,14 @@ export function parseAmrEntryAnalyticsPayload(
       !== AMR_ENTRY_SOURCE_PAGE_BY_SOURCE[sourceDetail as TrackingAmrEntrySource]
     || typeof entryOccurredAt !== 'string'
     || !Number.isFinite(Date.parse(entryOccurredAt))
+    || (hasCampaignId
+      && (typeof campaignId !== 'string'
+        || !AMR_ENTRY_CAMPAIGN_IDS.has(campaignId as TrackingCampaignId)))
+    || (hasConversionSource
+      && (typeof conversionSource !== 'string'
+        || !AMR_ENTRY_CAMPAIGN_CONVERSION_SOURCES.has(
+          conversionSource as TrackingCampaignConversionSource,
+        )))
     || odRole === INVALID_PROFILE_VALUE
     || odOrgSize === INVALID_PROFILE_VALUE
     || odSource === INVALID_PROFILE_VALUE
@@ -1493,6 +1639,10 @@ export function parseAmrEntryAnalyticsPayload(
     sourceProduct,
     sourceDetail: sourceDetail as TrackingAmrEntrySource,
     entryOccurredAt,
+    ...(hasCampaignId ? { campaignId: campaignId as TrackingCampaignId } : {}),
+    ...(hasConversionSource
+      ? { conversionSource: conversionSource as TrackingCampaignConversionSource }
+      : {}),
     ...(odRole ? { odRole } : {}),
     ...(odOrgSize ? { odOrgSize } : {}),
     ...(odUseCase ? { odUseCase } : {}),

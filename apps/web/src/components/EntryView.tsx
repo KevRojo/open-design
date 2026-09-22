@@ -31,7 +31,12 @@ import type {
 // hero + recent projects + plugins). Keeping the redesign in a sibling
 // component lets future rebases against upstream `EntryView` (props,
 // connector lifecycle, exported helpers) stay close to a no-op here.
-import { EntryShell, type ProjectTitleHint } from './EntryShell';
+import {
+  EntryShell,
+  type OptimisticProjectCreationHandoff,
+  type ProjectTitleHint,
+} from './EntryShell';
+import type { HomeAmrBalanceGateBlock } from './HomeAmrBalanceGateDialogs';
 import type { IntegrationTab } from './IntegrationsView';
 import type { CreateInput, ImportClaudeDesignOutcome } from './NewProjectPanel';
 import {
@@ -43,6 +48,7 @@ import type {
   PluginShareAction,
   PluginShareProjectOutcome,
 } from '../state/projects';
+import type { VelaLoginStatus } from '../providers/daemon';
 
 type EntryCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   metadata?: CreateInput['metadata'];
@@ -51,6 +57,7 @@ type EntryCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   pluginType?: string;
   appliedPluginSnapshotId?: string;
   pluginInputs?: Record<string, unknown>;
+  automaticStrategyTaskProfile?: import('@open-design/contracts').ProjectScenarioTaskProfile;
   conversationMode?: ChatSessionMode;
   autoSendFirstMessage?: boolean;
   requestId?: string;
@@ -78,6 +85,11 @@ interface Props {
   // detecting/skeleton state while the cold-start agent stream is in flight.
   agentsLoading?: boolean;
   amrLoggedIn?: boolean | null;
+  amrSessionState?: import('@open-design/contracts').AmrSessionState;
+  /** Forwarded to EntryShell for personal free campaign audience resolution. */
+  amrAccountPlan?: string | null;
+  /** Stable account boundary for CMS authorization instances. */
+  amrAccountId?: string | null;
   // Execution / model-switching context forwarded to the EntryShell so the
   // sticky top-bar can expose the active CLI/BYOK + model and persist
   // changes through the same channels as the project view.
@@ -113,6 +125,9 @@ interface Props {
   projectsLoading?: boolean;
   promptTemplatesLoading?: boolean;
   onCreateProject: (input: EntryCreateProjectInput) => Promise<boolean> | boolean | void;
+  /** Forwarded to EntryShell — see the prop docs there. */
+  onBeginProjectCreation: (input: EntryCreateProjectInput) => OptimisticProjectCreationHandoff;
+  onAmrBalanceGateBlockChange: (block: HomeAmrBalanceGateBlock | null) => void;
   onCreatePluginShareProject: (
     pluginId: string,
     action: PluginShareAction,
@@ -145,6 +160,8 @@ interface Props {
   onPersistComposioKey: (composio: AppConfig['composio']) => Promise<void> | void;
   onOpenSettings: (section?: 'execution' | 'media' | 'composio' | 'orbit' | 'integrations' | 'mcpClient' | 'language' | 'appearance' | 'notifications' | 'pet' | 'projectLocations' | 'library' | 'about' | 'memory' | 'designSystems') => void;
   onCompleteOnboarding: () => void;
+  onSignedOut?: () => void | Promise<void>;
+  onAmrLoginStatusChange?: (status: VelaLoginStatus | null) => void;
   artifactUpgradeSlot?: ReactNode;
 }
 
@@ -253,6 +270,9 @@ export function EntryView({
   agents,
   agentsLoading,
   amrLoggedIn,
+  amrSessionState,
+  amrAccountPlan,
+  amrAccountId,
   config,
   providerModelsCache,
   onProviderModelsCacheChange,
@@ -275,6 +295,8 @@ export function EntryView({
   projectsLoading = false,
   promptTemplatesLoading: _promptTemplatesLoading = false,
   onCreateProject,
+  onBeginProjectCreation,
+  onAmrBalanceGateBlockChange,
   onCreatePluginShareProject,
   onImportClaudeDesign,
   onImportFolder,
@@ -293,6 +315,8 @@ export function EntryView({
   onPersistComposioKey,
   onOpenSettings,
   onCompleteOnboarding,
+  onSignedOut,
+  onAmrLoginStatusChange,
   artifactUpgradeSlot,
 }: Props) {
   const [connectors, setConnectors] = useState<ConnectorDetail[]>([]);
@@ -383,6 +407,9 @@ export function EntryView({
       agents={agents}
       {...(agentsLoading !== undefined ? { agentsLoading } : {})}
       {...(amrLoggedIn !== undefined ? { amrLoggedIn } : {})}
+      {...(amrSessionState !== undefined ? { amrSessionState } : {})}
+      {...(amrAccountPlan !== undefined ? { amrAccountPlan } : {})}
+      {...(amrAccountId !== undefined ? { amrAccountId } : {})}
       daemonLive={daemonLive}
       onModeChange={onModeChange}
       onAgentChange={onAgentChange}
@@ -396,6 +423,8 @@ export function EntryView({
       onSkillsChanged={onSkillsChanged}
           onRefreshAgents={onRefreshAgents}
       onCreateProject={onCreateProject}
+      onBeginProjectCreation={onBeginProjectCreation}
+      onAmrBalanceGateBlockChange={onAmrBalanceGateBlockChange}
       onCreatePluginShareProject={onCreatePluginShareProject}
       onImportClaudeDesign={onImportClaudeDesign}
       {...(onImportFolder ? { onImportFolder } : {})}
@@ -414,6 +443,8 @@ export function EntryView({
       onPersistComposioKey={onPersistComposioKey}
       onOpenSettings={onOpenSettings}
       onCompleteOnboarding={onCompleteOnboarding}
+      onSignedOut={onSignedOut}
+      onAmrLoginStatusChange={onAmrLoginStatusChange}
       artifactUpgradeSlot={artifactUpgradeSlot}
     />
   );

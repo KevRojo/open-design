@@ -1,5 +1,6 @@
+import { observeUpdateLifecycleStages } from '../migration/update-apply-observations.js';
 import express, { type Express } from 'express';
-import { SIDECAR_DEFAULTS, SIDECAR_ENV } from '@open-design/sidecar-proto';
+import { SIDECAR_DEFAULTS } from '@open-design/sidecar-proto';
 import { randomUUID } from 'node:crypto';
 import {
   type McpAnalyticsEventRequest,
@@ -13,7 +14,7 @@ import {
 } from '../analytics.js';
 import type { AnalyticsContext } from '../analytics.js';
 import type { readAppConfig, writeAppConfig } from '../app-config.js';
-import { readCurrentAppVersionInfo } from '../app-version.js';
+import { readCurrentAppVersionInfo, UNKNOWN_APP_VERSION } from '../app-version.js';
 import { reportRunFeedbackFromDaemon } from '../langfuse-bridge.js';
 import { observePendingInstallerApplyAttempts } from '../migration/index.js';
 import {
@@ -22,9 +23,12 @@ import {
 
 export interface DaemonTelemetry {
   analyticsService: ReturnType<typeof createAnalyticsService>;
+  disposeFatalHandlers: () => void;
   getCachedAppVersion: () => any;
+  resolveAppVersion: () => Promise<any>;
   reportFeedback: (req: {
     runId: string;
+    traceId?: string;
     rating: 'positive' | 'negative';
     reasonCodes: string[];
     hasCustomReason: boolean;
@@ -35,8 +39,13 @@ export interface DaemonTelemetry {
 
 export interface RegisterTelemetryRoutesDeps {
   dataDir: string;
+  namespace?: string;
   readAppConfig: typeof readAppConfig;
   writeAppConfig: typeof writeAppConfig;
+}
+
+export function resolveInstallerObservationNamespace(namespace: string | undefined): string {
+  return namespace ?? SIDECAR_DEFAULTS.namespace;
 }
 
 export async function resolveMcpAnalyticsContext(
@@ -215,7 +224,7 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
     await analyticsService.capture({
       eventName: body.event,
       context,
-      appVersion: cachedAppVersion?.version ?? '0.0.0',
+      appVersion: cachedAppVersion?.version ?? UNKNOWN_APP_VERSION,
       properties,
       insertId: body.eventId,
     });
@@ -235,37 +244,64 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
         : {};
     analyticsService.captureSafety({
       eventName,
-      appVersion: cachedAppVersion?.version ?? '0.0.0',
+      appVersion: cachedAppVersion?.version ?? UNKNOWN_APP_VERSION,
       properties,
     });
     res.json({ ok: true });
   });
 
-  installFatalTelemetryHandlers({
+  const disposeFatalHandlers = installFatalTelemetryHandlers({
     analyticsService,
     getAppVersion: () => cachedAppVersion,
   });
 
-  void (async () => {
+  let lifecycleScanRunning = false;
+  let telemetryDisposed = false;
+  const scanUpdateLifecycle = async () => {
+    if (telemetryDisposed || lifecycleScanRunning || cachedAppVersion == null) return;
+    lifecycleScanRunning = true;
+    try {
+      await observeUpdateLifecycleStages({
+        analytics: analyticsService, appVersion: cachedAppVersion.version,
+        currentChannel: cachedAppVersion.channel, currentVersion: cachedAppVersion.version,
+        dataRoot: dataDir, namespace: resolveInstallerObservationNamespace(deps.namespace),
+      });
+    } catch { /* Observability never gates daemon lifecycle. */ }
+    finally { lifecycleScanRunning = false; }
+  };
+  const lifecycleTimer = setInterval(() => { void scanUpdateLifecycle(); }, 10_000);
+  lifecycleTimer.unref();
+  const appVersionPromise = (async () => {
     try {
       cachedAppVersion = await readCurrentAppVersionInfo();
-      await observePendingInstallerApplyAttempts({
+      void scanUpdateLifecycle();
+      void observePendingInstallerApplyAttempts({
         analytics: analyticsService,
         appVersion: cachedAppVersion.version,
         currentChannel: cachedAppVersion.channel,
         currentVersion: cachedAppVersion.version,
         dataRoot: dataDir,
         logger: console,
-        namespace: process.env[SIDECAR_ENV.NAMESPACE] ?? SIDECAR_DEFAULTS.namespace,
+        namespace: resolveInstallerObservationNamespace(deps.namespace),
+      }).catch(() => {
+        // Update-apply telemetry must not delay daemon version readiness.
       });
+      return cachedAppVersion;
     } catch {
       // Telemetry is best-effort; appVersion is omitted when unavailable.
+      return null;
     }
   })();
 
   return {
     analyticsService,
+    disposeFatalHandlers: () => {
+      telemetryDisposed = true;
+      clearInterval(lifecycleTimer);
+      disposeFatalHandlers();
+    },
     getCachedAppVersion: () => cachedAppVersion,
+    resolveAppVersion: () => appVersionPromise,
     reportFeedback: (req) =>
       reportRunFeedbackFromDaemon({
         dataDir,
@@ -578,7 +614,7 @@ function installFatalTelemetryHandlers({
 }: {
   analyticsService: ReturnType<typeof createAnalyticsService>;
   getAppVersion: () => any;
-}): void {
+}): () => void {
   const FATAL_FLUSH_TIMEOUT_MS = 1000;
   let fatalShuttingDown = false;
   const triggerFatalShutdown = (
@@ -591,7 +627,7 @@ function installFatalTelemetryHandlers({
       try {
         await analyticsService.captureSafety({
           eventName,
-          appVersion: getAppVersion()?.version ?? '0.0.0',
+          appVersion: getAppVersion()?.version ?? UNKNOWN_APP_VERSION,
           properties,
         });
       } catch {
@@ -610,19 +646,28 @@ function installFatalTelemetryHandlers({
       process.exit(1);
     });
   };
-  process.on('uncaughtException', (error) => {
+  const onUncaughtException = (error: Error) => {
     triggerFatalShutdown('daemon_uncaught_exception', {
       error_message: error?.message ?? String(error),
       error_name: error?.name ?? 'Error',
       error_stack: typeof error?.stack === 'string' ? error.stack.slice(0, 8192) : undefined,
     });
-  });
-  process.on('unhandledRejection', (reason) => {
+  };
+  const onUnhandledRejection = (reason: unknown) => {
     const asError = reason instanceof Error ? reason : null;
     triggerFatalShutdown('daemon_unhandled_rejection', {
       error_message: asError?.message ?? (typeof reason === 'string' ? reason : String(reason)),
       error_name: asError?.name ?? 'NonErrorRejection',
       error_stack: typeof asError?.stack === 'string' ? asError.stack.slice(0, 8192) : undefined,
     });
-  });
+  };
+  process.on('uncaughtException', onUncaughtException);
+  process.on('unhandledRejection', onUnhandledRejection);
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    process.off('uncaughtException', onUncaughtException);
+    process.off('unhandledRejection', onUnhandledRejection);
+  };
 }

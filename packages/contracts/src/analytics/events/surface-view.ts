@@ -4,7 +4,7 @@
  */
 import type { TrackingOnboardingFirstLoopStep, TrackingOnboardingProductType, TrackingOnboardingRole, TrackingOnboardingUseCase } from './onboarding.js';
 import type { TrackingRunRecoveryActionType } from './result-events.js';
-import type { TrackingArtifactKind, TrackingNewProjectTab, TrackingProjectKind } from './shared-enums.js';
+import type { TrackingArtifactKind, TrackingCampaignDeliveryMode, TrackingCampaignId, TrackingCampaignUserState, TrackingNewProjectTab, TrackingProjectKind, TrackingRunFailureCategory } from './shared-enums.js';
 import type { DesignSystemsPresetBrandPickerSurfaceViewProps } from './ui-click.js';
 import type { WorkspaceSurfaceViewProps } from './workspace.js';
 // ---- surface_view --------------------------------------------------------
@@ -31,6 +31,45 @@ export interface NewProjectModalSurfaceViewProps {
 export interface PluginReplacementModalSurfaceViewProps {
   page_name: 'home';
   area: 'plugin_replacement_modal';
+}
+
+// DeepSeek V4 Flash campaign discovery surfaces. These are separate from the
+// existing amr_entry click because an impression is the denominator while an
+// AMR entry is generated only after the user actively enters the billing path.
+export interface DeepSeekCampaignModalSurfaceViewProps {
+  page_name: 'home';
+  area: 'deepseek_campaign_modal';
+  element: 'modal';
+  campaign_id: TrackingCampaignId;
+  user_state: TrackingCampaignUserState;
+}
+
+export interface GoPlanSunsetModalSurfaceViewProps {
+  page_name: 'home';
+  area: 'go_plan_sunset_modal';
+  element: 'modal';
+  campaign_id: 'go_plan_sunset_202608';
+  announcement_version: '2026_08_25';
+  delivery_mode: TrackingCampaignDeliveryMode;
+  current_plan_id: string;
+  locale: string;
+}
+
+export interface DeepSeekCampaignBadgeSurfaceViewProps {
+  page_name: 'home';
+  area: 'campaign_badge';
+  element: 'deepseek_v4_flash' | 'deepseek_v4_pro';
+  campaign_id: TrackingCampaignId;
+  user_state: TrackingCampaignUserState;
+}
+
+export interface DeepSeekCampaignModelBenefitSurfaceViewProps {
+  page_name: 'home';
+  area: 'execution_settings_popover';
+  element: 'deepseek_v4_flash_benefit' | 'deepseek_v4_pro_benefit';
+  campaign_id: TrackingCampaignId;
+  user_state: TrackingCampaignUserState;
+  model_id: string;
 }
 
 // Impression of the plugin detail modal opened from the home Community
@@ -84,6 +123,28 @@ export interface RunFailedToastSurfaceViewProps {
   area: 'chat_panel';
   element: 'run_failed_toast';
   error_code: string;
+  /**
+   * WHICH SENTENCE the user actually read: the i18n key of the mapped copy,
+   * or `generic_fallback` when the mapping table had no line for this failure
+   * and the card fell back to "the task failed".
+   *
+   * Always present, never omitted. The fallback rate — how often we show a
+   * failed user a blank apology instead of a diagnosis — is the whole point,
+   * and a rate needs a denominator: an omitted key would silently drop the
+   * fallback impressions out of the count that is supposed to measure them.
+   *
+   * Not typed as the web's `RunFailureMessageKey` union: that union lives in
+   * `apps/web` and grows every time copy is added, and pinning it here would
+   * make a copy change a contracts change.
+   */
+  message_key: string;
+  /**
+   * The daemon's own classification of the failure, as carried on the run's
+   * error event. `unknown` when the event carries none — the enum's existing
+   * member for exactly that, so the field stays present and the shape stays
+   * one that `run_finished` / `run_recovery_action` can be joined against.
+   */
+  failure_category: TrackingRunFailureCategory;
   project_id: string;
   project_kind: TrackingProjectKind | null;
   conversation_id: string | null;
@@ -200,6 +261,8 @@ export interface FileVersionModalSurfaceViewProps {
   entry_from: 'toolbar' | 'more_menu';
   artifact_id: string;
   artifact_kind: TrackingArtifactKind;
+  project_id: string;
+  project_kind: TrackingProjectKind;
 }
 
 // Fires once when an HTML artifact is recognized as a slide deck and the
@@ -213,6 +276,8 @@ export interface DeckViewerSurfaceViewProps {
   area: 'deck_viewer';
   artifact_id: string;
   artifact_kind: TrackingArtifactKind;
+  project_id: string;
+  project_kind: TrackingProjectKind;
   slide_count?: number;
 }
 
@@ -243,6 +308,10 @@ export type SurfaceViewProps =
   | RunRecoveryActionSurfaceViewProps
   | RunStartBlockedSurfaceViewProps
   | PreviewRunStatusSurfaceViewProps
+  | DeepSeekCampaignModalSurfaceViewProps
+  | GoPlanSunsetModalSurfaceViewProps
+  | DeepSeekCampaignBadgeSurfaceViewProps
+  | DeepSeekCampaignModelBenefitSurfaceViewProps
   | HomeRecommendationSurfaceViewProps
   | StudioOnboardingHintSurfaceViewProps
   | HelpPopoverSurfaceViewProps

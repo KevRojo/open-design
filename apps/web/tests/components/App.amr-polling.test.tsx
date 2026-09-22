@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceCollabContext } from '@open-design/contracts';
 
 import { App } from '../../src/App';
+import { navigate, type Route } from '../../src/router';
 import type { AppConfig } from '../../src/types';
 import { loadConfig, mergeDaemonConfig, fetchDaemonConfig } from '../../src/state/config';
 import {
@@ -62,7 +63,7 @@ const workspaceContextHarness = vi.hoisted(() => {
 // for the settings surface to render at all.
 const homeRouteMock = { kind: 'home' as const, view: 'home' as const };
 const routeListeners = new Set<() => void>();
-const useRouteMock = vi.fn(() => homeRouteMock);
+const useRouteMock = vi.fn<() => Route>(() => homeRouteMock);
 
 vi.mock('../../src/collab/useWorkspaceContext', async () => {
   const actual = await vi.importActual<typeof import('../../src/collab/useWorkspaceContext')>(
@@ -272,6 +273,7 @@ const mockedListTemplates = vi.mocked(listTemplates);
 const mockedLoadConfig = vi.mocked(loadConfig);
 const mockedMergeDaemonConfig = vi.mocked(mergeDaemonConfig);
 const mockedFetchDaemonConfig = vi.mocked(fetchDaemonConfig);
+const mockedNavigate = vi.mocked(navigate);
 
 const baseConfig: AppConfig = {
   mode: 'api',
@@ -442,6 +444,38 @@ describe('App AMR polling', () => {
       expect(screen.getByTestId('amr-model').textContent).toBe('unlocked-model');
     });
     expect(mockedFetchAmrModels).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns every authenticated surface to onboarding when Cloud auth definitively expires', async () => {
+    mockedLoadConfig.mockReturnValue({
+      ...baseConfig,
+      mode: 'daemon',
+      agentId: 'amr',
+    });
+    useRouteMock.mockReturnValue({
+      kind: 'project',
+      projectId: 'project-with-expired-auth',
+      conversationId: null,
+      fileName: null,
+    });
+    mockedFetchVelaLoginStatus.mockResolvedValue({
+      loggedIn: true,
+      loginInFlight: false,
+      profile: 'local',
+      user: { id: 'expired-user', email: 'expired@example.com' },
+      configPath: '/tmp/amr-config.json',
+      sessionState: 'reauth_required',
+      credentialRevision: 'expired-revision',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockedNavigate).toHaveBeenCalledWith(
+        { kind: 'home', view: 'onboarding' },
+        { replace: true },
+      );
+    });
   });
 
   it('starts AMR preset polling before the agent probe resolves', { timeout: 10_000 }, async () => {
@@ -940,6 +974,10 @@ describe('App AMR polling', () => {
       expect(screen.getByTestId('amr-profile').textContent).toBe('prod');
     });
 
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const workspaceDirectoryReadsBefore = fetchMock.mock.calls.filter(([input]) =>
+      input.toString().includes('/api/workspace/directory')).length;
+
     fireEvent(window, new CustomEvent('open-design:app-config-changed'));
 
     await waitFor(() => {
@@ -953,6 +991,11 @@ describe('App AMR polling', () => {
     });
     await waitFor(() => {
       expect(mockedFetchAgentsStream).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) =>
+        input.toString().includes('/api/workspace/directory')).length,
+      ).toBeGreaterThan(workspaceDirectoryReadsBefore);
     });
     expect(mockedFetchAmrModels.mock.calls.length).toBeGreaterThanOrEqual(2);
   });

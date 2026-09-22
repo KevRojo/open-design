@@ -17,19 +17,13 @@ import type Database from 'better-sqlite3';
 
 import {
   type ComponentsManifest,
-  DesignSystemRuntimePathsSchema,
   extractComponentsManifest,
   summarizeComponentsManifestForPrompt,
-  type DesignSystemRuntimePaths,
 } from '@open-design/contracts';
 
 import { parseFrontmatter } from './frontmatter.js';
 import type { FrontmatterObject, FrontmatterValue } from './frontmatter.js';
 import { extractSwiftColors } from './swift-colors.js';
-import {
-  loadDesignSystemRuntimePackage,
-  type DesignSystemRuntimeLoadResult,
-} from './runtime.js';
 import { workspaceTeamDesignSystemBindingResourceId } from './workspace-team-binding.js';
 import {
   ensureWorkspaceResource,
@@ -200,7 +194,6 @@ type DesignSystemProjectManifest = {
     suggested?: string[];
     exemptions?: string[];
   };
-  runtime?: DesignSystemRuntimePaths;
 };
 
 export type DesignSystemProvenance = {
@@ -522,49 +515,6 @@ export async function readDesignSystemPackageInfo(
   };
 }
 
-export async function readDesignSystemRuntime(
-  root: string,
-  id: string,
-  options: { idPrefix?: string } = {},
-): Promise<DesignSystemRuntimeLoadResult> {
-  const dirId = stripPrefixAndValidateId(id, options.idPrefix);
-  if (!dirId) return { mode: 'legacy' };
-  const brandRoot = path.join(root, dirId);
-  const raw = await readFileOptional(path.join(brandRoot, 'manifest.json'));
-  if (raw === undefined) return { mode: 'legacy' };
-
-  let value: unknown;
-  try {
-    value = JSON.parse(raw) as unknown;
-  } catch (error) {
-    return {
-      mode: 'invalid',
-      errors: [`manifest.json: ${error instanceof Error ? error.message : String(error)}`],
-    };
-  }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { mode: 'invalid', errors: ['manifest.json must contain an object'] };
-  }
-  const record = value as Record<string, unknown>;
-  if (record.id !== dirId) {
-    return { mode: 'invalid', errors: [`manifest.json id must match ${dirId}`] };
-  }
-  if (record.runtime === undefined) return { mode: 'legacy' };
-  const parsedRuntime = DesignSystemRuntimePathsSchema.safeParse(record.runtime);
-  if (!parsedRuntime.success) {
-    return {
-      mode: 'invalid',
-      errors: parsedRuntime.error.issues.map((issue) => {
-        const suffix = issue.path.length === 0
-          ? ''
-          : issue.path.map((part) => typeof part === 'number' ? `[${part}]` : `.${part}`).join('');
-        return `manifest.json: $.runtime${suffix} ${issue.message}`;
-      }),
-    };
-  }
-  return loadDesignSystemRuntimePackage(brandRoot, parsedRuntime.data);
-}
-
 async function listAvailableDesignSystemPackageFiles(
   brandRoot: string,
   manifest: DesignSystemProjectManifest,
@@ -582,10 +532,6 @@ async function listAvailableDesignSystemPackageFiles(
   add(manifest.files.tailwind);
   add(manifest.usage);
   add(manifest.componentsManifest);
-  add(manifest.runtime?.components);
-  add(manifest.runtime?.intents);
-  add(manifest.runtime?.lint);
-  add(manifest.runtime?.fallback);
   for (const page of manifest.preview?.pages ?? []) add(page.path);
   for (const font of manifest.fonts ?? []) add(font.file);
 
@@ -855,6 +801,10 @@ async function resolveDesignSystemAssetsUncached(
   builtInRoot: string,
   userInstalledRoot: string,
 ): Promise<DesignSystemAssets> {
+  if (designSystemId.startsWith('user:')) {
+    return readDesignSystemAssets(userInstalledRoot, designSystemId);
+  }
+
   const builtIn = await readDesignSystemAssets(builtInRoot, designSystemId);
   if (builtIn.tokensCss !== undefined && builtIn.fixtureHtml !== undefined) {
     return builtIn;
@@ -888,12 +838,15 @@ async function designSystemAssetsCacheFingerprint(
   userInstalledRoot: string,
   env: NodeJS.ProcessEnv,
 ): Promise<string> {
+  const roots = designSystemId.startsWith('user:')
+    ? [designSystemAssetsRootFingerprint(userInstalledRoot, designSystemId)]
+    : [
+        designSystemAssetsRootFingerprint(builtInRoot, designSystemId),
+        designSystemAssetsRootFingerprint(userInstalledRoot, designSystemId),
+      ];
   const payload = {
     tokenChannel: env.OD_DESIGN_TOKEN_CHANNEL ?? null,
-    roots: await Promise.all([
-      designSystemAssetsRootFingerprint(builtInRoot, designSystemId),
-      designSystemAssetsRootFingerprint(userInstalledRoot, designSystemId),
-    ]),
+    roots: await Promise.all(roots),
   };
   return createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
 }
@@ -1947,7 +1900,7 @@ const DESIGN_SYSTEM_SURFACE_GUIDE: Record<
 // Build the SKILLS.md usage guide bundled into every downloaded design system.
 // Pure (no I/O) so it can be unit tested against fixed inputs. The guide teaches
 // a recipient how to feed the system to an AI coding tool for on-brand results
-// and attributes it to the Open Design open-source project for shareability.
+// and attributes it to the OpenDesign open-source project for shareability.
 export function buildDesignSystemSkillsMarkdown(input: {
   title: string;
   summary: string;
@@ -2034,7 +1987,7 @@ export function buildDesignSystemSkillsMarkdown(input: {
   lines.push('---');
   lines.push('');
   lines.push(
-    'Generated with **Open Design** — the open-source, local-first Claude Design alternative. ' +
+    'Generated with **OpenDesign** — the open-source, local-first Claude Design alternative. ' +
       'Generate decks, landing pages, dashboards, and brand systems with your favourite AI ' +
       'coding agent.',
   );
@@ -2087,7 +2040,7 @@ async function migrateLegacyDesignSystemPackage(
     return;
   }
   const title = normalizeTitle(metadata.title ?? firstHeading(body) ?? id);
-  const summary = summarize(body) || 'A reusable Open Design design system.';
+  const summary = summarize(body) || 'A reusable OpenDesign design system.';
   const palette = normalizeSwatches(body);
   const copyIfMissing = async (from: string, to: string): Promise<boolean> => {
     const fromPath = path.join(dir, ...from.split('/'));
@@ -2154,7 +2107,7 @@ async function migrateLegacyDesignSystemPackage(
     appKitExists
       ? writeIfMissing(
           'ui_kits/app/README.md',
-          `# ${title} UI Kit\n\nThis package was migrated from an earlier Open Design design-system workspace. Use \`index.html\` as the applied interface example and replace it with source-backed modular components when new repository evidence is available.\n`,
+          `# ${title} UI Kit\n\nThis package was migrated from an earlier OpenDesign design-system workspace. Use \`index.html\` as the applied interface example and replace it with source-backed modular components when new repository evidence is available.\n`,
         )
       : Promise.resolve(false),
     appKitExists
@@ -2538,7 +2491,7 @@ function generatedDesignSystemFileWrites(
   },
 ): AtomicTextFileWrite[] {
   const palette = normalizeSwatches(input.body);
-  const summary = input.summary || 'A user-created Open Design design system.';
+  const summary = input.summary || 'A user-created OpenDesign design system.';
   const sections = extractMarkdownSections(input.body);
   const provenance = input.provenance ?? normalizeProvenance(undefined, {
     ...(input.sourceNotes ? { sourceNotes: input.sourceNotes } : {}),
@@ -3514,7 +3467,7 @@ function upsertBlockquoteMeta(body: string, key: string, value: string): string 
 function buildDraftDesignSystemBody(input: UserDesignSystemInput & { title: string }): string {
   const category = cleanText(input.category) || 'Custom';
   const surface = input.surface ?? 'web';
-  const summary = cleanText(input.summary) || 'A user-authored design system for future Open Design projects.';
+  const summary = cleanText(input.summary) || 'A user-authored design system for future OpenDesign projects.';
   const sourceNotes = cleanText(input.sourceNotes);
   return `# ${input.title}
 
@@ -3617,7 +3570,7 @@ function renderReadme(input: {
     .join('\n');
   return `# ${input.title}
 
-A reusable Open Design package for ${input.title}.
+A reusable OpenDesign package for ${input.title}.
 
 ## Product Overview
 
@@ -3686,7 +3639,7 @@ function renderSkill(input: {
   const skillName = slugify(input.title);
   return `---
 name: ${skillName}
-description: Use this skill when generating Open Design artifacts that should follow ${input.title}.
+description: Use this skill when generating OpenDesign artifacts that should follow ${input.title}.
 user-invocable: true
 ---
 
@@ -3843,7 +3796,7 @@ function renderOverviewHtml(
   return renderHtmlDocument(
     title,
     `<main class="overview">
-      <p class="eyebrow">Open Design system</p>
+      <p class="eyebrow">OpenDesign system</p>
       <h1>${escapeHtml(title)}</h1>
       <p class="lead">${escapeHtml(summary)}</p>
       <div class="palette">
@@ -4156,15 +4109,13 @@ function isProjectManifest(value: unknown, expectedId: string): value is DesignS
   const files = record.files;
   if (typeof files !== 'object' || files === null || Array.isArray(files)) return false;
   const fileRecord = files as Record<string, unknown>;
-  if (!(
+  return (
     fileRecord.design === 'DESIGN.md' &&
     fileRecord.tokens === 'tokens.css' &&
     (fileRecord.designTokens === undefined || fileRecord.designTokens === 'design-tokens.json') &&
     (fileRecord.tailwind === undefined || fileRecord.tailwind === 'tailwind-v4.css') &&
     (fileRecord.components === undefined || fileRecord.components === 'components.html')
-  )) return false;
-
-  return record.runtime === undefined || DesignSystemRuntimePathsSchema.safeParse(record.runtime).success;
+  );
 }
 
 function summarize(raw: string): string {

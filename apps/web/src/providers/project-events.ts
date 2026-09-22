@@ -1,7 +1,10 @@
 import { useEffect, useRef } from 'react';
+import { BackoffController } from '../lib/backoff';
+import { bindStreamVisibility } from '../lib/stream-visibility';
 import {
   COLLAB_PROJECT_INVALIDATION_EVENTS,
   PROJECT_CONTENT_TRANSFER_STATE_EVENT,
+  type ChatArtifactRefsChangedSsePayload,
   type CollabProjectInvalidationSsePayload,
   type LiveArtifactRefreshSsePayload,
   type LiveArtifactSsePayload,
@@ -33,11 +36,21 @@ export type ProjectLiveArtifactEvent = LiveArtifactSsePayload | LiveArtifactRefr
 // receipt — the event carries no body.
 export type ProjectCollabInvalidationEvent = CollabProjectInvalidationSsePayload;
 
+/**
+ * A finished message's artifact refs changed after its run's terminal frame.
+ *
+ * Same thin-invalidation shape as the collab events above — it names the stale
+ * message and carries no refs, so the consumer re-reads the conversation rather
+ * than trusting a projection assembled on the wire.
+ */
+export type ProjectChatArtifactRefsChangedEvent = ChatArtifactRefsChangedSsePayload;
+
 export type ProjectEvent =
   | ProjectFileChangeEvent
   | ProjectConversationCreatedEvent
   | ProjectLiveArtifactEvent
   | ProjectCollabInvalidationEvent
+  | ProjectChatArtifactRefsChangedEvent
   | ProjectContentTransferStateSsePayload;
 
 export interface ProjectEventsConnectionOptions {
@@ -50,6 +63,8 @@ export interface ProjectEventsConnectionOptions {
   /** Test seam: setTimeout/clearTimeout substitutes for fake timers. */
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
+  /** Test seam: deterministic jitter source for the reconnect backoff. */
+  randomFn?: () => number;
   /**
    * Collab realtime hop-2 poll-as-floor signal. Fires `true` when the stream is
    * live (the daemon's `ready` handshake) and `false` on error/disconnect, so a
@@ -101,22 +116,30 @@ export function createProjectEventsConnection(
     ?? (typeof EventSource === 'undefined' ? null : EventSource);
   if (!Ctor) return { close() { /* noop */ } };
 
-  const initialBackoff = options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF;
-  const maxBackoff = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF;
   const setT = options.setTimeoutFn ?? setTimeout;
   const clearT = options.clearTimeoutFn ?? clearTimeout;
+  const backoff = new BackoffController({
+    initialMs: options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF,
+    maxMs: options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF,
+    factor: 2,
+    jitter: true,
+    random: options.randomFn,
+  });
 
   let cancelled = false;
-  let backoff = initialBackoff;
   let source: EventSource | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set while the socket is deliberately given back to a parked tab, so no
+  // error/reconnect path re-opens it before the tab is visible again.
+  let releasedWhileHidden = false;
 
   const connect = (): void => {
     if (cancelled) return;
+    if (source) return;
     const es = new Ctor(projectEventsUrl(projectId, workspaceContext));
     source = es;
     es.addEventListener('ready', () => {
-      backoff = initialBackoff;
+      backoff.reset();
       options.onConnectedChange?.(true);
       options.onReady?.();
     });
@@ -189,6 +212,24 @@ export function createProjectEventsConnection(
         }
       });
     }
+    // A cover finished rendering after its turn already ended. Thin signal:
+    // it names the stale message, and the consumer re-reads the conversation.
+    es.addEventListener('chat-artifact-refs-changed', (evt) => {
+      try {
+        const data = JSON.parse(
+          (evt as MessageEvent).data,
+        ) as ProjectChatArtifactRefsChangedEvent;
+        onChange(data);
+      } catch (err) {
+        if (
+          typeof process !== 'undefined'
+          && process.env?.NODE_ENV === 'development'
+        ) {
+          // eslint-disable-next-line no-console
+          console.warn('[project-events] malformed chat-artifact-refs-changed payload', err);
+        }
+      }
+    });
     es.addEventListener(PROJECT_CONTENT_TRANSFER_STATE_EVENT, (evt) => {
       try {
         // Thin invalidation only. The consumer must re-read exact-scoped
@@ -215,17 +256,47 @@ export function createProjectEventsConnection(
       options.onConnectedChange?.(false);
       es.close();
       if (source === es) source = null;
-      const delay = backoff;
-      backoff = Math.min(backoff * 2, maxBackoff);
-      reconnectTimer = setT(connect, delay) as ReturnType<typeof setTimeout>;
+      // A stream released because the tab is parked must not reconnect itself
+      // — that would quietly take the socket back while nobody is looking.
+      if (releasedWhileHidden) return;
+      reconnectTimer = setT(connect, backoff.nextDelay()) as ReturnType<typeof setTimeout>;
     });
   };
+
+  // A stream nobody can see must not hold one of the origin's six sockets —
+  // see `stream-visibility.ts`. `onReady` fires again on the reopen, and this
+  // hook's consumers already treat that as their reconcile point, so the gap a
+  // parked tab opens is closed the moment it comes back.
+  const visibility = bindStreamVisibility({
+    onHidden: () => {
+      if (cancelled) return;
+      releasedWhileHidden = true;
+      if (reconnectTimer) {
+        clearT(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (source) {
+        source.close();
+        source = null;
+      }
+      options.onConnectedChange?.(false);
+    },
+    onVisible: () => {
+      if (cancelled) return;
+      releasedWhileHidden = false;
+      backoff.reset();
+      connect();
+    },
+    ...(options.setTimeoutFn ? { setTimeoutFn: options.setTimeoutFn } : {}),
+    ...(options.clearTimeoutFn ? { clearTimeoutFn: options.clearTimeoutFn } : {}),
+  });
 
   connect();
 
   return {
     close(): void {
       cancelled = true;
+      visibility.dispose();
       if (reconnectTimer) clearT(reconnectTimer);
       if (source) source.close();
     },

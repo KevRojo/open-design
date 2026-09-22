@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { TrackingProjectKind } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
 import { trackFileManagerClick } from '../analytics/events';
 import { useT } from '../i18n';
@@ -34,6 +35,10 @@ import {
   getHtmlThumbnailSource,
   loadHtmlThumbnailSource,
 } from './html-thumbnail-source-cache';
+import { BuildPreviewToggle } from './design-files/BuildPreviewToggle';
+import { DesignFilesBuildingState } from './design-files/DesignFilesBuildingState';
+import { selectBuildPreviewHtmlEntry } from './auto-open-file';
+import type { RunProgressStep } from '../runtime/run-progress';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
 
@@ -46,6 +51,7 @@ export interface DesignFilesNavState {
 
 interface Props {
   projectId: string;
+  projectKind: TrackingProjectKind;
   filesRefreshKey?: number;
   /** Read-only viewer of a team-shared project: disables project mutations. */
   viewerOnly?: boolean;
@@ -56,6 +62,14 @@ interface Props {
    * only an empty local result swaps the creation CTAs for a syncing notice.
    */
   downloadPending?: boolean;
+  /**
+   * Whether `files` reflects a file list the daemon actually returned. Zero
+   * files before the first authoritative read is indistinguishable from a
+   * genuinely empty project, and the empty-state CTAs create NEW content --
+   * offering them to someone whose project does have files is the same class
+   * of mistake the `downloadPending` branch below already guards (OPEND-2283).
+   */
+  filesAuthoritative?: boolean;
   // Basename of the project's working directory when the user has chosen a
   // real folder (e.g. "openclaw"). Shown as the breadcrumb root instead of
   // the generic "project" label. Undefined for default-storage projects.
@@ -63,9 +77,16 @@ interface Props {
   // True while the host is reindexing a freshly replaced working dir. Drives
   // a loading overlay so the panel doesn't sit silently on the stale tree.
   reloading?: boolean;
-  // True while the chat agent is generating. The footer swaps its idle
-  // drop/upload hint for the typewriter "tip" line while a run is in flight.
+  // True while a run of this conversation is genuinely in flight (streaming,
+  // or attached and about to). Not the composer's disabled state: a read-only
+  // viewer has that with nothing running. A run that has already written a
+  // page is shown taking shape.
   running?: boolean;
+  /** Active turn start, used to exclude pages left over from earlier runs. */
+  runStartedAt?: number | null;
+  /** The running turn's tool calls, newest first. The building preview names
+   *  the first one as the current step and logs the rest beneath it. */
+  runSteps?: RunProgressStep[];
   files: ProjectFile[];
   // Persisted folders from `/api/projects/:id/folders`, including empty ones
   // that no file lives under. Without these, a folder only appears once a file
@@ -138,6 +159,83 @@ const SECTION_ORDER: FileCategory[] = [
 
 const STYLESHEET_EXTENSIONS = new Set(['css', 'scss', 'sass', 'less']);
 const HTML_THUMBNAIL_INLINE_MAX_BYTES = 512 * 1024;
+
+// Incremental grid rendering: the page-card grid and the image masonry start
+// with this many entries and reveal the next batch when the invisible
+// end-of-grid sentinel nears the viewport. Root views intentionally list every
+// nested file (see dirsAtCurrentDir), so a web-clone project can put 4000+
+// HTML files in one section — rendering them all at once froze the client.
+const GRID_RENDER_BATCH = 48;
+
+// At most this many thumbnail content fetches run concurrently. Each visible
+// card fetches its HTML to build a srcDoc preview; without a cap, a large
+// section fires thousands of parallel fetches, exhausting local sockets
+// (net::ERR_INSUFFICIENT_RESOURCES) and starving the web<->daemon proxy.
+const MAX_CONCURRENT_HTML_THUMBNAIL_FETCHES = 6;
+
+let activeHtmlThumbnailFetches = 0;
+const queuedHtmlThumbnailFetches: Array<() => void> = [];
+
+// Start queued thumbnail fetches on a microtask, never synchronously from a
+// release. A synchronous pump would let one card's unmount cleanup start a
+// queued fetch for a sibling card that is being torn down in the same commit
+// (its own cleanup just hasn't run yet). Deferring to a microtask lets every
+// cleanup dequeue its task first; the pump then only starts live tasks.
+function pumpHtmlThumbnailFetchQueue(): void {
+  queueMicrotask(() => {
+    while (
+      activeHtmlThumbnailFetches < MAX_CONCURRENT_HTML_THUMBNAIL_FETCHES
+      && queuedHtmlThumbnailFetches.length > 0
+    ) {
+      queuedHtmlThumbnailFetches.shift()!();
+    }
+  });
+}
+
+/**
+ * FIFO concurrency gate for thumbnail content fetches. `start` runs once a
+ * slot is free (synchronously when one is available now) and receives the
+ * release function to call when the fetch settles. The returned function
+ * abandons the reservation, for effect cleanup:
+ * - abandoned before starting → the queued task is removed and never runs;
+ * - abandoned after starting → the slot stays held until the underlying
+ *   request settles and the settle path calls `release`. Cleanup must never
+ *   free a slot whose request is still on the network: releasing early would
+ *   let the queue pump start replacement fetches while the abandoned ones are
+ *   still in flight, pushing real connection concurrency above the cap during
+ *   directory/project navigation — the exact socket-exhaustion path this pool
+ *   exists to prevent.
+ */
+function acquireHtmlThumbnailFetchSlot(
+  start: (release: () => void) => void,
+): () => void {
+  let started = false;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    activeHtmlThumbnailFetches -= 1;
+    pumpHtmlThumbnailFetchQueue();
+  };
+  const run = () => {
+    started = true;
+    activeHtmlThumbnailFetches += 1;
+    start(release);
+  };
+  let abandoned = false;
+  const abandon = () => {
+    if (abandoned || started) return;
+    abandoned = true;
+    const index = queuedHtmlThumbnailFetches.indexOf(run);
+    if (index >= 0) queuedHtmlThumbnailFetches.splice(index, 1);
+  };
+  if (activeHtmlThumbnailFetches < MAX_CONCURRENT_HTML_THUMBNAIL_FETCHES) {
+    run();
+  } else {
+    queuedHtmlThumbnailFetches.push(run);
+  }
+  return abandon;
+}
 
 function fileCategory(file: ProjectFile): FileCategory {
   const dot = file.name.lastIndexOf('.');
@@ -366,12 +464,16 @@ function RotatingTip({ auxiliary = false }: { auxiliary?: boolean }) {
  */
 export function DesignFilesPanel({
   projectId,
+  projectKind,
   filesRefreshKey = 0,
   viewerOnly = false,
   downloadPending = false,
+  filesAuthoritative = true,
   rootDirName,
   reloading,
   running = false,
+  runStartedAt,
+  runSteps,
   files,
   folders,
   liveArtifacts,
@@ -403,6 +505,26 @@ export function DesignFilesPanel({
   const { workspaceContext } = useProjectCollabContext();
   const t = useT();
   const analytics = useAnalytics();
+  // The page the run is currently building, if it has produced one. Only HTML
+  // qualifies: there is nothing to watch take shape in a markdown file or an
+  // image, and swapping the preview for one mid-run would be a downgrade.
+  const buildPreviewName = useMemo(
+    () => {
+      if (!running || !runStartedAt || !Number.isFinite(runStartedAt)) return null;
+      return selectBuildPreviewHtmlEntry(files.filter((file) => file.mtime >= runStartedAt));
+    },
+    [running, runStartedAt, files],
+  );
+  const buildPreviewFile = useMemo(
+    () => (buildPreviewName ? files.find((file) => file.name === buildPreviewName) ?? null : null),
+    [buildPreviewName, files],
+  );
+  // A long run must not trap the user away from their files. The topbar's
+  // preview switch flips this both ways; it resets when the next run starts.
+  const [buildPreviewDismissed, setBuildPreviewDismissed] = useState(false);
+  useEffect(() => {
+    if (running) setBuildPreviewDismissed(false);
+  }, [running]);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [dropReadError, setDropReadError] = useState<string | null>(null);
   const dragDepthRef = useRef(0);
@@ -564,6 +686,56 @@ export function DesignFilesPanel({
     const pages = availableTabs.find((tab) => tab.id === 'cat:html');
     return (pages ?? availableTabs[0])?.id ?? null;
   }, [activeTab, availableTabs]);
+
+  // Incremental grid rendering (see GRID_RENDER_BATCH). Only one card grid is
+  // on screen at a time (one active tab), so a single revealed-count state
+  // serves both the page-card grid and the image masonry. Environments
+  // without IntersectionObserver (jsdom) render every entry at once, matching
+  // the previous behavior.
+  const canLazyRenderGrids = typeof IntersectionObserver !== 'undefined';
+  const [gridRenderLimit, setGridRenderLimit] = useState(GRID_RENDER_BATCH);
+  const gridScopeKey = `${currentDir}\u0000${resolvedTab ?? ''}`;
+  const [gridScope, setGridScope] = useState(gridScopeKey);
+  if (gridScope !== gridScopeKey) {
+    // Adjust-during-render reset: navigating directories or switching tabs
+    // must drop the revealed count back to the initial batch BEFORE the new
+    // list paints, or one throwaway frame would render it at the old count.
+    setGridScope(gridScopeKey);
+    setGridRenderLimit(GRID_RENDER_BATCH);
+  }
+  const revealNextGridBatch = useCallback(() => {
+    setGridRenderLimit((limit) => limit + GRID_RENDER_BATCH);
+  }, []);
+  const limitGridEntries = (sectionFiles: ProjectFile[]): ProjectFile[] =>
+    canLazyRenderGrids ? sectionFiles.slice(0, gridRenderLimit) : sectionFiles;
+  const renderGridSentinel = (sectionFiles: ProjectFile[]) =>
+    canLazyRenderGrids && sectionFiles.length > gridRenderLimit ? (
+      <GridRenderSentinel
+        // Keyed by the revealed count so each batch re-observes from scratch:
+        // a fresh observation always reports the current intersection state,
+        // so a sentinel still inside the extended viewport after a batch
+        // keeps revealing until it leaves it or the list is exhausted.
+        key={`grid-sentinel:${gridRenderLimit}`}
+        onReveal={revealNextGridBatch}
+      />
+    ) : null;
+
+  // One pass over the full file list replaces renderDirRow's previous
+  // per-directory `files.filter(...)`. The visible count is unchanged, but a
+  // directory-heavy project now costs O(files + directories), not
+  // O(files * directories), on every panel render.
+  const descendantFileCountByDir = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of files) {
+      const parts = file.name.split('/');
+      let dir = '';
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        dir = dir ? `${dir}/${parts[index]}` : parts[index]!;
+        counts.set(dir, (counts.get(dir) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [files]);
 
   // Prune selections that no longer exist in the current file list
   // (e.g. after a refresh or delete within the same project).
@@ -1083,8 +1255,7 @@ export function DesignFilesPanel({
 
   function renderDirRow(dirName: string) {
     const fullPath = currentDir === '' ? dirName : `${currentDir}/${dirName}`;
-    const prefix = `${fullPath}/`;
-    const count = files.filter((f) => f.name.startsWith(prefix)).length;
+    const count = descendantFileCountByDir.get(fullPath) ?? 0;
     return (
       <div key={`dir:${fullPath}`} className="df-row df-dir-row" onClick={() => setCurrentDir(fullPath)}>
         <span className="df-row-check" aria-hidden />
@@ -1231,6 +1402,8 @@ export function DesignFilesPanel({
                       page_name: 'file_manager',
                       area: 'file_manager',
                       element: 'create_design_system_from_project',
+                      project_id: projectId,
+                      project_kind: projectKind,
                     });
                     setProjectMenuOpen(false);
                     onCreateDesignSystemFromProject();
@@ -1250,6 +1423,8 @@ export function DesignFilesPanel({
                       page_name: 'file_manager',
                       area: 'file_manager',
                       element: 'duplicate_project',
+                      project_id: projectId,
+                      project_kind: projectKind,
                     });
                     setProjectMenuOpen(false);
                     onDuplicateProject();
@@ -1320,7 +1495,19 @@ export function DesignFilesPanel({
       <div className="df-main">
         <div className="df-topbar">
           <div className="df-topbar-left">{breadcrumbs}</div>
-          <div className="df-topbar-right">{fileActions}</div>
+          <div className="df-topbar-right">
+            {/* Only while there is something to preview: a run in flight that
+                has already written a page. Outside that window the pane has
+                one view, and a switch with nothing on its other side would be
+                a control that does nothing. */}
+            {buildPreviewFile && running ? (
+              <BuildPreviewToggle
+                checked={!buildPreviewDismissed}
+                onChange={(next) => setBuildPreviewDismissed(!next)}
+              />
+            ) : null}
+            {fileActions}
+          </div>
         </div>
         <div
           className="df-body"
@@ -1375,6 +1562,8 @@ export function DesignFilesPanel({
                       page_name: 'file_manager',
                       area: 'file_manager',
                       element: 'download_as_zip',
+                      project_id: projectId,
+                      project_kind: projectKind,
                     });
                     void handleBatchDownload();
                   }}
@@ -1401,7 +1590,32 @@ export function DesignFilesPanel({
               </div>
             </div>
           ) : null}
-          {files.length === 0 && liveArtifacts.length === 0 && (folders?.length ?? 0) === 0 ? (
+          {buildPreviewFile && running && !buildPreviewDismissed ? (
+            /* The middle state: a page exists but the run is still writing it.
+               Watching it take shape beats a grid of file cards whose only news
+               is that a file appeared. Falls back to the grid the moment the run
+               ends, or when the topbar's preview switch is turned off. */
+            <div className="df-empty" data-testid="design-files-building-host">
+              <DesignFilesBuildingState
+                projectId={projectId}
+                file={buildPreviewFile}
+                filesRefreshKey={filesRefreshKey ?? 0}
+                steps={runSteps ?? []}
+                workspaceContext={workspaceContext}
+              />
+            </div>
+          ) : files.length === 0 && liveArtifacts.length === 0 && (folders?.length ?? 0) === 0 && !filesAuthoritative ? (
+            // The list has not arrived. Saying nothing reads as "stuck"; saying
+            // "no designs yet" would be a guess. Say we are working instead.
+            <div className="df-empty df-empty-syncing" data-testid="design-files-loading">
+              <div className="df-empty-pill">
+                <FileSyncBadge state="downloading" size={20} />
+                <span className="df-empty-title">{t('common.loading')}</span>
+              </div>
+            </div>
+          ) : null}
+          {buildPreviewFile && running && !buildPreviewDismissed ? null
+          : files.length === 0 && liveArtifacts.length === 0 && (folders?.length ?? 0) === 0 && filesAuthoritative ? (
             downloadPending ? (
               // A shared project whose local mirror has not caught up yet
               // reads as EXACTLY the same zero-files result as a genuinely
@@ -1618,7 +1832,7 @@ export function DesignFilesPanel({
                               void handlePluginFolderAgentAction(folder.path, 'contribute')
                             }
                           >
-                            {sharingFolder === `contribute:${folder.path}` ? 'Sending…' : 'Open Design PR'}
+                            {sharingFolder === `contribute:${folder.path}` ? 'Sending…' : 'OpenDesign PR'}
                           </button>
                         </div>
                       ) : null}
@@ -1638,13 +1852,15 @@ export function DesignFilesPanel({
                       // Page cards are self-describing — a straight grid
                       // under the tab bar.
                       <div className="df-card-grid">
-                        {sectionFiles.map((f) => renderPageCard(f, category))}
+                        {limitGridEntries(sectionFiles).map((f) => renderPageCard(f, category))}
+                        {renderGridSentinel(sectionFiles)}
                       </div>
                     ) : category === 'image' ? (
                       // Images read as their own preview — a masonry waterfall
                       // of natural-aspect thumbnails instead of list rows.
                       <div className="df-image-masonry" data-testid="design-files-image-masonry">
-                        {sectionFiles.map((f) => renderImageCard(f, category))}
+                        {limitGridEntries(sectionFiles).map((f) => renderImageCard(f, category))}
+                        {renderGridSentinel(sectionFiles)}
                       </div>
                     ) : (
                       sectionFiles.map((f) => renderFileRow(f, category))
@@ -1744,6 +1960,55 @@ export function DesignFilesPanel({
   );
 }
 
+// Invisible end-of-grid marker that reveals the next render batch when it
+// nears the viewport. Deliberately renders no visible UI — no button, no
+// loading copy — so an incrementally rendered grid reads exactly like a fully
+// rendered one. The 1200px bottom rootMargin reveals the next batch well
+// before the user reaches the end of the rendered cards.
+function GridRenderSentinel({ onReveal }: { onReveal: () => void }) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    // The parent only renders the sentinel when IntersectionObserver exists
+    // (environments without it fall back to rendering the full grid), so this
+    // guard is for safety, not a jsdom fallback path.
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            onReveal();
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { rootMargin: '0px 0px 1200px 0px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onReveal]);
+
+  return (
+    <div
+      ref={sentinelRef}
+      data-testid="design-files-grid-sentinel"
+      aria-hidden
+      // Spans the card grid's full row (gridColumn) and avoids splitting
+      // across masonry columns (breakInside) while staying visually absent.
+      style={{
+        gridColumn: '1 / -1',
+        breakInside: 'avoid',
+        blockSize: 1,
+        margin: 0,
+        padding: 0,
+        border: 0,
+      }}
+    />
+  );
+}
+
 // Pages are laid out at a desktop-ish width and scaled down to the card, so
 // the thumbnail reads as a zoomed-out page preview instead of the page's
 // narrow mobile layout cropped to the card's top-left corner.
@@ -1804,6 +2069,36 @@ function HtmlCardThumbnail({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState<number | null>(null);
 
+  // Content fetches wait until the card scrolls near the viewport; the 800px
+  // bottom rootMargin prefetches cards about to be scrolled into view, and a
+  // card that has intersected once stays "near" for good (same pattern as
+  // ExampleCard in ExamplesTab). Environments without IntersectionObserver
+  // (jsdom) fall back to treating every card as immediately visible.
+  const [nearViewport, setNearViewport] = useState(false);
+  useEffect(() => {
+    if (nearViewport) return;
+    const host = hostRef.current;
+    if (!host) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setNearViewport(true);
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { rootMargin: '0px 0px 800px 0px' },
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [nearViewport]);
+
   useEffect(() => {
     setSrcDoc(null);
     if (tooLargeForThumbnail || !thumbnailIdentity) return;
@@ -1819,46 +2114,62 @@ function HtmlCardThumbnail({
       setSrcDoc(buildSrcdoc(cachedSource, { baseHref }));
       return;
     }
+    // Only an actual network load waits for viewport proximity (cached
+    // sources above render immediately) and for a free fetch slot — the
+    // gate + pool that keep a huge grid from firing thousands of fetches.
+    if (!nearViewport) return;
     let cancelled = false;
-    void loadHtmlThumbnailSource(
-      thumbnailIdentity,
-      async () => {
-        const response = await fetch(
-          appendResourceQuery(url, `v=${Math.round(file.mtime)}`),
-          {},
-        );
-        return response?.ok ? response.text() : null;
-      },
-    ).then((html) => {
-        if (cancelled || html === null) return;
-        const nextSrcDoc = buildSrcdoc(html, { baseHref });
-        if (!cancelled) setSrcDoc(nextSrcDoc);
-      })
-      .catch((err) => {
-        if (!cancelled) setSrcDoc(null);
-      });
+    const abandonSlot = acquireHtmlThumbnailFetchSlot((release) => {
+      void loadHtmlThumbnailSource(
+        thumbnailIdentity,
+        async () => {
+          const response = await fetch(
+            appendResourceQuery(url, `v=${Math.round(file.mtime)}`),
+            {},
+          );
+          return response?.ok ? response.text() : null;
+        },
+      ).then((html) => {
+          if (cancelled || html === null) return;
+          const nextSrcDoc = buildSrcdoc(html, { baseHref });
+          if (!cancelled) setSrcDoc(nextSrcDoc);
+        })
+        .catch(() => {
+          if (!cancelled) setSrcDoc(null);
+        })
+        // Success and failure both pass through here exactly once per
+        // started fetch — the ONLY place a started fetch's slot is freed.
+        // Cleanup below abandons the reservation without freeing the slot,
+        // so a fetch abandoned mid-flight keeps its slot until the network
+        // actually settles it and real concurrency stays within the cap.
+        .finally(release);
+    });
     return () => {
       cancelled = true;
+      abandonSlot();
     };
   }, [
     authorizationScopeKey,
     baseHref,
+    nearViewport,
     refreshKey,
     tooLargeForThumbnail,
     url,
   ]);
 
-  // Track the host width so the fixed-layout iframe scales with the card.
-  // Environments without ResizeObserver (jsdom) fall back to an unscaled
-  // fill-the-box iframe.
-  useEffect(() => {
+  // Track the host width before paint so the iframe's first rendered viewport
+  // is the fixed desktop layout, then only its outer transform follows the
+  // card. This prevents responsive decks from fitting once to the card-sized
+  // iframe and then being scaled a second time after ResizeObserver runs.
+  useLayoutEffect(() => {
     const host = hostRef.current;
-    if (!host || typeof ResizeObserver === 'undefined') return;
+    if (!host) return;
     const update = () => {
       const width = host.clientWidth;
       if (width > 0) setScale(width / PAGE_THUMB_LAYOUT_WIDTH);
     };
     update();
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(update);
     observer.observe(host);
     return () => observer.disconnect();
@@ -1874,16 +2185,16 @@ function HtmlCardThumbnail({
           srcDoc={srcDoc}
           sandbox="allow-scripts allow-downloads"
           loading="lazy"
-          style={
-            scale
+          style={{
+            width: PAGE_THUMB_LAYOUT_WIDTH,
+            height: PAGE_THUMB_LAYOUT_HEIGHT,
+            ...(scale
               ? {
-                  width: PAGE_THUMB_LAYOUT_WIDTH,
-                  height: PAGE_THUMB_LAYOUT_HEIGHT,
                   transform: `scale(${scale})`,
                   transformOrigin: '0 0',
                 }
-              : undefined
-          }
+              : {}),
+          }}
         />
       )}
     </div>
