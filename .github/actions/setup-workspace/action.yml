@@ -197,9 +197,6 @@ runs:
       if: ${{ steps.install-contract.outputs.cache-format == '7z-2603-mx1' && steps.persistent-pnpm-store.outputs.enabled != 'true' && steps.dependencies-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: |
-        archive_path="$HOME/.cache/open-design/pnpm-store-archives/store-v1.7z"
-        mkdir -p "$(dirname "$archive_path")"
-        echo "archive-path=$archive_path" >> "$GITHUB_OUTPUT"
         python3 .github/scripts/pnpm_store_archive.py bootstrap \
           --tool-dir "$RUNNER_TEMP/open-design-tools/7zip-26.03" \
           --github-output "$GITHUB_OUTPUT" \

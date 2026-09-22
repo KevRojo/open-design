@@ -122,6 +122,7 @@ describe("GitHub Actions cache workflows", () => {
     expect(action).toContain('echo "cache-format=$PNPM_STORE_CACHE_FORMAT"');
     expect(action).toContain("steps.install-contract.outputs.cache-format == '7z-2603-mx1'");
     expect(action).toContain("pnpm_store_archive.py bootstrap");
+    expect(action).toContain("steps.pnpm-store-archive.outputs.archive-path");
     expect(action).toContain("pnpm_store_archive.py unpack");
     expect(action).toContain("pnpm_store_archive.py pack");
     expect(archiveRestore).toContain("pnpm-store-v3-7z${{ steps.pnpm-store-archive.outputs.version }}");

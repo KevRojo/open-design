@@ -233,7 +233,13 @@ def main() -> int:
                 round((time.monotonic() - started) * 1000),
                 status,
             )
-        values = {"path": str(binary), "version": VERSION_TOKEN}
+        archive_path = Path.home() / ".cache" / "open-design" / "pnpm-store-archives" / "store-v1.7z"
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        values = {
+            "archive-path": str(archive_path),
+            "path": str(binary),
+            "version": VERSION_TOKEN,
+        }
         if arguments.github_output:
             with Path(arguments.github_output).open("a", encoding="utf-8") as output:
                 for key, value in values.items():
