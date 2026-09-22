@@ -88,10 +88,7 @@ describe("GitHub Actions cache workflows", () => {
     expect(restoreStep).toContain(
       "pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-",
     );
-    expect(restoreStep).toContain(
-      "pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}",
-    );
-    expect(restoreStep).toContain("pnpm-store-${{ runner.os }}-");
+    expect(restoreStep).not.toContain("pnpm-store-${{ runner.os }}-");
 
     const saveStep = action.slice(action.indexOf("- name: Save pnpm store"));
     expect(saveStep).toContain("inputs.save-pnpm-cache == 'true'");

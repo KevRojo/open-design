@@ -182,8 +182,6 @@ runs:
         key: pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-${{ hashFiles('pnpm-lock.yaml') }}
         restore-keys: |
           pnpm-store-v2-${{ runner.os }}-${{ steps.postinstall-plan.outputs.install-profile || inputs.install-profile }}-
-          pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          pnpm-store-${{ runner.os }}-
 
     - name: Install dependencies
       if: ${{ inputs.cache-tools != 'true' && (steps.postinstall-plan.outputs.install-profile || inputs.install-profile) == 'workspace' }}
