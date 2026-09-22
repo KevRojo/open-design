@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,48 @@ const phase = process.argv[2] ?? process.env.OPEN_DESIGN_POSTINSTALL_PHASE ?? "a
 if (!["all", "dependencies", "build", "describe"].includes(phase)) {
   throw new Error(`Unknown postinstall phase: ${phase}`);
 }
+
+const timingPath = process.env.OPEN_DESIGN_POSTINSTALL_TIMING_PATH?.trim() ?? "";
+const postinstallStartedAt = Date.now();
+const postinstallStarted = performance.now();
+let timingWarningWritten = false;
+
+function recordTiming({ durationMs, operation, startedAt, status, target }) {
+  if (timingPath.length === 0) return;
+  try {
+    const resolvedPath = resolve(repoRoot, timingPath);
+    mkdirSync(dirname(resolvedPath), { recursive: true });
+    appendFileSync(
+      resolvedPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        phase,
+        operation,
+        ...(target == null ? {} : { target }),
+        status,
+        startedAt: new Date(startedAt).toISOString(),
+        durationMs: Math.max(0, Math.round(durationMs)),
+      })}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    if (!timingWarningWritten) {
+      timingWarningWritten = true;
+      process.stderr.write(
+        `postinstall: could not write optional timing data: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
+}
+
+process.on("exit", (code) => {
+  recordTiming({
+    durationMs: performance.now() - postinstallStarted,
+    operation: "postinstall",
+    startedAt: postinstallStartedAt,
+    status: code === 0 ? "success" : "failure",
+  });
+});
 
 const buildTargets = [
   "packages/release",
@@ -52,17 +94,41 @@ function resolvePackageManagerInvocation() {
 const packageManager = resolvePackageManagerInvocation();
 
 function materializeDomToPptxBundle() {
+  const startedAt = Date.now();
+  const started = performance.now();
   const vendorDir = resolve(repoRoot, "apps", "desktop", "vendor", "dom-to-pptx");
   const compressedBundle = resolve(vendorDir, "dom-to-pptx.bundle.js.gz");
   const bundle = resolve(vendorDir, "dom-to-pptx.bundle.js");
 
   if (!existsSync(compressedBundle)) {
+    recordTiming({
+      durationMs: performance.now() - started,
+      operation: "materialize-dom-to-pptx",
+      startedAt,
+      status: "skipped",
+    });
     return;
   }
 
-  mkdirSync(vendorDir, { recursive: true });
-  writeFileSync(bundle, gunzipSync(readFileSync(compressedBundle)));
-  process.stdout.write("postinstall: materialized dom-to-pptx browser bundle\n");
+  try {
+    mkdirSync(vendorDir, { recursive: true });
+    writeFileSync(bundle, gunzipSync(readFileSync(compressedBundle)));
+    process.stdout.write("postinstall: materialized dom-to-pptx browser bundle\n");
+    recordTiming({
+      durationMs: performance.now() - started,
+      operation: "materialize-dom-to-pptx",
+      startedAt,
+      status: "success",
+    });
+  } catch (error) {
+    recordTiming({
+      durationMs: performance.now() - started,
+      operation: "materialize-dom-to-pptx",
+      startedAt,
+      status: "failure",
+    });
+    throw error;
+  }
 }
 
 function availableBuildTargets() {
@@ -83,6 +149,20 @@ function availableBuildTargets() {
 
 function runBuildTarget(target) {
   return new Promise((resolvePromise, rejectPromise) => {
+    const startedAt = Date.now();
+    const started = performance.now();
+    let settled = false;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      recordTiming({
+        durationMs: performance.now() - started,
+        operation: "workspace-build",
+        startedAt,
+        status,
+        target,
+      });
+    };
     const child = spawn(
       packageManager.command,
       [...packageManager.argsPrefix, "-C", target, "run", "build"],
@@ -92,13 +172,18 @@ function runBuildTarget(target) {
       },
     );
 
-    child.on("error", rejectPromise);
+    child.on("error", (error) => {
+      finish("failure");
+      rejectPromise(error);
+    });
     child.on("close", (code, signal) => {
       if (code === 0) {
+        finish("success");
         resolvePromise();
         return;
       }
 
+      finish("failure");
       const suffix = signal != null ? `signal ${signal}` : `exit code ${code ?? 1}`;
       rejectPromise(new Error(`postinstall: ${target} failed with ${suffix}`));
     });
@@ -222,10 +307,28 @@ function selectedBuildTargets() {
 }
 
 async function runBuildTargets() {
+  const startedAt = Date.now();
+  const started = performance.now();
   const targets = selectedBuildTargets();
   process.stdout.write(`postinstall: selected build closure ${JSON.stringify(targets)}\n`);
   const concurrency = postinstallConcurrency();
-  await runBuildTargetsInParallel(targets, concurrency);
+  try {
+    await runBuildTargetsInParallel(targets, concurrency);
+    recordTiming({
+      durationMs: performance.now() - started,
+      operation: "workspace-build-closure",
+      startedAt,
+      status: "success",
+    });
+  } catch (error) {
+    recordTiming({
+      durationMs: performance.now() - started,
+      operation: "workspace-build-closure",
+      startedAt,
+      status: "failure",
+    });
+    throw error;
+  }
 }
 
 // Separate installation side effects from source compilation. The default
@@ -252,6 +355,8 @@ if (phase === "build") process.exit(0);
 // using its own node-gyp lifecycle — no assumptions about where node-gyp lives.
 const req = createRequire(resolve(repoRoot, "apps/daemon/package.json"));
 let needsRebuild = false;
+const nativeProbeStartedAt = Date.now();
+const nativeProbeStarted = performance.now();
 try {
   // Try to actually use the native addon; merely requiring the JS wrapper
   // succeeds even when the binary is missing (e.g. after `pnpm install --ignore-scripts`).
@@ -264,16 +369,30 @@ try {
     needsRebuild = true;
   }
 }
+recordTiming({
+  durationMs: performance.now() - nativeProbeStarted,
+  operation: "better-sqlite3-probe",
+  startedAt: nativeProbeStartedAt,
+  status: "success",
+});
 
 if (needsRebuild) {
   process.stdout.write(
     `postinstall: rebuilding better-sqlite3 for Node.js ${process.version}...\n`,
   );
+  const rebuildStartedAt = Date.now();
+  const rebuildStarted = performance.now();
   const rebuild = spawnSync(
     packageManager.command,
     [...packageManager.argsPrefix, "--filter", "@open-design/daemon", "rebuild", "better-sqlite3"],
     { cwd: repoRoot, stdio: "inherit" },
   );
+  recordTiming({
+    durationMs: performance.now() - rebuildStarted,
+    operation: "better-sqlite3-rebuild",
+    startedAt: rebuildStartedAt,
+    status: rebuild.error == null && rebuild.status === 0 ? "success" : "failure",
+  });
   if (rebuild.error != null) throw rebuild.error;
   if (rebuild.status !== 0) {
     process.stderr.write(

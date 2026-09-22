@@ -2315,6 +2315,8 @@ process.stdin.on("end", () => {
     expect(action).toContain("OPEN_DESIGN_POSTINSTALL_PHASE: dependencies");
     expect(action).toContain("run: pnpm run postinstall build");
     expect(action).toContain("run: pnpm run postinstall dependencies");
+    expect(action).toContain("OPEN_DESIGN_POSTINSTALL_TIMING_PATH");
+    expect(action).toContain("postinstall-timings-json:");
     expect(action).toContain("inputs.install-profile == 'source-web'");
     expect(action).toContain("pnpm install --frozen-lockfile --ignore-scripts");
     expect(action).toContain("--filter @open-design/tools-pack...");
@@ -2331,6 +2333,23 @@ process.stdin.on("end", () => {
     expect(sectionBetween(action, "    - name: '[restore] Tool build closure'", "    - name: '[build] Tool build closure'")).not.toContain("runner.os != 'Windows'");
     expect(action).toContain("run: pnpm exec tools-pack --help");
     expect(action).not.toContain("Plan");
+  });
+
+  it("[P2] records beta timing evidence without gating delivery", async () => {
+    const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
+    const report = workflow.slice(workflow.indexOf("  delivery_report:"));
+
+    expect(report).toContain("name: Collect release timing ledger");
+    expect(report).toContain("continue-on-error: true");
+    expect(report).toContain("github.rest.actions.getWorkflowRun");
+    expect(report).toContain("github.rest.actions.listJobsForWorkflowRun");
+    expect(report).toContain("const thresholdMs = 30_000;");
+    expect(report).toContain("MAC_X64_UPLOAD_TIMINGS: ${{ needs.build_mac_x64.outputs.publish_timings }}");
+    expect(report).toContain("Uploads at or above 30 seconds");
+    expect(report).toContain("name: release-beta-timing-${{ github.run_id }}-${{ github.run_attempt }}");
+    expect(report.indexOf("name: Collect release timing ledger")).toBeLessThan(
+      report.indexOf("name: Publish direct CDN links and validation results"),
+    );
   });
 
   it("[P1] seeds macOS dependencies through the existing main-only cache boundary", async () => {

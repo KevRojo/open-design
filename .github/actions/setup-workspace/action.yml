@@ -27,6 +27,11 @@ inputs:
     required: false
     default: 'workspace'
 
+outputs:
+  postinstall-timings-json:
+    description: Optional postinstall timing observations collected during setup
+    value: ${{ steps.postinstall-timings.outputs.json }}
+
 runs:
   using: composite
   steps:
@@ -46,6 +51,17 @@ runs:
             exit 1
             ;;
         esac
+
+    - name: Initialize postinstall timing observation
+      id: postinstall-timing-path
+      continue-on-error: true
+      shell: bash
+      run: |
+        action_id="$(printf '%s' "${GITHUB_ACTION:-setup-workspace}" | tr -c '[:alnum:]_-' '_')"
+        timing_path="$RUNNER_TEMP/open-design-timings/postinstall-${GITHUB_JOB}-${action_id}.jsonl"
+        mkdir -p "$(dirname "$timing_path")"
+        : > "$timing_path"
+        echo "path=$timing_path" >> "$GITHUB_OUTPUT"
 
     - name: Detect persistent pnpm store
       id: persistent-pnpm-store
@@ -137,6 +153,8 @@ runs:
     - name: Install dependencies
       if: ${{ inputs.cache-tools != 'true' && inputs.install-profile == 'workspace' }}
       shell: bash
+      env:
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm install --frozen-lockfile
 
     - name: '[prepare] Web source dependencies'
@@ -178,11 +196,14 @@ runs:
       shell: bash
       env:
         OPEN_DESIGN_POSTINSTALL_PHASE: dependencies
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm install --frozen-lockfile
 
     - name: '[validate] Restored workspace dependencies'
       if: ${{ inputs.cache-tools == 'true' && steps.dependencies-cache.outputs.cache-hit == 'true' }}
       shell: bash
+      env:
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm run postinstall dependencies
 
     - name: '[cache] Installed workspace dependencies'
@@ -209,6 +230,8 @@ runs:
     - name: '[build] Tool build closure'
       if: ${{ inputs.cache-tools == 'true' && steps.tools-cache.outputs.cache-hit != 'true' }}
       shell: bash
+      env:
+        OPEN_DESIGN_POSTINSTALL_TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
       run: pnpm run postinstall build
 
     - name: '[validate] Packaging tool readiness'
@@ -229,3 +252,40 @@ runs:
       with:
         path: ${{ steps.pnpm-store.outputs.path }}
         key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+    - name: Summarize postinstall timing observation
+      id: postinstall-timings
+      if: ${{ always() }}
+      continue-on-error: true
+      shell: bash
+      env:
+        TIMING_PATH: ${{ steps.postinstall-timing-path.outputs.path }}
+      run: |
+        node --input-type=module -e '
+          import { existsSync, readFileSync } from "node:fs";
+          const path = process.env.TIMING_PATH;
+          const timings = path && existsSync(path)
+            ? readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+            : [];
+          const json = JSON.stringify(timings);
+          process.stdout.write(`json=${json}\n`);
+          if (process.env.GITHUB_STEP_SUMMARY && timings.length > 0) {
+            const rows = timings
+              .filter((entry) => entry.operation !== "postinstall")
+              .sort((left, right) => right.durationMs - left.durationMs)
+              .map((entry) => `| \`${entry.phase}\` | \`${entry.target ?? entry.operation}\` | \`${entry.status}\` | ${(entry.durationMs / 1000).toFixed(1)}s |`);
+            const total = timings.filter((entry) => entry.operation === "postinstall").reduce((sum, entry) => sum + entry.durationMs, 0);
+            const markdown = [
+              "### Postinstall timing",
+              "",
+              `- observed total: \`${(total / 1000).toFixed(1)}s\``,
+              "",
+              "| Phase | Target or operation | Status | Duration |",
+              "| --- | --- | --- | ---: |",
+              ...rows,
+              "",
+            ].join("\n");
+            const { appendFileSync } = await import("node:fs");
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown, "utf8");
+          }
+        ' >> "$GITHUB_OUTPUT"
