@@ -10,6 +10,7 @@
 import type Database from 'better-sqlite3';
 import type { CollabCloudComment } from '@open-design/contracts';
 import { currentCommentRelayPublicationMapping, migrateCommentRelayPublicationMappings } from './comment-relay-publication-mapping.js';
+import { markPublishedCommentBackfillOutcome } from './published-comment-backfill-state.js';
 
 type SqliteDb = Database.Database;
 
@@ -47,7 +48,8 @@ export interface CommentRelayOutboxStore {
   }): void;
   isPublicationCurrent?(record: CommentRelayOutboxRecord): boolean;
   listDue(now: number, limit?: number): CommentRelayOutboxRecord[];
-  acknowledge(record: CommentRelayOutboxRecord): boolean;
+  /** Default acknowledgement is discard/cancel; only an explicit receipt is delivery. */
+  acknowledge(record: CommentRelayOutboxRecord, outcome?: 'delivered' | 'discarded'): boolean;
   defer(record: CommentRelayOutboxRecord, input: {
     nextAttemptAt: number;
     error: string;
@@ -305,14 +307,20 @@ export function createCommentRelayOutboxStore(
         .map(parseRecord)
         .filter((record): record is CommentRelayOutboxRecord => record !== null);
     },
-    acknowledge(record) {
-      return acknowledgeRow.run(
-        record.workspaceId,
-        record.workspaceMemberId,
-        record.projectId,
-        record.commentId,
-        record.revision,
-      ).changes > 0;
+    acknowledge(record, outcome = 'discarded') {
+      return db.transaction(() => {
+        const changed = acknowledgeRow.run(
+          record.workspaceId,
+          record.workspaceMemberId,
+          record.projectId,
+          record.commentId,
+          record.revision,
+        ).changes > 0;
+        // Revision-conditional deletion is the race fence: an older in-flight
+        // acknowledgement cannot affect an overwritten queue row or its batch.
+        if (changed) markPublishedCommentBackfillOutcome(db, record, outcome);
+        return changed;
+      })();
     },
     defer(record, input) {
       return db.transaction(() => {
@@ -326,6 +334,7 @@ export function createCommentRelayOutboxStore(
           record.commentId,
           record.revision,
         ).changes > 0;
+        if (changed) markPublishedCommentBackfillOutcome(db, record, 'deferred');
         if (changed) db.prepare(`INSERT INTO comment_relay_sync_failures(workspace_id, workspace_member_id, project_id, failed_at)
           VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, workspace_member_id, project_id)
           DO UPDATE SET failed_at=excluded.failed_at`).run(record.workspaceId, record.workspaceMemberId, record.projectId, now());
