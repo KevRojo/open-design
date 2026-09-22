@@ -1,4 +1,4 @@
-import { useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type ReactNode, type SetStateAction } from 'react';
 import { Button } from '@open-design/components';
 import { workspaceContextHasTeamIdentity, type WorkspaceCollabContext } from '@open-design/contracts';
 import type { PublicFilePublishFailureKey } from '../../collab/public-file-publish';
@@ -87,6 +87,41 @@ export function ShareTab({
 }) {
   const [copyingLink, setCopyingLink] = useState(false);
   const copyInFlight = useRef(false);
+  const scopeTriggerRef = useRef<HTMLButtonElement>(null);
+  const scopeOptionsRef = useRef<HTMLDivElement>(null);
+
+  // Focus only when the controlled list opens, never on unrelated host renders.
+  useEffect(() => {
+    if (shareAccessMenuOpen) {
+      scopeOptionsRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)')?.focus();
+    }
+  }, [shareAccessMenuOpen]);
+
+  function handleScopeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape' && shareAccessMenuOpen) {
+      event.preventDefault();
+      event.stopPropagation(); // Close the nested list, not the surrounding Share panel.
+      setShareAccessMenuOpen(false);
+      scopeTriggerRef.current?.focus();
+      return;
+    }
+    if (shareAccessBusy || viewerOnly) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!shareAccessMenuOpen) {
+      setShareAccessMenuOpen(true);
+      return;
+    }
+    const options = Array.from(scopeOptionsRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
+    if (!options.length) return;
+    const current = options.findIndex((option) => option === document.activeElement);
+    const next = event.key === 'Home' ? 0
+      : event.key === 'End' ? options.length - 1
+      : event.key === 'ArrowDown' ? (current + 1) % options.length
+      : (current - 1 + options.length) % options.length;
+    options[next]?.focus();
+  }
 
   // The host owns clipboard outcomes and their reset timer; only await its action here.
   async function handleCopyPublishedFileLink() {
@@ -238,10 +273,11 @@ export function ShareTab({
                           <div className="share-menu-section-label share-menu-section-label--help" role="presentation">
                             <span>{t('fileViewer.workspaceVisibilityTitle')}</span>
                           </div>
-                          <div className="chrome-access-select">
+                          <div className="chrome-access-select" onKeyDown={handleScopeKeyDown}>
                             <button
                               type="button"
                               className="chrome-access-trigger"
+                              ref={scopeTriggerRef}
                               aria-haspopup="listbox"
                               aria-expanded={shareAccessMenuOpen}
                               disabled={shareAccessBusy || viewerOnly}
@@ -272,7 +308,7 @@ export function ShareTab({
                               </svg>
                             </button>
                             {shareAccessMenuOpen ? (
-                              <div className="chrome-access-options" role="listbox">
+                              <div className="chrome-access-options" role="listbox" ref={scopeOptionsRef}>
                                 {([
                                   ['private', 'lock-line', t('fileViewer.workspaceAccessPrivate')],
                                   ['workspace', 'team-line', t('fileViewer.workspaceAccessMembers')],

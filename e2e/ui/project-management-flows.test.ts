@@ -2851,9 +2851,9 @@ for (const published of [false, true]) {
        await expect(description).toHaveCSS(property, value);
      }
      await expect(description.locator('..')).toHaveCSS('gap', '4px');
-     const deployHeading = menu.locator('.share-menu-section-label:not(.share-menu-section-label--help)');
-     await expect(deployHeading).toHaveCSS('font-size', '12px');
-     await expect(deployHeading).toHaveCSS('font-weight', '700');
+     // S12 moved deployment entries into the header overflow, not a body heading.
+     await expect(menu.getByRole('button', { name: 'More sharing options' })).toBeVisible();
+     await expect(menu.locator('.share-menu-section-label:not(.share-menu-section-label--help)')).toHaveCount(0);
      const trigger = menu.locator('.chrome-access-trigger');
      const headingBounds = (await heading.boundingBox())!;
      const triggerBounds = (await trigger.boundingBox())!;
@@ -2929,6 +2929,22 @@ for (const published of [false, true]) {
     await trigger.click();
     await expect(menu.getByRole('listbox')).toBeHidden();
 
+    // Keyboard navigation must not change visibility or dismiss the Share panel.
+    await trigger.press('ArrowDown');
+    await expect(selected).toBeFocused();
+    await selected.press('Home');
+    await expect(privateOption).toBeFocused();
+    await privateOption.press('End');
+    await expect(selected).toBeFocused();
+    await selected.press('ArrowDown');
+    await expect(privateOption).toBeFocused();
+    await expect(selected).toHaveAttribute('aria-selected', 'true');
+    await privateOption.press('Escape');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('listbox')).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+
     // A real confirmation/request drives busy state; do not inject DOM classes.
     const movePath = `/api/workspaces/${context.workspaceId}/projects/${projectId}/move`;
     let releaseMove = () => {};
@@ -2938,8 +2954,11 @@ for (const published of [false, true]) {
       await route.fulfill({ status: 503, json: { error: { message: 'visual busy-state fixture' } } });
     });
     try {
-      await trigger.click();
-      await privateOption.click();
+      await trigger.press('ArrowUp');
+      await expect(selected).toBeFocused();
+      await selected.press('Home');
+      await expect(privateOption).toBeFocused();
+      await privateOption.press('Enter');
       const confirmation = page.getByRole('alertdialog', { name: 'Move out of team space' });
       const [request] = await Promise.all([
         page.waitForRequest(request => new URL(request.url()).pathname === movePath && request.method() === 'POST'),
