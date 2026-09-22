@@ -1599,7 +1599,9 @@ export interface CommentSyncState {
   shareStopped: boolean | null;
   /**
    * K2. Backfill of the comments that already existed when a file was
-   * published. Absent means NOT ATTEMPTED — never "succeeded".
+   * published. Absent means NOT ATTEMPTED — never "succeeded", and it is
+   * absent whenever the caller did not name a file
+   * ({@link COMMENT_BACKFILL_REQUIRES_A_NAMED_FILE}).
    *
    * This is deliberately NOT `lastError`. `lastError` is the ordinary
    * outbox's most recent failure across the whole scope; folding backfill
@@ -1952,10 +1954,26 @@ export type CommentBackfillStateValue = (typeof COMMENT_BACKFILL_STATES)[number]
 export interface CommentBackfillState {
   state: CommentBackfillStateValue;
   /**
-   * The publication generation this result describes. Compare it against the
-   * publication's current generation before rendering; a lower one is stale.
+   * Which file this result is about. Backfill is per FILE, like the
+   * publications it follows — a project with three published files has three
+   * independent backfill outcomes, and the newest of them is not "the
+   * project's".
    */
-  generation: number;
+  filePath: string;
+  /**
+   * The publication revision this result describes, as an OPAQUE TOKEN.
+   *
+   * This was specified as a number and that was wrong: what the publish path
+   * actually carries is a revision token, not a counter. A numeric field
+   * forces the producer either to invent an ordering the system does not have,
+   * or to send a token cast to a number — and a consumer that then writes
+   * `record.generation < current` gets an answer from a comparison that never
+   * meant anything.
+   *
+   * So it is a string and it is compared for EQUALITY only. "Stale" means
+   * "not the revision this file is published at now", never "smaller".
+   */
+  publicationRevision: string;
   /** Whether anything will retry on its own. Meaningful when `state` is `failed`. */
   retryable: boolean;
   /** Machine-readable cause, when the producer recorded one. */
@@ -1971,9 +1989,26 @@ export interface CommentBackfillState {
 export const COMMENT_BACKFILL_ABSENT_IS_NOT_SUCCESS = true;
 
 /**
- * A backfill result older than the current publication generation must not be
- * rendered at all — not as a warning, and not as a success.
+ * A backfill result whose `publicationRevision` is not the file's current one
+ * must not be rendered at all — not as a warning, and not as a success.
+ *
+ * The test is equality, not ordering: the revision is a token, and asking
+ * whether one token is "older" than another is a question it cannot answer.
  */
-export const COMMENT_BACKFILL_STALE_GENERATION_IS_NOT_RENDERED = true;
+export const COMMENT_BACKFILL_STALE_REVISION_IS_NOT_RENDERED = true;
+
+/**
+ * `backfill` is present ONLY when the caller named a file.
+ *
+ * A project-scoped read has no file to be about, and the tempting fallback —
+ * return the most recent backfill record in the project — answers a question
+ * nobody asked: it presents one file's outcome as though it described the
+ * file the user is looking at. Publishing file B successfully would then
+ * clear the failure banner for file A, which still has not been backfilled.
+ *
+ * So: no `filePath` in the request means no `backfill` in the response, and
+ * absent still means NOT ATTEMPTED rather than succeeded.
+ */
+export const COMMENT_BACKFILL_REQUIRES_A_NAMED_FILE = true;
 
 
